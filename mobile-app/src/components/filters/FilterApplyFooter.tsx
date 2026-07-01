@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
+import { useTranslation } from '../../i18n';
 import { filterTheme } from './filterTheme';
 import { theme } from '../../theme';
 
@@ -15,14 +16,15 @@ export function FilterApplyFooter({
   onPress,
   label: labelOverride,
   resultCount = 0,
-  singularLabel = 'Ver 1 resultado',
+  singularLabel,
   pluralLabel,
 }: FilterApplyFooterProps) {
+  const { t } = useTranslation();
   const label =
     labelOverride ??
     (resultCount === 1
-      ? singularLabel
-      : pluralLabel ?? `Ver ${resultCount} resultados`);
+      ? (singularLabel ?? t('common.seeOneResult'))
+      : (pluralLabel ?? t('common.seeResultsMany', { count: resultCount })));
 
   return (
     <Pressable

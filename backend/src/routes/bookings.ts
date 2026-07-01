@@ -12,19 +12,45 @@ import { canAccessClub } from '../lib/clubAccess';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { insertClubChatMention } from '../lib/clubChatMentions';
 import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
-import { ensureOpenMatchRecordForBooking } from '../lib/matchFromBookingSync';
+import { clubTimezoneOrDefault } from '../lib/clubTimezone';
+import { ensureOpenMatchRecordForBooking, type OpenMatchSyncOpts } from '../lib/matchFromBookingSync';
 import { checkWalletBalances, computeBookingStatus, upsertManualPayments } from '../lib/bookingManualPayment';
+import {
+  collectStripePlayerIds,
+  fetchBookingParticipantsForRefund,
+  listCashRefundCandidates,
+  refundAllBookingParticipants,
+  refundBookingParticipant,
+  validateCashRefundMap,
+  bookingParticipantsHavePayments,
+  type CashRefundMap,
+} from '../lib/bookingParticipantRefund';
+import {
+  evaluateBookingRefundPolicy,
+  refundPolicyUserMessage,
+} from '../lib/bookingCancellationPolicy';
+import { resolveAdminRefundPercent } from '../lib/refundPercent';
+import { notifyBookingCancellationEmails } from '../lib/bookingCancellationNotify';
+import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
 import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
+import { parseEloRange } from '../lib/openMatchRules';
+import { normalizeReservationTypeSlug } from '../lib/reservationTypeSlug';
+import {
+  cancelDisplacedBookingsForOccupyingReservation,
+  contentionStatusForNewMatchBooking,
+  overlappingBookingBlocksNewReservation,
+  resolveCourtContention,
+} from '../lib/courtContentionService';
 import { getFrontendUrl } from '../lib/env';
 
 const router = Router();
 router.use(attachAuthContext);
 
 const SELECT_LIST =
-  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, court_contention_status, contention_third_paid_at, source_channel, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, elo_rating), booking_participants(player_id, role, payment_status, payment_method, paid_amount_cents, wallet_amount_cents, share_amount_cents, players!booking_participants_player_id_fkey(id, first_name, last_name, elo_rating)), payment_transactions(amount_cents, status, stripe_payment_intent_id, payer_player_id), tournament_booking_links(tournament_id, court_id, tournaments(id, name, registration_mode, tournament_inscriptions(id, status, player_id_1, player_id_2, players_1:players!tournament_inscriptions_player_id_1_fkey(id, first_name, last_name, elo_rating), players_2:players!tournament_inscriptions_player_id_2_fkey(id, first_name, last_name, elo_rating))))';
+  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, court_contention_status, contention_third_paid_at, source_channel, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, elo_rating), booking_participants(player_id, role, payment_status, payment_method, paid_amount_cents, wallet_amount_cents, share_amount_cents, players!booking_participants_player_id_fkey(id, first_name, last_name, elo_rating)), payment_transactions(amount_cents, status, stripe_payment_intent_id, payer_player_id), tournament_booking_links(tournament_id, court_id, tournaments(id, name, registration_mode, tournament_inscriptions(id, status, player_id_1, player_id_2, players_1:players!tournament_inscriptions_player_id_1_fkey(id, first_name, last_name, elo_rating), players_2:players!tournament_inscriptions_player_id_2_fkey(id, first_name, last_name, elo_rating)))), matches(id, visibility, elo_min, elo_max)';
 // payment_transactions joined to get per-player payment data (no migration needed)
 const SELECT_ONE =
-  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, email, elo_rating), booking_participants(id, player_id, role, share_amount_cents, payment_status, players!booking_participants_player_id_fkey(id, first_name, last_name, email, elo_rating)), payment_transactions(id, payer_player_id, amount_cents, stripe_payment_intent_id, status), tournament_booking_links(tournament_id, court_id, tournaments(id, name))';
+  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, email, elo_rating), booking_participants(id, player_id, role, share_amount_cents, payment_status, payment_method, paid_amount_cents, wallet_amount_cents, players!booking_participants_player_id_fkey(id, first_name, last_name, email, elo_rating)), payment_transactions(id, payer_player_id, amount_cents, stripe_payment_intent_id, status), tournament_booking_links(tournament_id, court_id, tournaments(id, name)), matches(id, elo_min, elo_max, visibility, gender)';
 
 /** Maps frontend status values to DB-safe values (partial_payment is not in DB constraint) */
 function toDbStatus(status: string): string {
@@ -119,6 +145,8 @@ async function hasCourtConflict(params: {
   startAt: string;
   endAt: string;
   excludeBookingId?: string;
+  reservationType?: string;
+  occupiesCourtImmediately?: boolean;
 }): Promise<{ conflict: boolean; reason?: string }> {
   const supabase = getSupabaseServiceRoleClient();
   const startMs = new Date(params.startAt).getTime();
@@ -143,10 +171,12 @@ async function hasCourtConflict(params: {
   }
   const preClubId = (courtRow as { club_id?: string | null }).club_id;
 
-  // 1) Conflicto contra bookings existentes
+  const newType = normalizeReservationTypeSlug(params.reservationType ?? 'standard');
+  const occupiesImmediately = params.occupiesCourtImmediately ?? true;
+
   let q = supabase
     .from('bookings')
-    .select('id, start_at, end_at, status, notes, reservation_type')
+    .select('id, start_at, end_at, status, notes, reservation_type, court_contention_status')
     .eq('court_id', params.courtId)
     .neq('status', 'cancelled')
     .is('deleted_at', null);
@@ -155,9 +185,7 @@ async function hasCourtConflict(params: {
   if (bErr) return { conflict: true, reason: bErr.message };
   const bookingOverlap = (existingBookings ?? []).some((b: any) => {
     if (isExpiredMatchLock(b.notes)) return false;
-    const s = new Date(b.start_at).getTime();
-    const e = new Date(b.end_at).getTime();
-    return startMs < e && endMs > s;
+    return overlappingBookingBlocksNewReservation(b, startMs, endMs, newType, occupiesImmediately);
   });
   if (bookingOverlap) {
     return { conflict: true, reason: 'La pista ya tiene una reserva en ese horario' };
@@ -992,6 +1020,8 @@ router.post('/', async (req: Request, res: Response) => {
     booking_type,
     source_channel,
     participants, // Array of { player_id }
+    elo_min,
+    elo_max,
   } = req.body ?? {};
 
   if (!court_id || !start_at || !end_at || total_price_cents == null) {
@@ -1025,15 +1055,6 @@ router.post('/', async (req: Request, res: Response) => {
     });
     if (!hoursCheck.ok) {
       return res.status(400).json({ ok: false, error: hoursCheck.error });
-    }
-
-    const conflict = await hasCourtConflict({
-      courtId: String(court_id),
-      startAt: String(start_at),
-      endAt: String(end_at),
-    });
-    if (conflict.conflict) {
-      return res.status(409).json({ ok: false, error: conflict.reason ?? 'Conflicto de horario' });
     }
 
     // Reservas manuales desde grilla: el mismo cliente puede figurar en varias pistas a la misma hora (bloqueo grupal).
@@ -1085,6 +1106,61 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const wantConfirmed = status === 'confirmed';
+    const reservationType = normalizeReservationTypeSlug(booking_type ?? 'standard');
+
+    let openMatchElo: OpenMatchSyncOpts | undefined;
+    if (reservationType === 'open_match') {
+      const eloParsed = parseEloRange(elo_min, elo_max);
+      if (!eloParsed.ok) return res.status(400).json({ ok: false, error: eloParsed.error });
+      openMatchElo = { elo_min: eloParsed.elo_min, elo_max: eloParsed.elo_max };
+    }
+
+    const previewParticipantRows: Array<{ paid_amount_cents?: number; wallet_amount_cents?: number }> = [];
+    if (Array.isArray(participants)) {
+      for (const p of participants) {
+        if (!p?.player_id) continue;
+        previewParticipantRows.push({
+          paid_amount_cents: p.paid_amount_cents ?? 0,
+          wallet_amount_cents: p.wallet_amount_cents ?? 0,
+        });
+      }
+    }
+    const wouldBeFullyPaid =
+      wantConfirmed && !organizer_player_id
+        ? true
+        : previewParticipantRows.length > 0
+          ? computeBookingStatus(Number(total_price_cents), previewParticipantRows as any) === 'confirmed'
+          : false;
+    const occupiesCourtImmediately =
+      reservationType === 'open_match' || reservationType === 'standard'
+        ? wouldBeFullyPaid
+        : true;
+
+    const conflict = await hasCourtConflict({
+      courtId: String(court_id),
+      startAt: String(start_at),
+      endAt: String(end_at),
+      reservationType,
+      occupiesCourtImmediately,
+    });
+    if (conflict.conflict) {
+      return res.status(409).json({ ok: false, error: conflict.reason ?? 'Conflicto de horario' });
+    }
+
+    const courtContentionStatus = contentionStatusForNewMatchBooking(reservationType, wouldBeFullyPaid);
+
+    // Club de la pista: define el timezone de la reserva (no el dispositivo) y
+    // se reutiliza para las wallet transactions.
+    const { data: courtData } = await supabase
+      .from('courts')
+      .select('club_id, club:clubs(timezone)')
+      .eq('id', court_id)
+      .maybeSingle();
+    const clubIdForWallet = (courtData as { club_id?: string } | null)?.club_id as string | undefined;
+    const bookingTimezone = clubTimezoneOrDefault(
+      (courtData as { club?: { timezone?: string | null } } | null)?.club?.timezone
+        ?? (typeof timezone === 'string' ? timezone : null),
+    );
 
     // 1. Insert Booking (siempre como pending; el middleware de pago lo confirma si aplica)
     const { data: insertedBooking, error: bookingError } = await supabase
@@ -1095,12 +1171,13 @@ router.post('/', async (req: Request, res: Response) => {
           organizer_player_id: organizer_player_id ?? null,
           start_at,
           end_at,
-          timezone: timezone ?? 'Europe/Madrid',
+          timezone: bookingTimezone,
           total_price_cents: Number(total_price_cents),
           currency: currency ?? 'EUR',
           status: 'pending_payment',
           notes: notes ?? null,
-          reservation_type: booking_type ?? 'standard',
+          reservation_type: reservationType,
+          court_contention_status: courtContentionStatus,
           pricing_rule_ids: Array.isArray(pricing_rule_ids) ? pricing_rule_ids : null,
           source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
             ? source_channel
@@ -1115,11 +1192,6 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(500).json({ ok: false, error: bookingError.message });
     }
     const booking = insertedBooking as { id: string };
-
-    // 2. Obtener club_id para wallet transactions
-    const { data: courtData } = await supabase
-      .from('courts').select('club_id').eq('id', court_id).maybeSingle();
-    const clubIdForWallet = (courtData as any)?.club_id as string | undefined;
 
     // 3. Construir filas de participantes (incluye organizador si viene en el array)
     const participantRows: any[] = [];
@@ -1182,6 +1254,24 @@ router.post('/', async (req: Request, res: Response) => {
             error: `Error al crear participantes: ${fallbackErr.message}`,
           });
         }
+        for (const row of participantRows) {
+          const paid = row.paid_amount_cents ?? 0;
+          const wallet = row.wallet_amount_cents ?? 0;
+          if (paid + wallet <= 0 && !row.payment_method) continue;
+          const { error: patchErr } = await supabase
+            .from('booking_participants')
+            .update({
+              paid_amount_cents: paid,
+              wallet_amount_cents: wallet,
+              payment_method: row.payment_method ?? null,
+              payment_status: row.payment_status,
+            })
+            .eq('booking_id', booking.id)
+            .eq('player_id', row.player_id);
+          if (patchErr) {
+            console.error('[POST /bookings] Participant payment patch error:', patchErr.message);
+          }
+        }
       }
     }
 
@@ -1200,7 +1290,21 @@ router.post('/', async (req: Request, res: Response) => {
 
       await upsertManualPayments(supabase, booking.id, participantRows);
       finalStatus = computeBookingStatus(Number(total_price_cents), participantRows);
+      if (
+        finalStatus !== 'confirmed' &&
+        wantConfirmed &&
+        computeBookingStatus(Number(total_price_cents), previewParticipantRows as any) === 'confirmed'
+      ) {
+        finalStatus = 'confirmed';
+      }
       await supabase.from('bookings').update({ status: finalStatus }).eq('id', booking.id);
+      if (finalStatus === 'confirmed') {
+        await supabase
+          .from('bookings')
+          .update({ court_contention_status: null, updated_at: new Date().toISOString() })
+          .eq('id', booking.id)
+          .eq('court_contention_status', 'competing');
+      }
 
       // 4b. Descontar saldo de wallet para quienes pagaron con wallet
       if (clubIdForWallet) {
@@ -1233,8 +1337,33 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const { data: finalBooking } = await supabase.from('bookings').select(SELECT_ONE).eq('id', booking.id).maybeSingle();
-    await ensureOpenMatchRecordForBooking(supabase, booking.id);
-    return res.status(201).json({ ok: true, booking: finalBooking ?? booking });
+    await ensureOpenMatchRecordForBooking(supabase, booking.id, openMatchElo);
+
+    const actuallyOccupiesCourt =
+      reservationType !== 'open_match' && reservationType !== 'standard'
+        ? true
+        : finalStatus === 'confirmed';
+    if (actuallyOccupiesCourt) {
+      try {
+        await cancelDisplacedBookingsForOccupyingReservation(
+          supabase,
+          booking.id,
+          String(court_id),
+          String(start_at),
+          String(end_at),
+        );
+      } catch (displaceErr) {
+        console.error('[POST /bookings] cancelDisplacedBookings:', displaceErr);
+      }
+    }
+
+    try {
+      await resolveCourtContention(supabase, booking.id);
+    } catch (contentionErr) {
+      console.error('[POST /bookings] resolveCourtContention:', contentionErr);
+    }
+    const { data: bookingWithMatch } = await supabase.from('bookings').select(SELECT_ONE).eq('id', booking.id).maybeSingle();
+    return res.status(201).json({ ok: true, booking: bookingWithMatch ?? finalBooking ?? booking });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -1243,7 +1372,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   console.log(`[PUT /bookings/${id}] body:`, JSON.stringify(req.body, null, 2));
-  const { status, cancelled_by, cancellation_reason, notes, booking_type, participants, court_id, start_at, end_at, total_price_cents } = req.body ?? {};
+  const { status, cancelled_by, cancellation_reason, notes, booking_type, participants, court_id, start_at, end_at, total_price_cents, elo_min, elo_max } = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (status !== undefined && status !== 'confirmed') update.status = toDbStatus(status);
   if (cancelled_by !== undefined) update.cancelled_by = cancelled_by;
@@ -1252,7 +1381,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     update.cancelled_at = new Date().toISOString();
   }
   if (notes !== undefined) update.notes = notes;
-  if (booking_type !== undefined) update.reservation_type = booking_type;
+  if (booking_type !== undefined) update.reservation_type = normalizeReservationTypeSlug(booking_type);
   if (court_id !== undefined) update.court_id = court_id;
   if (start_at !== undefined) update.start_at = start_at;
   if (end_at !== undefined) update.end_at = end_at;
@@ -1260,26 +1389,59 @@ router.put('/:id', async (req: Request, res: Response) => {
     update.total_price_cents = Number(total_price_cents);
   }
 
-  if (Object.keys(update).length === 1 && !Array.isArray(participants) && status !== 'confirmed') {
+  const hasEloUpdate = elo_min !== undefined || elo_max !== undefined;
+
+  if (Object.keys(update).length === 1 && !Array.isArray(participants) && status !== 'confirmed' && !hasEloUpdate) {
     return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
+  }
+
+  let openMatchElo: OpenMatchSyncOpts | undefined;
+  if (hasEloUpdate) {
+    const eloParsed = parseEloRange(
+      elo_min !== undefined ? elo_min : null,
+      elo_max !== undefined ? elo_max : null,
+    );
+    if (!eloParsed.ok) return res.status(400).json({ ok: false, error: eloParsed.error });
+    openMatchElo = { elo_min: eloParsed.elo_min, elo_max: eloParsed.elo_max };
   }
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const scheduleTouched = court_id !== undefined || start_at !== undefined || end_at !== undefined;
+
+    interface ExistingBooking {
+      court_id: string;
+      start_at: string;
+      end_at: string;
+      reservation_type?: string | null;
+      status?: string | null;
+    }
+
+    let existingBooking: ExistingBooking | null = null;
 
     if (court_id !== undefined || start_at !== undefined || end_at !== undefined) {
-      const { data: existingBooking, error: exErr } = await supabase
+      const { data: ex, error: exErr } = await supabase
         .from('bookings')
-        .select('court_id, start_at, end_at, reservation_type')
+        .select('court_id, start_at, end_at, reservation_type, status')
         .eq('id', id)
         .maybeSingle();
       if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
-      if (!existingBooking) return res.status(404).json({ ok: false, error: 'Booking not found' });
-      const nextCourt = String(court_id ?? (existingBooking as any).court_id);
-      const nextStart = String(start_at ?? (existingBooking as any).start_at);
-      const nextEnd = String(end_at ?? (existingBooking as any).end_at);
-      const nextType = booking_type ?? (existingBooking as any).reservation_type ?? 'standard';
+      if (!ex) return res.status(404).json({ ok: false, error: 'Booking not found' });
+      existingBooking = ex as ExistingBooking;
+    }
+
+    const scheduleTouched =
+      existingBooking != null &&
+      ((court_id !== undefined && String(court_id) !== String(existingBooking.court_id)) ||
+        (start_at !== undefined && String(start_at) !== String(existingBooking.start_at)) ||
+        (end_at !== undefined && String(end_at) !== String(existingBooking.end_at)));
+
+    if (scheduleTouched && existingBooking) {
+      const nextCourt = String(court_id ?? existingBooking.court_id);
+      const nextStart = String(start_at ?? existingBooking.start_at);
+      const nextEnd = String(end_at ?? existingBooking.end_at);
+      const nextType = normalizeReservationTypeSlug(
+        booking_type ?? existingBooking.reservation_type ?? 'standard',
+      );
       const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
         courtId: nextCourt,
         startAt: nextStart,
@@ -1294,6 +1456,11 @@ router.put('/:id', async (req: Request, res: Response) => {
         startAt: nextStart,
         endAt: nextEnd,
         excludeBookingId: id,
+        reservationType: nextType,
+        occupiesCourtImmediately:
+          nextType !== 'open_match' && nextType !== 'standard'
+            ? true
+            : String(existingBooking.status ?? '').toLowerCase() === 'confirmed',
       });
       if (conflict.conflict) {
         return res.status(409).json({ ok: false, error: conflict.reason ?? 'Conflicto de horario' });
@@ -1343,6 +1510,44 @@ router.put('/:id', async (req: Request, res: Response) => {
         .from('courts').select('club_id')
         .eq('id', (data as any).court_id).maybeSingle();
       const clubIdForWallet = (courtRow as any)?.club_id as string | undefined;
+
+      const existingParticipants = await fetchBookingParticipantsForRefund(supabase, id);
+      const newPlayerIds = new Set(
+        participants
+          .filter((p: { player_id?: string }) => p.player_id)
+          .map((p: { player_id: string }) => String(p.player_id)),
+      );
+      const removedParticipants = existingParticipants.filter(
+        (p) => p.player_id && !newPlayerIds.has(String(p.player_id)),
+      );
+
+      if (removedParticipants.length > 0) {
+        const refundPolicy = await evaluateBookingRefundPolicy(supabase, id);
+        for (const removed of removedParticipants) {
+          if (clubIdForWallet) {
+            const refundResult = await refundBookingParticipant(supabase, id, clubIdForWallet, removed, {
+              concept: 'Reembolso por baja de reserva',
+              refundEligible: refundPolicy.eligible,
+              refundPercent: refundPolicy.eligible ? 100 : 0,
+            });
+            if (refundResult.errors.length > 0) {
+              console.error(
+                `[PUT /bookings/${id}] refund on remove ${removed.player_id}:`,
+                refundResult.errors,
+              );
+            }
+          }
+          await notifyBookingCancellationEmails(supabase, {
+            bookingId: id,
+            scenario: 'removed',
+            cancelledBy: 'admin',
+            refundPercent: refundPolicy.eligible ? 100 : 0,
+            refundEligible: refundPolicy.eligible,
+            policyMessage: refundPolicyUserMessage(refundPolicy),
+            notifyPlayerIds: [removed.player_id],
+          });
+        }
+      }
 
       // Eliminar guests anteriores y upsert organizer
       await supabase.from('booking_participants').delete()
@@ -1444,8 +1649,20 @@ router.put('/:id', async (req: Request, res: Response) => {
               console.error('[PUT /bookings] propagate tournament:', e);
             }
           }
-          await ensureOpenMatchRecordForBooking(supabase, id);
-          return res.json({ ok: true, booking: bookingOut });
+          await ensureOpenMatchRecordForBooking(supabase, id, openMatchElo);
+          if (Array.isArray(participants)) {
+            const { data: linkedMatch } = await supabase.from('matches').select('id').eq('booking_id', id).maybeSingle();
+            if (linkedMatch?.id) {
+              await syncMatchPlayersFromBooking(supabase, linkedMatch.id, id);
+            }
+          }
+          try {
+            await resolveCourtContention(supabase, id);
+          } catch (contentionErr) {
+            console.error(`[PUT /bookings/${id}] resolveCourtContention:`, contentionErr);
+          }
+          const { data: withMatch } = await supabase.from('bookings').select(SELECT_ONE).eq('id', id).maybeSingle();
+          return res.json({ ok: true, booking: withMatch ?? bookingOut });
         }
       }
     }
@@ -1460,21 +1677,93 @@ router.put('/:id', async (req: Request, res: Response) => {
         console.error('[PUT /bookings] propagate tournament:', e);
       }
     }
-    await ensureOpenMatchRecordForBooking(supabase, id);
-    return res.json({ ok: true, booking: bookingOut });
+    await ensureOpenMatchRecordForBooking(supabase, id, openMatchElo);
+    if (Array.isArray(participants)) {
+      const { data: linkedMatch } = await supabase.from('matches').select('id').eq('booking_id', id).maybeSingle();
+      if (linkedMatch?.id) {
+        await syncMatchPlayersFromBooking(supabase, linkedMatch.id, id);
+      }
+    }
+    try {
+      await resolveCourtContention(supabase, id);
+    } catch (contentionErr) {
+      console.error(`[PUT /bookings/${id}] resolveCourtContention:`, contentionErr);
+    }
+    const { data: withMatch } = await supabase.from('bookings').select(SELECT_ONE).eq('id', id).maybeSingle();
+    return res.json({ ok: true, booking: withMatch ?? bookingOut });
   } catch (err) {
     console.error(`[PUT /bookings/${id}] Unhandled error:`, (err as Error).message, (err as Error).stack);
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
+/**
+ * @openapi
+ * /bookings/{id}/refund-preview:
+ *   get:
+ *     tags: [Bookings]
+ *     summary: Vista previa de jugadores con pago en efectivo
+ *     description: Lista participantes que pagaron en efectivo y requieren decisión del mostrador antes de cancelar o dar de baja.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: player_id
+ *         schema: { type: string, format: uuid }
+ *         description: Filtra a un solo jugador (baja individual)
+ *     responses:
+ *       200:
+ *         description: Lista de jugadores con efectivo pendiente de disposición
+ */
+router.get('/:id/refund-preview', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const filterPlayerId = typeof req.query.player_id === 'string' ? req.query.player_id : undefined;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const policy = await evaluateBookingRefundPolicy(supabase, id);
+    const participants = await fetchBookingParticipantsForRefund(supabase, id);
+    const stripeIds = await collectStripePlayerIds(supabase, id);
+    const cash_players = listCashRefundCandidates(participants, stripeIds, filterPlayerId);
+    const has_refundable_payments = bookingParticipantsHavePayments(
+      filterPlayerId
+        ? participants.filter((p) => p.player_id === filterPlayerId)
+        : participants,
+      stripeIds,
+    );
+    const policy_eligible = policy.eligible;
+    const refund_eligible = policy_eligible && has_refundable_payments;
+    const admin_can_choose_percent = !policy_eligible && has_refundable_payments;
+    return res.json({
+      ok: true,
+      cash_players,
+      has_refundable_payments,
+      policy_eligible,
+      admin_can_choose_percent,
+      refund_eligible,
+      notice_hours: policy.notice_hours,
+      incomplete_public_exempt: policy.incomplete_public_exempt,
+      match_player_count: policy.match_player_count,
+      hours_until_start: Math.round(policy.hours_until_start * 10) / 10,
+      policy_message:
+        has_refundable_payments && !policy_eligible ? refundPolicyUserMessage(policy) : undefined,
+      refund_percent_options: [0, 25, 50, 75, 100],
+      suggested_refund_percent: refund_eligible ? 100 : 0,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 router.delete('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const body = req.body ?? {};
+  const cashRefunds = (body.cash_refunds ?? undefined) as CashRefundMap | undefined;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const now = new Date().toISOString();
 
-    // 1. Fetch booking + court's club_id before cancelling
     const { data: bookingRow, error: fetchErr } = await supabase
       .from('bookings')
       .select('id, court_id, courts(club_id)')
@@ -1486,20 +1775,45 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     const clubId = (bookingRow.courts as { club_id?: string } | null)?.club_id;
 
-    // 2. App móvil (Stripe pi_*): reembolso en pasarela. La web/manual sigue en el bloque de monedero más abajo.
-    if (clubId) {
-      const stripeRef = await refundStripeBookingPaymentTransactions(supabase, id, clubId);
-      if (stripeRef.errors.length > 0) {
-        console.error(`[DELETE /bookings/${id}] Stripe refund errors:`, stripeRef.errors);
+    const policy = await evaluateBookingRefundPolicy(supabase, id);
+    const participants = await fetchBookingParticipantsForRefund(supabase, id);
+    const stripeIds = await collectStripePlayerIds(supabase, id);
+    const hasPayments = bookingParticipantsHavePayments(participants, stripeIds);
+    const refundPercent = resolveAdminRefundPercent(body, policy.eligible, hasPayments);
+
+    if (clubId && refundPercent > 0) {
+      const cashCandidates = listCashRefundCandidates(participants, stripeIds);
+      const validation = validateCashRefundMap(cashCandidates, cashRefunds);
+      if (!validation.ok) {
+        return res.status(400).json({
+          ok: false,
+          code: 'cash_refund_required',
+          error: validation.error,
+          cash_players: cashCandidates,
+          missing_player_ids: validation.missing_player_ids,
+        });
+      }
+
+      const refundResult = await refundAllBookingParticipants(
+        supabase,
+        id,
+        clubId,
+        cashRefunds,
+        refundPercent < 100
+          ? `Reembolso parcial (${refundPercent}%) por cancelación de reserva`
+          : 'Reembolso por cancelación de reserva',
+        refundPercent,
+      );
+      if (refundResult.errors.length > 0) {
+        console.error(`[DELETE /bookings/${id}] Refund errors:`, refundResult.errors);
         return res.status(502).json({
           ok: false,
-          error: 'No se pudieron completar los reembolsos con tarjeta (app). La reserva no se canceló.',
-          refund_errors: stripeRef.errors,
+          error: 'No se pudieron completar todos los reembolsos. La reserva no se canceló.',
+          refund_errors: refundResult.errors,
         });
       }
     }
 
-    // 3. Cancel the booking
     const { data, error } = await supabase
       .from('bookings')
       .update({
@@ -1515,44 +1829,31 @@ router.delete('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
-    // 4. Web / reserva manual: reembolsos al monedero según participantes (comportamiento original del panel)
-    if (clubId) {
-      const { data: paidParticipants } = await supabase
-        .from('booking_participants')
-        .select('player_id, paid_amount_cents, wallet_amount_cents')
-        .eq('booking_id', id)
-        .eq('payment_status', 'paid');
-
-      if (paidParticipants && paidParticipants.length > 0) {
-        const refundRows = paidParticipants
-          .filter((p) => (p.paid_amount_cents ?? 0) > 0 || (p.wallet_amount_cents ?? 0) > 0)
-          .map((p) => ({
-            player_id: p.player_id,
-            club_id: clubId,
-            amount_cents: (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
-            concept: `Reembolso por cancelación de reserva`,
-            type: 'refund',
-            booking_id: id,
-            created_at: now,
-          }));
-
-        if (refundRows.length > 0) {
-          const { error: refundErr } = await supabase.from('wallet_transactions').insert(refundRows);
-          if (refundErr) {
-            console.error(`[DELETE /bookings/${id}] Refund insert error:`, refundErr.message);
-          }
-        }
-      }
-    }
-
-    // 5. Also cancel any match linked to this booking
     await supabase
       .from('matches')
       .update({ status: 'cancelled' })
       .eq('booking_id', id)
       .not('status', 'in', '("cancelled","finished")');
 
-    return res.json({ ok: true, booking: data });
+    await notifyBookingCancellationEmails(supabase, {
+      bookingId: id,
+      scenario: 'cancelled',
+      cancelledBy: 'admin',
+      refundPercent,
+      refundEligible: refundPercent > 0,
+      policyMessage: refundPercent > 0 ? undefined : refundPolicyUserMessage(policy),
+      cashRefunds,
+    });
+
+    return res.json({
+      ok: true,
+      booking: data,
+      refund_eligible: policy.eligible,
+      refund_applied: refundPercent > 0,
+      refund_percent: refundPercent,
+      incomplete_public_exempt: policy.incomplete_public_exempt,
+      policy_message: policy.eligible ? undefined : refundPolicyUserMessage(policy),
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

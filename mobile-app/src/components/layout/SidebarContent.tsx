@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useHomeData } from '../../contexts/HomeDataContext';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
 import { useSidebarContext } from '../../contexts/SidebarContext';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 function getInitials(fullName?: string | null, email?: string): string {
@@ -19,6 +20,7 @@ function getInitials(fullName?: string | null, email?: string): string {
 }
 
 function SidebarUserHeader() {
+  const { t } = useTranslation();
   const ctx = useSidebarContext();
   const { session } = useAuth();
   const { profile } = useHomeData();
@@ -29,7 +31,7 @@ function SidebarUserHeader() {
       : (session?.user?.user_metadata?.full_name ?? null);
   const email = profile?.email ?? session?.user?.email ?? '';
   const initials = getInitials(name, email);
-  const displayName = name?.trim() || email || 'Usuario';
+  const displayName = name?.trim() || email || t('common.userFallback');
   const avatarUrl = profile?.avatarUrl?.trim() || null;
 
   return (
@@ -41,7 +43,7 @@ function SidebarUserHeader() {
             close?.();
             ctx?.onProfilePress?.();
           }}
-          accessibilityLabel="Perfil de usuario"
+          accessibilityLabel={t('nav.userProfileA11y')}
         >
           <View style={styles.avatarWrap}>
             <AvatarWithFrame
@@ -57,13 +59,13 @@ function SidebarUserHeader() {
             <Text style={styles.userName} numberOfLines={1}>
               {displayName}
             </Text>
-            <Text style={styles.userSubtitle}>Cuenta estándar</Text>
+            <Text style={styles.userSubtitle}>{t('common.standardAccount')}</Text>
           </View>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
           onPress={close}
-          accessibilityLabel="Cerrar menú"
+          accessibilityLabel={t('nav.closeMenu')}
         >
           <Ionicons name="close" size={20} color={theme.auth.textMuted} />
         </Pressable>
@@ -71,10 +73,10 @@ function SidebarUserHeader() {
       <Pressable
         style={({ pressed }) => [styles.inviteButton, pressed && styles.inviteButtonPressed]}
         onPress={close}
-        accessibilityLabel="Invitar amigos"
+        accessibilityLabel={t('nav.inviteFriends')}
       >
         <Ionicons name="share-social-outline" size={16} color={theme.auth.textMuted} />
-        <Text style={styles.inviteButtonText}>Invitar amigos</Text>
+        <Text style={styles.inviteButtonText}>{t('nav.inviteFriends')}</Text>
       </Pressable>
     </View>
   );
@@ -137,6 +139,7 @@ function SidebarSection({ title, children }: SidebarSectionProps) {
 }
 
 export function SidebarContent() {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const ctx = useSidebarContext();
   const { logout } = useAuth();
@@ -162,11 +165,11 @@ export function SidebarContent() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
         showsVerticalScrollIndicator={false}
       >
-        <SidebarSection title="Tu cuenta">
+        <SidebarSection title={t('nav.sectionYourAccount')}>
           <SidebarRowItem
             icon="person-outline"
-            title="Editar perfil"
-            subtitle="Edita nombre, correo, teléfono, ubicación, ..."
+            title={t('nav.editProfile')}
+            subtitle={t('nav.editProfileSub')}
             iconVariant="orange"
             onPress={() => {
               close?.();
@@ -175,8 +178,8 @@ export function SidebarContent() {
           />
           <SidebarRowItem
             icon="trophy-outline"
-            title="Tu actividad"
-            subtitle="Partidos, clases, competiciones, grupos"
+            title={t('nav.yourActivity')}
+            subtitle={t('nav.yourActivitySub')}
             iconVariant="purple"
             onPress={() => {
               close?.();
@@ -184,9 +187,9 @@ export function SidebarContent() {
             }}
           />
           <SidebarRowItem
-            icon="cash-outline"
-            title="Monedero"
-            subtitle="Saldo a favor en tus clubes"
+            icon="wallet-outline"
+            title={t('nav.wallet')}
+            subtitle={t('nav.walletSub')}
             iconVariant="emerald"
             onPress={() => {
               close?.();
@@ -194,19 +197,9 @@ export function SidebarContent() {
             }}
           />
           <SidebarRowItem
-            icon="wallet-outline"
-            title="Tus pagos"
-            subtitle="Tarjeta, reservas pendientes y Stripe"
-            iconVariant="sky"
-            onPress={() => {
-              close?.();
-              ctx?.onNavigateToTusPagos?.();
-            }}
-          />
-          <SidebarRowItem
             icon="settings-outline"
-            title="Ajustes"
-            subtitle="Configura privacidad, notificaciones, segu..."
+            title={t('nav.settings')}
+            subtitle={t('nav.settingsSub')}
             iconVariant="sky"
             onPress={() => {
               close?.();
@@ -215,8 +208,8 @@ export function SidebarContent() {
           />
           <SidebarRowItem
             icon="star-outline"
-            title="Valorar clubes"
-            subtitle="Reseñas de clubes donde has jugado"
+            title={t('nav.rateClubs')}
+            subtitle={t('nav.rateClubsSub')}
             iconVariant="orange"
             onPress={() => {
               close?.();
@@ -225,10 +218,10 @@ export function SidebarContent() {
           />
         </SidebarSection>
 
-        <SidebarSection title="Soporte">
+        <SidebarSection title={t('nav.sectionSupport')}>
           <SidebarRowItem
             icon="help-circle-outline"
-            title="Ayuda"
+            title={t('nav.help')}
             onPress={() => {
               close?.();
               ctx?.onNavigateToInfo?.('help');
@@ -236,7 +229,7 @@ export function SidebarContent() {
           />
           <SidebarRowItem
             icon="phone-portrait-outline"
-            title="Cómo funciona WeMatch"
+            title={t('nav.howItWorks')}
             onPress={() => {
               close?.();
               ctx?.onNavigateToInfo?.('how-it-works');
@@ -244,10 +237,10 @@ export function SidebarContent() {
           />
         </SidebarSection>
 
-        <SidebarSection title="Información legal">
+        <SidebarSection title={t('nav.sectionLegal')}>
           <SidebarRowItem
             icon="document-text-outline"
-            title="Condiciones de uso"
+            title={t('nav.termsOfUse')}
             onPress={() => {
               close?.();
               ctx?.onNavigateToInfo?.('terms');
@@ -255,7 +248,7 @@ export function SidebarContent() {
           />
           <SidebarRowItem
             icon="eye-outline"
-            title="Política de privacidad"
+            title={t('nav.privacyPolicy')}
             onPress={() => {
               close?.();
               ctx?.onNavigateToInfo?.('privacy');
@@ -277,7 +270,7 @@ export function SidebarContent() {
               <Ionicons name="power" size={20} color="#f87171" />
             </View>
             <Text style={styles.logoutText}>
-              {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
+              {isLoggingOut ? t('nav.loggingOut') : t('nav.logout')}
             </Text>
           </Pressable>
         </View>

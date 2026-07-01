@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTranslation } from '../../i18n';
 
 const { width } = Dimensions.get('window');
 
@@ -11,6 +12,7 @@ interface ComingSoonProps {
 }
 
 export const ComingSoon: React.FC<ComingSoonProps> = ({ title, icon }) => {
+  const { t } = useTranslation();
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -21,10 +23,10 @@ export const ComingSoon: React.FC<ComingSoonProps> = ({ title, icon }) => {
       </LinearGradient>
       
       <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>Estamos trabajando para traerte la mejor experiencia de comunidad.</Text>
+      <Text style={styles.subtitle}>{t('common.comingSoonSection')}</Text>
       
       <View style={styles.badge}>
-        <Text style={styles.badgeText}>PRÓXIMAMENTE</Text>
+        <Text style={styles.badgeText}>{t('common.comingSoon').toUpperCase()}</Text>
       </View>
     </View>
   );

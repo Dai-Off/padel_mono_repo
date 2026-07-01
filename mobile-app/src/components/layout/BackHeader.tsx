@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 type BackHeaderProps = {
@@ -18,6 +19,7 @@ export function BackHeader({
   rightSlot,
   tone = 'light',
 }: BackHeaderProps) {
+  const { t } = useTranslation();
   const dark = tone === 'dark';
   return (
     <View style={[styles.container, dark && styles.containerDark]}>
@@ -29,7 +31,7 @@ export function BackHeader({
           pressed && styles.pressed,
         ]}
         accessibilityRole="button"
-        accessibilityLabel="Volver"
+        accessibilityLabel={t('common.back')}
       >
         <Ionicons name="arrow-back" size={20} color={dark ? '#fff' : '#1A1A1A'} />
       </Pressable>

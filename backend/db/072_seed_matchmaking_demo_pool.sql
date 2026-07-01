@@ -1,10 +1,9 @@
 -- =============================================================================
 
 -- 2/2 — Cola matchmaking demo (sin club preferido)
-
 -- Los bots aceptan cualquier sede: club_id NULL en pool y favorite_clubs vacío.
-
 -- Requiere haber ejecutado antes: 071_seed_matchmaking_demo_players.sql
+-- Tras cambiar ELO en 071, re-ejecutá ambos scripts para actualizar jugadores y pool.
 
 -- =============================================================================
 

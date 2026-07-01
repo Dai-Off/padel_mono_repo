@@ -2,7 +2,7 @@ import express, { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { generateInviteToken, hashInviteToken, getInviteExpiresAt } from '../lib/inviteToken';
-import { requireAdmin } from '../middleware/requireAdmin';
+import { requireAdminOrMobileAdmin } from '../middleware/requireAdminOrMobileAdmin';
 import { sendInviteEmail, sendClubApplicationConfirmationEmail, sendClubApprovedEmail } from '../lib/mailer';
 import { getFrontendUrl } from '../lib/env';
 
@@ -66,7 +66,7 @@ router.post('/upload', (req: Request, res: Response, next: express.NextFunction)
   }
 });
 
-router.get('/', requireAdmin, async (req: Request, res: Response) => {
+router.get('/', requireAdminOrMobileAdmin, async (req: Request, res: Response) => {
   const status = req.query.status as string | undefined;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -121,7 +121,7 @@ router.get('/:id/validate-invite', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/:id', requireAdmin, async (req: Request, res: Response) => {
+router.get('/:id', requireAdminOrMobileAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -134,7 +134,7 @@ router.get('/:id', requireAdmin, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) => {
+router.post('/:id/approve', requireAdminOrMobileAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -176,7 +176,7 @@ router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) =>
 /**
  * POST /club-applications/:id/resend-invite — regenerar token y reenviar email (solo approved, sin registro completado).
  */
-router.post('/:id/resend-invite', requireAdmin, async (req: Request, res: Response) => {
+router.post('/:id/resend-invite', requireAdminOrMobileAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -226,7 +226,7 @@ router.post('/:id/resend-invite', requireAdmin, async (req: Request, res: Respon
   }
 });
 
-router.post('/:id/reject', requireAdmin, async (req: Request, res: Response) => {
+router.post('/:id/reject', requireAdminOrMobileAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { reason } = req.body ?? {};
   try {
@@ -326,6 +326,17 @@ router.post('/', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'Deporte no válido' });
   }
 
+  // Tarifas obligatorias: un club no puede crearse sin precios configurados,
+  // de lo contrario las reservas fallan al calcular el precio.
+  const pricingArr = Array.isArray(pricing) ? pricing : [];
+  const hasValidPricing = pricingArr.some((p) => {
+    const price = Number(String((p as { price?: unknown })?.price ?? '').replace(',', '.').trim());
+    return Number.isFinite(price) && price > 0;
+  });
+  if (!hasValidPricing) {
+    return res.status(400).json({ ok: false, error: 'Configura al menos una tarifa con precio mayor a 0' });
+  }
+
   const row: Record<string, unknown> = {
     responsible_first_name: trim(responsible_first_name),
     responsible_last_name: trim(responsible_last_name),
@@ -360,6 +371,35 @@ router.post('/', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const emailLower = trim(email).toLowerCase();
+
+    // 1) El email ya pertenece a un club registrado (club_owners es único por email).
+    const { data: existingOwner } = await supabase
+      .from('club_owners')
+      .select('id')
+      .eq('email', emailLower)
+      .maybeSingle();
+    if (existingOwner) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Ya existe un club registrado con este email. Inicia sesión en el panel en lugar de crear una nueva solicitud.',
+      });
+    }
+
+    // 2) Ya hay una solicitud en curso (pendiente, contactada o aprobada) con ese email.
+    const { data: existingApps } = await supabase
+      .from('club_applications')
+      .select('id')
+      .eq('email', emailLower)
+      .in('status', ['pending', 'contacted', 'approved'])
+      .limit(1);
+    if (existingApps && existingApps.length > 0) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Ya existe una solicitud en curso con este email. Te contactaremos para continuar el proceso.',
+      });
+    }
+
     const { data, error } = await supabase
       .from('club_applications')
       .insert(row)

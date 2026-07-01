@@ -10,6 +10,7 @@ import { TuActividadListSkeleton } from '../../components/tuActividad/TuActivida
 import type { ActivityOutcomeFilter } from '../../domain/matchOutcome';
 import { matchesActivityFilter } from '../../domain/matchOutcome';
 import type { PartidoItem } from '../PartidosScreen';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 type MisPartidosActividadScreenProps = {
@@ -18,6 +19,7 @@ type MisPartidosActividadScreenProps = {
 };
 
 export function MisPartidosActividadScreen({ onBack, onPartidoPress }: MisPartidosActividadScreenProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { loading, refreshing, error, pastPartidos, refresh } = useTuActividadData();
   const [outcomeFilter, setOutcomeFilter] = useState<ActivityOutcomeFilter>('all');
@@ -31,19 +33,19 @@ export function MisPartidosActividadScreen({ onBack, onPartidoPress }: MisPartid
     if (filteredPartidos.length === 0) return null;
     const n = filteredPartidos.length;
     if (outcomeFilter === 'all') {
-      return n === 1 ? '1 partido jugado' : `${n} partidos jugados`;
+      return n === 1 ? t('activity.rowMatchesPlayedOne') : t('activity.rowMatchesPlayedMany', { count: n });
     }
-    return n === 1 ? '1 partido' : `${n} partidos`;
-  }, [filteredPartidos.length, outcomeFilter]);
+    return n === 1 ? t('activity.matchesSummaryOne') : t('activity.matchesSummaryMany', { count: n });
+  }, [filteredPartidos.length, outcomeFilter, t]);
 
   if (loading) {
-    return <TuActividadListSkeleton title="Partidos" onBack={onBack} />;
+    return <TuActividadListSkeleton title={t('activity.rowMatches')} onBack={onBack} />;
   }
 
   if (error && pastPartidos.length === 0) {
     return (
       <View style={styles.container}>
-        <TuActividadHeader title="Partidos" onBack={onBack} />
+        <TuActividadHeader title={t('activity.rowMatches')} onBack={onBack} />
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
@@ -53,7 +55,7 @@ export function MisPartidosActividadScreen({ onBack, onPartidoPress }: MisPartid
 
   return (
     <View style={styles.container}>
-      <TuActividadHeader title="Partidos" onBack={onBack} />
+      <TuActividadHeader title={t('activity.rowMatches')} onBack={onBack} />
       <FlatList
         data={filteredPartidos}
         keyExtractor={(item) => item.id}
@@ -80,11 +82,11 @@ export function MisPartidosActividadScreen({ onBack, onPartidoPress }: MisPartid
         ListEmptyComponent={
           <ActivityEmptyState
             icon="trophy-outline"
-            title={outcomeFilter === 'all' ? 'Sin partidos todavía' : 'Nada en este filtro'}
+            title={outcomeFilter === 'all' ? t('activity.matchesEmptyAll') : t('activity.matchesEmptyFilter')}
             message={
               outcomeFilter === 'all'
-                ? 'Cuando completes un partido en el que participes, aparecerá aquí tu historial.'
-                : 'Probá otro filtro o jugá un partido para ver más historial.'
+                ? t('activity.matchesEmptyAllSub')
+                : t('activity.matchesEmptyFilterSub')
             }
           />
         }

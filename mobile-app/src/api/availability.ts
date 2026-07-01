@@ -3,6 +3,10 @@ import { API_URL } from '../config';
 export type AvailabilitySlot = {
   start: string;
   end: string;
+  /** Instante UTC del inicio del turno (zona del club). */
+  start_at?: string;
+  /** Instante UTC del fin del turno (zona del club). */
+  end_at?: string;
 };
 
 export type CourtAvailability = {
@@ -10,6 +14,10 @@ export type CourtAvailability = {
   court_name: string;
   /** Present on multi-club responses; single-club queries include it per court row. */
   club_id: string;
+  /** Zona IANA del club; los slots `start`/`end` son hora civil en esta zona. */
+  club_timezone?: string;
+  /** Duración de turno (min) del club, usada para generar/validar el slot. */
+  slot_minutes?: number;
   free_slots: AvailabilitySlot[];
 };
 

@@ -3,6 +3,17 @@ import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-nati
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { CourseEnrollment } from '../../api/schoolCourses';
+import { useTranslation } from '../../i18n';
+
+const WEEKDAY_KEYS: Record<string, string> = {
+  mon: 'common.weekdayMon',
+  tue: 'common.weekdayTue',
+  wed: 'common.weekdayWed',
+  thu: 'common.weekdayThu',
+  fri: 'common.weekdayFri',
+  sat: 'common.weekdaySat',
+  sun: 'common.weekdaySun',
+};
 
 const { width } = Dimensions.get('window');
 
@@ -13,6 +24,7 @@ interface BookedCourseCardProps {
 }
 
 export const BookedCourseCard: React.FC<BookedCourseCardProps> = ({ enrollment, onPress, onCancel }) => {
+  const { t } = useTranslation();
   const course = enrollment.course;
   if (!course) return null;
 
@@ -25,7 +37,7 @@ export const BookedCourseCard: React.FC<BookedCourseCardProps> = ({ enrollment, 
         {/* Badge "Confirmada" */}
         <View style={styles.badge}>
           <Text style={styles.badgeText}>✓</Text>
-          <Text style={styles.badgeLabel}>Confirmada</Text>
+          <Text style={styles.badgeLabel}>{t('learning.schoolConfirmed')}</Text>
         </View>
 
         <View style={styles.content}>
@@ -50,7 +62,7 @@ export const BookedCourseCard: React.FC<BookedCourseCardProps> = ({ enrollment, 
                 </View>
                 <View style={[styles.metaItem, { marginLeft: 12 }]}>
                   <Ionicons name="people" size={12} color="#3B82F6" />
-                  <Text style={styles.metaText}>Grupo</Text>
+                  <Text style={styles.metaText}>{t('learning.schoolGroup')}</Text>
                 </View>
               </View>
             </View>
@@ -61,7 +73,7 @@ export const BookedCourseCard: React.FC<BookedCourseCardProps> = ({ enrollment, 
             <View style={styles.scheduleItem}>
               <Ionicons name="calendar-outline" size={14} color="#9CA3AF" />
               <Text style={styles.scheduleText}>
-                {(course.days || []).map(d => d.weekday.charAt(0).toUpperCase() + d.weekday.slice(1)).join(', ')}
+                {(course.days || []).map((d) => t(WEEKDAY_KEYS[d.weekday] ?? d.weekday)).join(', ')}
               </Text>
             </View>
             <View style={styles.scheduleDivider} />
@@ -80,7 +92,7 @@ export const BookedCourseCard: React.FC<BookedCourseCardProps> = ({ enrollment, 
               onPress={onCancel}
               activeOpacity={0.7}
             >
-              <Text style={styles.cancelButtonText}>Cancelar</Text>
+              <Text style={styles.cancelButtonText}>{t('learning.schoolCancel')}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -88,7 +100,7 @@ export const BookedCourseCard: React.FC<BookedCourseCardProps> = ({ enrollment, 
               onPress={onPress}
               activeOpacity={0.7}
             >
-              <Text style={styles.detailsButtonText}>Ver detalles</Text>
+              <Text style={styles.detailsButtonText}>{t('learning.schoolViewDetails')}</Text>
               <Ionicons name="chevron-forward" size={14} color="#FFF" />
             </TouchableOpacity>
           </View>

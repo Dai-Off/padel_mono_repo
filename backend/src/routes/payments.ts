@@ -11,6 +11,8 @@ import {
   STRIPE_META_TOURNAMENT_PURPOSE,
 } from '../services/tournamentsService';
 import { refreshBookingStatusAfterParticipantPayment } from '../lib/bookingPaymentSync';
+import { clubTimezoneOrDefault } from '../lib/clubTimezone';
+import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
 import {
   finalizeSeasonPassElitePurchase,
   getOrCreateSeasonPassRow,
@@ -18,18 +20,54 @@ import {
 } from '../services/seasonPassService';
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import {
-  insertGuestMatchPlayerAfterPayment,
+  assertGuestCanJoinMatch,
+  guestJoinMatchAfterPayment,
+  registerGuestJoinPaymentIntent,
   tryRepairPaidGuestMissingFromMatch,
 } from '../services/matchPlayerSlotService';
 import { sendMatchJoinConfirmationEmail } from '../lib/mailer';
+import {
+  finalizeStoreOrder,
+  normalizeCartItems,
+  STRIPE_META_STORE_ORDER,
+  validateAndPriceCart,
+} from '../lib/storeCheckout';
+import { validatePromoCode } from '../lib/promoCodes';
+
+/** Importe mínimo cobrable por Stripe en EUR (50 céntimos). */
+const STRIPE_MIN_EUR_CENTS = 50;
+
+/** Reserva de pista privada = pago del total; partido público abierto = 1/4 salvo pay_full explícito. */
+function resolvePayFullForNewMatch(opts: {
+  pay_full?: unknown;
+  visibility?: string | null;
+}): boolean {
+  if (
+    opts.pay_full === true ||
+    opts.pay_full === 'true' ||
+    opts.pay_full === 1 ||
+    opts.pay_full === '1'
+  ) {
+    return true;
+  }
+  return String(opts.visibility ?? '').toLowerCase() === 'private';
+}
+
+function parsePreferredSlotFromMeta(meta: Record<string, string | undefined>): number | null {
+  const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
+  return Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
+}
 import { zonedTimeToUtc } from './learningTimezone';
+import { buildStoreSalesForCashClosing, listClubStorePaymentEntries, paymentMethodFromStripeRef, type ClubPaymentLedgerEntry } from '../lib/inventorySale';
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import {
   assertCourtSlotAvailableForNewContentionMatch,
+  cancelDisplacedBookingsForOccupyingReservation,
   contentionStatusForNewMatchBooking,
   resolveCourtContention,
 } from '../lib/courtContentionService';
+import { evictDemoPlayersWhenRealJoins } from '../lib/demoPlayerEvict';
 import { parseEloLevel, parseEloRange } from '../lib/openMatchRules';
 
 /**
@@ -316,7 +354,8 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
     }
 
     const totalCents = Number(total_price_cents);
-    const isPayFull = pay_full === true || pay_full === 'true' || pay_full === 1;
+    const vis = visibility === 'public' ? 'public' : 'private';
+    const isPayFull = resolvePayFullForNewMatch({ pay_full, visibility: vis });
     const reservation_type = isPayFull ? 'standard' : 'open_match';
 
     const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
@@ -329,9 +368,30 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       res.status(400).json({ ok: false, error: slotConflict });
       return;
     }
+    // La reserva (inicio + duración) debe caber dentro del horario del club:
+    // p.ej. cerrando 21:00, no se puede empezar 20:00 un turno de 120 min.
+    const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+      courtId: court_id,
+      startAt: start_at,
+      endAt: end_at,
+      reservationType: reservation_type,
+    });
+    if (!hoursCheck.ok) {
+      res.status(400).json({ ok: false, error: hoursCheck.error });
+      return;
+    }
     const sch0 = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'mobile';
-    const { data: courtForClub } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
+    const { data: courtForClub } = await supabase
+      .from('courts')
+      .select('club_id, club:clubs(timezone)')
+      .eq('id', court_id)
+      .maybeSingle();
     const clubIdRule = (courtForClub as { club_id?: string } | null)?.club_id;
+    // El timezone de la reserva lo define el club de la pista, no el dispositivo.
+    const bookingTimezone = clubTimezoneOrDefault(
+      (courtForClub as { club?: { timezone?: string | null } } | null)?.club?.timezone
+        ?? (typeof timezone === 'string' ? timezone : null),
+    );
     if (clubIdRule) {
       const allowMap = await fetchAllowOnlineByType(supabase, clubIdRule);
       const gate = assertReservationTypeAllowedOnline(allowMap, reservation_type, sch0);
@@ -359,8 +419,8 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       end_at,
       total_price_cents: String(totalCents),
       payer_player_id: player.id,
-      timezone: timezone ?? 'Europe/Madrid',
-      visibility: visibility === 'public' ? 'public' : 'private',
+      timezone: bookingTimezone,
+      visibility: vis,
       competitive: '0',
       gender: gender ?? 'any',
       source_channel: sch0,
@@ -681,6 +741,228 @@ export async function createIntentForSeasonPassEliteHandler(req: Request, res: R
 }
 
 /**
+ * POST /payments/create-intent-for-store-order
+ * Body: { items: [{ product_id, quantity }] }
+ * Headers: Authorization: Bearer <token>
+ *
+ * Revalida el carrito y calcula el total en el servidor, crea el pedido en
+ * estado `pending_payment` y el PaymentIntent de Stripe. El stock se descuenta
+ * solo al confirmar el pago (confirm-client / metadata purpose=store_order).
+ */
+export async function createIntentForStoreOrderHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const normalized = normalizeCartItems(req.body?.items);
+  if (!normalized.ok) {
+    res.status(400).json({ ok: false, error: normalized.error });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const { data: player } = await supabase
+      .from('players')
+      .select('id, email, stripe_customer_id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+
+    if (!player) {
+      res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+      return;
+    }
+
+    const priced = await validateAndPriceCart(supabase, normalized.items);
+    if (!priced.ok) {
+      res.status(409).json({ ok: false, code: 'cart_invalid', error: priced.error });
+      return;
+    }
+
+    // Descuento por código promocional (opcional). El servidor recalcula el descuento.
+    let discountCents = 0;
+    let appliedPromoCode: string | null = null;
+    const rawPromo = req.body?.promo_code;
+    if (rawPromo != null && String(rawPromo).trim() !== '') {
+      const promo = await validatePromoCode(supabase, rawPromo, priced.subtotalCents);
+      if (!promo.ok) {
+        res.status(409).json({ ok: false, code: 'promo_invalid', error: promo.error });
+        return;
+      }
+      discountCents = promo.discountCents;
+      appliedPromoCode = promo.code;
+    }
+
+    const totalCents = priced.subtotalCents - discountCents;
+    if (totalCents < STRIPE_MIN_EUR_CENTS) {
+      res.status(409).json({
+        ok: false,
+        code: 'amount_too_low',
+        error: 'El total con descuento es inferior al mínimo cobrable',
+      });
+      return;
+    }
+
+    const { data: order, error: orderErr } = await supabase
+      .from('store_orders')
+      .insert({
+        player_id: player.id,
+        status: 'pending_payment',
+        subtotal_cents: priced.subtotalCents,
+        discount_cents: discountCents,
+        promo_code: appliedPromoCode,
+        currency: 'EUR',
+      })
+      .select('id')
+      .maybeSingle();
+
+    if (orderErr || !order) {
+      console.error('[payments/create-intent-for-store-order] order insert:', orderErr);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el pedido' });
+      return;
+    }
+
+    const itemsToInsert = priced.items.map((it) => ({
+      order_id: order.id,
+      product_id: it.product_id,
+      product_name: it.product_name,
+      product_brand: it.product_brand,
+      image_url: it.image_url,
+      unit_price_cents: it.unit_price_cents,
+      quantity: it.quantity,
+      line_total_cents: it.line_total_cents,
+    }));
+    const { error: itemsErr } = await supabase.from('store_order_items').insert(itemsToInsert);
+    if (itemsErr) {
+      console.error('[payments/create-intent-for-store-order] items insert:', itemsErr);
+      await supabase.from('store_orders').delete().eq('id', order.id);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el pedido' });
+      return;
+    }
+
+    const stripe = getStripe();
+    const metadata: Record<string, string> = {
+      payer_player_id: player.id as string,
+      purpose: STRIPE_META_STORE_ORDER,
+      store_order_id: String(order.id),
+    };
+    if (appliedPromoCode) {
+      metadata.promo_code = appliedPromoCode;
+      metadata.discount_cents = String(discountCents);
+    }
+
+    const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
+      amount: totalCents,
+      currency: 'eur',
+      automatic_payment_methods: { enabled: true },
+      setup_future_usage: 'off_session',
+      metadata,
+    };
+
+    if (player.stripe_customer_id) {
+      paymentIntentParams.customer = player.stripe_customer_id as string;
+    } else {
+      const customer = await stripe.customers.create({
+        email: player.email as string,
+        metadata: { player_id: player.id as string },
+      });
+      paymentIntentParams.customer = customer.id;
+      await supabase
+        .from('players')
+        .update({ stripe_customer_id: customer.id, updated_at: new Date().toISOString() })
+        .eq('id', player.id);
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
+
+    await supabase
+      .from('store_orders')
+      .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
+      .eq('id', order.id);
+
+    res.json({
+      ok: true,
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      amountCents: totalCents,
+      subtotalCents: priced.subtotalCents,
+      discountCents,
+      promoCode: appliedPromoCode,
+      orderId: order.id,
+    });
+  } catch (err) {
+    console.error('[payments/create-intent-for-store-order]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/preview-store-promo
+ * Body: { items: [{ product_id, quantity }], code }
+ * Headers: Authorization: Bearer <token>
+ *
+ * Previsualiza el descuento de un código promocional sobre el carrito actual,
+ * sin crear pedido ni PaymentIntent. El total real se recalcula al pagar.
+ */
+export async function previewStorePromoHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const normalized = normalizeCartItems(req.body?.items);
+  if (!normalized.ok) {
+    res.status(400).json({ ok: false, error: normalized.error });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const priced = await validateAndPriceCart(supabase, normalized.items);
+    if (!priced.ok) {
+      res.status(409).json({ ok: false, code: 'cart_invalid', error: priced.error });
+      return;
+    }
+
+    const promo = await validatePromoCode(supabase, req.body?.code, priced.subtotalCents);
+    if (!promo.ok) {
+      res.status(409).json({ ok: false, code: 'promo_invalid', error: promo.error });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      code: promo.code,
+      discountType: promo.discountType,
+      discountValue: promo.discountValue,
+      subtotalCents: priced.subtotalCents,
+      discountCents: promo.discountCents,
+      totalCents: priced.subtotalCents - promo.discountCents,
+    });
+  } catch (err) {
+    console.error('[payments/preview-store-promo]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
  * POST /payments/create-intent
  * Body:
  * - Join nuevo: { booking_id, slot_index } (sin crear participant antes de pagar)
@@ -735,6 +1017,7 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       return;
     }
     let amountCents = Math.ceil(Number(booking.total_price_cents ?? 0) / 4);
+    let guestJoinMatchId: string | null = null;
     if (participant_id) {
       const { data: participant, error: errParticipant } = await supabase
         .from('booking_participants')
@@ -788,25 +1071,24 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
         res.status(400).json({ ok: false, error: 'El partido no permite nuevas plazas' });
         return;
       }
-      const { data: inMatch } = await supabase
-        .from('match_players')
-        .select('id')
-        .eq('match_id', match.id)
-        .eq('player_id', player.id)
-        .maybeSingle();
-      if (inMatch) {
+      guestJoinMatchId = match.id;
+
+      const capacity = await assertGuestCanJoinMatch(
+        supabase,
+        match.id,
+        booking_id,
+        player.id,
+        slot_index,
+      );
+      if (!capacity.ok) {
+        res.status(409).json({ ok: false, code: capacity.code, error: capacity.error });
+        return;
+      }
+      if (capacity.code === 'already_in_match') {
         res.status(409).json({ ok: false, code: 'already_in_match', error: 'Ya estás en este partido' });
         return;
       }
-      const { data: takenSlots } = await supabase
-        .from('match_players')
-        .select('slot_index')
-        .eq('match_id', match.id);
-      const slotTaken = (takenSlots ?? []).some((row) => Number(row.slot_index) === Number(slot_index));
-      if (slotTaken) {
-        res.status(409).json({ ok: false, code: 'slot_taken', error: 'Esa plaza ya está ocupada' });
-        return;
-      }
+
       const { data: existingBookingParticipant } = await supabase
         .from('booking_participants')
         .select('id, payment_status')
@@ -885,6 +1167,28 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       return;
     }
 
+    if (guestJoinMatchId) {
+      const capacityBeforePay = await assertGuestCanJoinMatch(
+        supabase,
+        guestJoinMatchId,
+        booking_id,
+        player.id,
+        typeof slot_index === 'number' ? slot_index : null,
+      );
+      if (!capacityBeforePay.ok) {
+        res.status(409).json({
+          ok: false,
+          code: capacityBeforePay.code,
+          error: capacityBeforePay.error,
+        });
+        return;
+      }
+      if (capacityBeforePay.code === 'already_in_match') {
+        res.status(409).json({ ok: false, code: 'already_in_match', error: 'Ya estás en este partido' });
+        return;
+      }
+    }
+
     const metadata: Record<string, string> = {
       booking_id,
       payer_player_id: player.id,
@@ -916,16 +1220,41 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
 
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
 
-    const { error: txInsertErr } = await supabase.from('payment_transactions').insert({
-      booking_id,
-      payer_player_id: player.id,
-      amount_cents: amountCents,
-      currency: booking.currency ?? 'EUR',
-      stripe_payment_intent_id: paymentIntent.id,
-      status: 'requires_action',
-    });
-    if (txInsertErr) {
-      console.error('[payments/create-intent] payment_transactions insert:', txInsertErr);
+    if (guestJoinMatchId) {
+      const registered = await registerGuestJoinPaymentIntent(supabase, {
+        bookingId: booking_id,
+        matchId: guestJoinMatchId,
+        playerId: player.id,
+        stripePaymentIntentId: paymentIntent.id,
+        amountCents,
+        currency: booking.currency ?? 'EUR',
+        slotIndex: typeof slot_index === 'number' ? slot_index : null,
+      });
+      if (!registered.ok) {
+        try {
+          await stripe.paymentIntents.cancel(paymentIntent.id);
+        } catch (cancelErr) {
+          console.warn('[payments/create-intent] cancel PI after capacity fail:', cancelErr);
+        }
+        res.status(409).json({
+          ok: false,
+          code: registered.code,
+          error: registered.error,
+        });
+        return;
+      }
+    } else {
+      const { error: txInsertErr } = await supabase.from('payment_transactions').insert({
+        booking_id,
+        payer_player_id: player.id,
+        amount_cents: amountCents,
+        currency: booking.currency ?? 'EUR',
+        stripe_payment_intent_id: paymentIntent.id,
+        status: 'requires_action',
+      });
+      if (txInsertErr) {
+        console.error('[payments/create-intent] payment_transactions insert:', txInsertErr);
+      }
     }
 
     res.json({
@@ -1111,47 +1440,37 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
     }
 
     if (participant?.role === 'guest') {
-      const { data: match } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('booking_id', booking_id)
-        .maybeSingle();
-      if (match) {
-        const { data: existing } = await supabase
-          .from('match_players')
-          .select('id')
-          .eq('match_id', match.id)
-          .eq('player_id', participant.player_id)
-          .maybeSingle();
-        if (!existing) {
-          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
-          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
-          const ins = await insertGuestMatchPlayerAfterPayment(
-            supabase,
-            match.id,
-            participant.player_id,
-            preferred
-          );
-          if (!ins.ok) {
-            console.error('[payments/webhook] match_players guest insert failed:', ins.error, ins.code, {
-              match_id: match.id,
-              player_id: participant.player_id,
-            });
-          } else {
-            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
-            if (ins.reassigned) {
-              console.warn('[payments/webhook] slot reassigned (race):', {
-                match_id: match.id,
-                player_id: participant.player_id,
-                used: ins.slot_index,
-              });
-            }
-          }
+      const join = await guestJoinMatchAfterPayment(
+        supabase,
+        booking_id,
+        participant.player_id,
+        parsePreferredSlotFromMeta(meta),
+      );
+      if (!join.ok) {
+        console.error('[payments/webhook] guest join failed after payment:', join.error, join.code, {
+          booking_id,
+          player_id: participant.player_id,
+        });
+      } else {
+        notifyMatchJoinByEmail(supabase, join.match_id, participant.player_id);
+        if (join.reassigned) {
+          console.warn('[payments/webhook] slot reassigned (race):', {
+            match_id: join.match_id,
+            player_id: participant.player_id,
+            used: join.slot_index,
+          });
         }
       }
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+    if (participant?.player_id) {
+      try {
+        await evictDemoPlayersWhenRealJoins(supabase, booking_id, participant.player_id);
+      } catch (evictErr) {
+        console.error('[payments/webhook] evictDemoPlayers:', (evictErr as Error).message);
+      }
+    }
     try {
       await resolveCourtContention(supabase, booking_id);
     } catch (contentionErr) {
@@ -1598,7 +1917,7 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
       txByBookingPlayer.set(bid, bookingMap);
     }
 
-    const participantsByBooking = new Map<string, Array<Record<string, unknown>>>();
+    const participantsByBooking = new Map<string, Array<ClubPaymentLedgerEntry['participants'][number]>>();
     if (bookingIds.length > 0) {
       const { data: bpRows, error: bpError } = await supabase
         .from('booking_participants')
@@ -1635,14 +1954,14 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
           const resolvedWalletCents = bpPaidCents > 0 ? Number(bp.wallet_amount_cents ?? 0) : 0;
           // For app (Stripe) payments, method is null in BP but it's always 'card'
           const resolvedMethod = (bp.payment_method as string | null) ?? txInfo?.method ?? (bp.payment_status === 'paid' ? 'card' : null);
-          const item = {
-            player_id: bp.player_id ?? null,
-            first_name: player?.first_name ?? null,
-            last_name: player?.last_name ?? null,
-            email: player?.email ?? null,
-            role: bp.role ?? null,
-            share_amount_cents: bp.share_amount_cents ?? 0,
-            payment_status: bp.payment_status ?? null,
+          const item: ClubPaymentLedgerEntry['participants'][number] = {
+            player_id: bp.player_id != null ? String(bp.player_id) : null,
+            first_name: player?.first_name != null ? String(player.first_name) : null,
+            last_name: player?.last_name != null ? String(player.last_name) : null,
+            email: player?.email != null ? String(player.email) : null,
+            role: bp.role != null ? String(bp.role) : null,
+            share_amount_cents: Number(bp.share_amount_cents ?? 0),
+            payment_status: bp.payment_status != null ? String(bp.payment_status) : null,
             payment_method: resolvedMethod,
             paid_amount_cents: resolvedPaidCents,
             wallet_amount_cents: resolvedWalletCents,
@@ -1654,7 +1973,12 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
       }
     }
 
-    const transactions = (rows ?? []).map((t: Record<string, unknown>) => {
+    const transactions = (rows ?? [])
+      .filter((t: Record<string, unknown>) => {
+        const stripeRef = String(t.stripe_payment_intent_id ?? '');
+        return !stripeRef.startsWith('STORE_SALE_');
+      })
+      .map((t: Record<string, unknown>): ClubPaymentLedgerEntry => {
       const rawB = t.bookings;
       const b = (Array.isArray(rawB) ? rawB[0] : rawB) as Record<string, unknown> | null;
       const rawCourt = b?.courts;
@@ -1664,26 +1988,44 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
       const rawPayer = t.players;
       const payer = (Array.isArray(rawPayer) ? rawPayer[0] : rawPayer) as Record<string, unknown> | null;
       const bid = typeof t.booking_id === 'string' ? t.booking_id : null;
+      const stripeRef = String(t.stripe_payment_intent_id ?? '');
+      const paymentMethod = paymentMethodFromStripeRef(stripeRef);
+      const courtName = court?.name ? String(court.name) : null;
+      const startAt = (b?.start_at as string | null) ?? null;
+      const concept = courtName && startAt
+        ? `Turno · ${courtName}`
+        : bid
+          ? `Reserva ${bid.slice(0, 8)}`
+          : 'Pago';
       return {
-        id: t.id,
-        amount_cents: t.amount_cents,
-        currency: t.currency,
-        status: t.status,
-        created_at: t.created_at,
-        booking_id: t.booking_id,
-        start_at: b?.start_at ?? null,
-        end_at: b?.end_at ?? null,
-        court_name: court?.name ?? null,
-        club_name: club?.name ?? null,
-        city: club?.city ?? null,
-        payer_first_name: payer?.first_name ?? null,
-        payer_last_name: payer?.last_name ?? null,
-        payer_email: payer?.email ?? null,
+        id: String(t.id ?? ''),
+        amount_cents: Number(t.amount_cents ?? 0),
+        currency: String(t.currency ?? ''),
+        status: String(t.status ?? ''),
+        created_at: String(t.created_at ?? ''),
+        booking_id: bid,
+        start_at: startAt,
+        end_at: (b?.end_at as string | null) ?? null,
+        court_name: courtName,
+        club_name: club?.name != null ? String(club.name) : null,
+        city: club?.city != null ? String(club.city) : null,
+        payer_first_name: payer?.first_name != null ? String(payer.first_name) : null,
+        payer_last_name: payer?.last_name != null ? String(payer.last_name) : null,
+        payer_email: payer?.email != null ? String(payer.email) : null,
+        payer_player_id: t.payer_player_id != null ? String(t.payer_player_id) : null,
+        concept,
+        source: 'booking' as const,
+        payment_method: paymentMethod,
         participants: bid ? participantsByBooking.get(bid) ?? [] : [],
       };
     });
 
-    res.json({ ok: true, transactions });
+    const storeEntries = await listClubStorePaymentEntries(supabase, clubId, limit);
+    const merged: ClubPaymentLedgerEntry[] = [...transactions, ...storeEntries]
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .slice(0, limit);
+
+    res.json({ ok: true, transactions: merged });
   } catch (err) {
     console.error('[payments/club-transactions]', err);
     res.status(500).json({ ok: false, error: (err as Error).message });
@@ -1888,8 +2230,6 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
     const byBooking = new Map<string, BookingExpected>();
     let systemCashTotalCents = 0;
     let systemCardTotalCents = 0;
-    let storeSalesCashCents = 0;
-    let storeSalesCardCents = 0;
 
     const closingCutoffMs = lastClosedAtIso ? new Date(lastClosedAtIso).getTime() : null;
     const filteredRows = ((rows ?? []) as Record<string, unknown>[]).filter((row) => {
@@ -1913,21 +2253,15 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       const court = (Array.isArray(rawCourts) ? rawCourts[0] : rawCourts) as Record<string, unknown> | null;
 
       const stripeRef = r.stripe_payment_intent_id as string | null;
-      const txStatus = String((r as { status?: string }).status ?? '');
       const isStoreSaleTx = typeof stripeRef === 'string' && stripeRef.startsWith('STORE_SALE_');
-      if (isStoreSaleTx && txStatus === 'refunded') continue;
+      if (isStoreSaleTx) continue;
+
       const sourceChannel = (b.source_channel as string | null) ?? null;
       const isCash =
         (typeof stripeRef === 'string' && stripeRef.startsWith('CASH_')) ||
-        (typeof stripeRef === 'string' && stripeRef.startsWith('STORE_SALE_cash_')) ||
         sourceChannel === 'manual';
 
       const amount = typeof r.amount_cents === 'number' ? r.amount_cents : 0;
-      if (isStoreSaleTx) {
-        if (isCash) storeSalesCashCents += amount;
-        else storeSalesCardCents += amount;
-        continue;
-      }
 
       const cur = byBooking.get(bookingId) ?? {
         booking_id: bookingId,
@@ -1950,61 +2284,15 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       systemCardTotalCents += b.card_paid_cents;
     }
 
-    const storeSaleLines: Array<{
-      movement_id: string;
-      sale_id: string;
-      name: string;
-      payment_method: string;
-      amount_cents: number;
-      movement_at: string | null;
-      booking_id: string | null;
-      player_id: string | null;
-    }> = [];
-
-    const { data: inventorySaleMovements, error: saleMovementsErr } = await supabase
-      .from('inventory_movements')
-      .select('id, reason, movement_at, created_at')
-      .eq('club_id', clubId)
-      .eq('movement_type', 'out')
-      .gte('movement_at', startUtc.toISOString())
-      .lt('movement_at', endUtc.toISOString())
-      .limit(2000);
-    if (!saleMovementsErr && Array.isArray(inventorySaleMovements)) {
-      for (const movement of inventorySaleMovements) {
-        const reason = typeof (movement as any).reason === 'string' ? (movement as any).reason : '';
-        if (!reason.startsWith('SALE|') || reason.startsWith('VOID|')) continue;
-        const movementAtSource = (movement as any).movement_at ?? (movement as any).created_at;
-        if (closingCutoffMs != null && typeof movementAtSource === 'string') {
-          const movementMs = new Date(movementAtSource).getTime();
-          if (Number.isFinite(movementMs) && movementMs <= closingCutoffMs) continue;
-        }
-        const parts = reason.split('|');
-        const saleId = String(parts[1] ?? '');
-        const method = String(parts[2] ?? '');
-        const amountCents = Number(parts[3] ?? 0);
-        if (!Number.isFinite(amountCents) || amountCents <= 0) continue;
-        const name = String(parts[4] ?? 'Producto').replace(/\|/g, ' ');
-        let bookingId: string | null = null;
-        let playerId: string | null = null;
-        for (const extra of parts.slice(5)) {
-          if (extra.startsWith('booking:')) bookingId = extra.slice('booking:'.length) || null;
-          if (extra.startsWith('player:')) playerId = extra.slice('player:'.length) || null;
-        }
-        const normalizedMethod = method.includes('cash') ? 'cash' : method.includes('card') ? 'card' : method.includes('wallet') ? 'wallet' : method;
-        if (normalizedMethod === 'cash') storeSalesCashCents += Math.trunc(amountCents);
-        if (normalizedMethod === 'card') storeSalesCardCents += Math.trunc(amountCents);
-        storeSaleLines.push({
-          movement_id: String((movement as any).id ?? ''),
-          sale_id: saleId,
-          name,
-          payment_method: normalizedMethod,
-          amount_cents: Math.trunc(amountCents),
-          movement_at: typeof movementAtSource === 'string' ? movementAtSource : null,
-          booking_id: bookingId && bookingId !== 'none' ? bookingId : null,
-          player_id: playerId || null,
-        });
-      }
-    }
+    const storeSales = await buildStoreSalesForCashClosing(supabase, {
+      clubId,
+      startUtc,
+      endUtc,
+      closingCutoffMs,
+    });
+    const storeSalesCashCents = storeSales.cashCents;
+    const storeSalesCardCents = storeSales.cardCents;
+    const storeSaleLines = storeSales.lines;
 
     systemCashTotalCents += storeSalesCashCents;
     systemCardTotalCents += storeSalesCardCents;
@@ -2095,7 +2383,7 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       openings: openingsForDay,
       cash_movements: cashMovements,
       bookings: Array.from(byBooking.values()).sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? '')),
-      store_sale_lines: storeSaleLines.sort((a, b) => (a.movement_at ?? '').localeCompare(b.movement_at ?? '')),
+      store_sale_lines: storeSaleLines,
     });
   } catch (err) {
     console.error('[payments/cash-closing/expected]', err);
@@ -3196,11 +3484,12 @@ async function processNewMatchPayment(
   const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
     ? meta.source_channel
     : 'mobile';
+  const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
   const reservation_type =
-    meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
-      ? meta.reservation_type
-      : meta.pay_full === '1'
-        ? 'standard'
+    isPayFull
+      ? 'standard'
+      : meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+        ? meta.reservation_type
         : 'open_match';
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
@@ -3233,7 +3522,6 @@ async function processNewMatchPayment(
     }
   }
 
-  const isPayFull = meta.pay_full === '1';
   const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
   const contentionStatus = contentionStatusForNewMatchBooking(reservation_type, isPayFull);
 
@@ -3305,6 +3593,20 @@ async function processNewMatchPayment(
     stripe_payment_intent_id: pi.id,
     status: 'succeeded',
   });
+
+  if (isPayFull) {
+    try {
+      await cancelDisplacedBookingsForOccupyingReservation(
+        supabase,
+        booking.id,
+        court_id,
+        start_at,
+        end_at,
+      );
+    } catch (displaceErr) {
+      console.error('[payments/webhook] cancelDisplacedBookings:', displaceErr);
+    }
+  }
 }
 
 /**
@@ -3398,12 +3700,12 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
 
-      const isPayFull = meta.pay_full === '1';
+      const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
       const reservation_type =
-        meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
-          ? meta.reservation_type
-          : isPayFull
-            ? 'standard'
+        isPayFull
+          ? 'standard'
+          : meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+            ? meta.reservation_type
             : 'open_match';
 
       const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
@@ -3514,6 +3816,20 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         status: 'succeeded',
       });
 
+      if (isPayFull) {
+        try {
+          await cancelDisplacedBookingsForOccupyingReservation(
+            supabase,
+            booking.id,
+            court_id,
+            start_at,
+            end_at,
+          );
+        } catch (displaceErr) {
+          console.error('[payments/confirm-client] cancelDisplacedBookings:', displaceErr);
+        }
+      }
+
       res.json({ ok: true, match, booking: { id: booking.id } });
       return;
     }
@@ -3565,6 +3881,24 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
       res.json({ ok: true, season_pass: { has_elite: true } });
+      return;
+    }
+
+    // Pedido de tienda (mobile-app)
+    if (meta.purpose === STRIPE_META_STORE_ORDER && payer_player_id) {
+      if (player.id !== String(payer_player_id)) {
+        res.status(403).json({ ok: false, error: 'No eres el comprador de este pedido' });
+        return;
+      }
+      const r = await finalizeStoreOrder({
+        paymentIntentId: payment_intent_id,
+        playerId: String(payer_player_id),
+      });
+      if (!r.ok) {
+        res.status(400).json({ ok: false, error: r.error ?? 'No se pudo completar el pedido' });
+        return;
+      }
+      res.json({ ok: true, store_order: { id: r.orderId } });
       return;
     }
 
@@ -3638,47 +3972,50 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
     }
 
     // Si es guest (join): añadir a match_players tras el pago.
-    // Las validaciones de ELO/onboarding ya corrieron en prepare-join; re-chequear aquí
-    // dejaría al jugador como pagado en booking_participants pero sin fila en match_players.
     if (participant?.role === 'guest') {
-      const { data: match } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('booking_id', booking_id)
-        .maybeSingle();
-      if (match) {
-        const { data: existing } = await supabase
-          .from('match_players')
-          .select('id')
-          .eq('match_id', match.id)
-          .eq('player_id', participant.player_id)
-          .maybeSingle();
-        if (!existing) {
-          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
-          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
-          const ins = await insertGuestMatchPlayerAfterPayment(
-            supabase,
-            match.id,
-            participant.player_id,
-            preferred
-          );
-          if (!ins.ok) {
-            console.error('[payments/confirm-client] match_players guest insert failed:', ins.error, ins.code, {
-              match_id: match.id,
-              player_id: participant.player_id,
-            });
-          } else {
-            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
-            if (ins.reassigned) {
-              console.warn('[payments/confirm-client] slot reassigned (race):', {
-                match_id: match.id,
-                player_id: participant.player_id,
-                used: ins.slot_index,
-              });
-            }
-          }
-        }
+      const join = await guestJoinMatchAfterPayment(
+        supabase,
+        booking_id,
+        participant.player_id,
+        parsePreferredSlotFromMeta(meta),
+      );
+      if (!join.ok) {
+        console.error('[payments/confirm-client] guest join failed after payment:', join.error, join.code, {
+          booking_id,
+          player_id: participant.player_id,
+        });
+        res.status(409).json({
+          ok: false,
+          code: join.code === 'match_full' ? 'match_full' : 'join_failed',
+          payment_succeeded: true,
+          error:
+            join.code === 'match_full'
+              ? 'El partido se completó mientras pagabas. Tu pago quedó registrado; contacta al club para el reembolso.'
+              : 'Tu pago se registró pero no pudimos asignarte la plaza. Cierra y vuelve a abrir el partido.',
+        });
+        return;
       }
+      notifyMatchJoinByEmail(supabase, join.match_id, participant.player_id);
+      if (join.reassigned) {
+        console.warn('[payments/confirm-client] slot reassigned (race):', {
+          match_id: join.match_id,
+          player_id: participant.player_id,
+          used: join.slot_index,
+        });
+      }
+
+      await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+      try {
+        await resolveCourtContention(supabase, booking_id);
+      } catch (contentionErr) {
+        console.error('[payments/confirm-client] resolveCourtContention:', contentionErr);
+      }
+
+      res.json({
+        ok: true,
+        join: { slot_index: join.slot_index, reassigned: join.reassigned, match_id: join.match_id },
+      });
+      return;
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
@@ -3951,34 +4288,16 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
     }
 
     if (chosenParticipant.role === 'guest') {
-      const { data: match } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('booking_id', booking.id)
-        .maybeSingle();
-
-      if (match) {
-        const { data: existing } = await supabase
-          .from('match_players')
-          .select('id')
-          .eq('match_id', match.id)
-          .eq('player_id', chosenParticipant.player_id)
-          .maybeSingle();
-
-        if (!existing) {
-          const { error: insErr } = await supabase.from('match_players').insert({
-            match_id: match.id,
-            player_id: chosenParticipant.player_id,
-            team: 'A',
-            invite_status: 'accepted',
-            slot_index: null,
-          });
-          if (!insErr) {
-            notifyMatchJoinByEmail(supabase, match.id, chosenParticipant.player_id);
-          }
-        } else {
-          notifyMatchJoinByEmail(supabase, match.id, chosenParticipant.player_id);
-        }
+      const join = await guestJoinMatchAfterPayment(
+        supabase,
+        booking.id,
+        chosenParticipant.player_id,
+        null,
+      );
+      if (join.ok) {
+        notifyMatchJoinByEmail(supabase, join.match_id, chosenParticipant.player_id);
+      } else {
+        console.error('[payments/simulate-turn-payment] guest join failed:', join.error, join.code);
       }
     }
 
@@ -4103,12 +4422,12 @@ export async function simulateBookingPaymentHandler(req: Request, res: Response)
       return;
     }
 
-    const isPayFull = meta.pay_full === '1';
+    const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
     const reservation_type =
-      meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
-        ? meta.reservation_type
-        : isPayFull
-          ? 'standard'
+      isPayFull
+        ? 'standard'
+        : meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+          ? meta.reservation_type
           : 'open_match';
 
     const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
@@ -4209,6 +4528,20 @@ export async function simulateBookingPaymentHandler(req: Request, res: Response)
       stripe_payment_intent_id: pi.id,
       status: 'succeeded',
     });
+
+    if (isPayFull) {
+      try {
+        await cancelDisplacedBookingsForOccupyingReservation(
+          supabase,
+          booking.id,
+          court_id,
+          start_at,
+          end_at,
+        );
+      } catch (displaceErr) {
+        console.error('[payments/simulate-booking-payment] cancelDisplacedBookings:', displaceErr);
+      }
+    }
 
     res.json({ ok: true, match, booking: { id: booking.id } });
   } catch (err) {
@@ -4397,29 +4730,34 @@ export async function simulateJoinPaymentHandler(req: Request, res: Response): P
     }
 
     if (participant?.role === 'guest') {
-      const { data: match } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('booking_id', booking_id)
-        .maybeSingle();
-      if (match) {
-        const { data: existing } = await supabase
-          .from('match_players')
-          .select('id')
-          .eq('match_id', match.id)
-          .eq('player_id', participant.player_id)
-          .maybeSingle();
-        if (!existing) {
-          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
-          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
-          const ins = await insertGuestMatchPlayerAfterPayment(supabase, match.id, participant.player_id, preferred);
-          if (!ins.ok) {
-            console.error('[payments/simulate-join-payment] match_players insert failed:', ins.error, ins.code);
-          } else {
-            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
-          }
-        }
+      const join = await guestJoinMatchAfterPayment(
+        supabase,
+        booking_id,
+        participant.player_id,
+        parsePreferredSlotFromMeta(meta),
+      );
+      if (!join.ok) {
+        console.error('[payments/simulate-join-payment] guest join failed:', join.error, join.code);
+        res.status(409).json({
+          ok: false,
+          code: join.code === 'match_full' ? 'match_full' : 'join_failed',
+          payment_succeeded: true,
+          error: join.error,
+        });
+        return;
       }
+      notifyMatchJoinByEmail(supabase, join.match_id, participant.player_id);
+      await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+      try {
+        await resolveCourtContention(supabase, booking_id);
+      } catch (contentionErr) {
+        console.error('[payments/simulate-join-payment] resolveCourtContention:', contentionErr);
+      }
+      res.json({
+        ok: true,
+        join: { slot_index: join.slot_index, reassigned: join.reassigned, match_id: join.match_id },
+      });
+      return;
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);

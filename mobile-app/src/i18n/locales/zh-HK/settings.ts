@@ -1,0 +1,38 @@
+import type { SettingsTranslationKeys } from '../../sections/settings';
+
+export const settings: SettingsTranslationKeys = {
+  title: '設定',
+  languageSection: '語言',
+  languageAppLabel: '應用程式語言',
+  languageSelectA11y: '選擇語言',
+  languageHint: '選擇應用程式顯示語言',
+  languageEs: '🇪🇸 Español',
+  languageZhHk: '🇭🇰 繁體中文',
+  configSection: '設定',
+  privacy: '私隱',
+  notifications: '通知',
+  security: '安全',
+  dangerZone: '危險區域',
+  deleteAccount: '刪除你的帳戶',
+  deleteAccountA11y: '刪除你的帳戶',
+  deleteAccountBody:
+    '你的帳戶將被停用；在寬限期後，個人資料會被匿名化。交易及稅務紀錄會保留，但不會包含可識別資料。',
+  deleteAccountConfirmTitle: '確定刪除帳戶？',
+  deleteAccountConfirmBody:
+    '你的帳戶將進入待刪除狀態。在期限前再次登入即可取消。',
+  deleteAccountConfirmButton: '是的，刪除帳戶',
+  deleteAccountCancelButton: '取消',
+  deleteAccountSuccess: '已提交申請',
+  deleteAccountSuccessBody: '你的帳戶將在 {days} 天後刪除。如改變主意，請在期限前再次登入。',
+  deleteAccountError: '無法處理申請，請稍後再試。',
+  notifMessages: '訊息',
+  notifNewMatches: '新球局',
+  notifCompetitions: '競賽',
+  notifClasses: '課程',
+  privacyIntro1: '控制你分享的資訊及 WeMatch 如何使用你的活動數據。',
+  privacyIntro2: '你可於個人檔案的「偏好設定」管理收藏球會、打球偏好及可見度。',
+  privacyViewPolicy: '查看完整私隱政策',
+  privacyViewPolicyA11y: '查看完整私隱政策',
+  lastUpdated: '最後更新：{date}',
+  contactFallback: '聯絡',
+};

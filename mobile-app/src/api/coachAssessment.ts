@@ -1,4 +1,6 @@
 import { API_URL } from '../config';
+import { withLangQuery } from './backendLang';
+import type { AppLocale } from '../i18n/constants';
 
 export type CoachAssessment = {
   id: string;
@@ -38,10 +40,13 @@ type AssessmentResponse = {
 /**
  * Obtiene la evaluación del Coach IA del jugador actual.
  */
-export async function fetchMyCoachAssessment(token: string | null | undefined): Promise<CoachAssessment | null> {
+export async function fetchMyCoachAssessment(
+  token: string | null | undefined,
+  locale?: AppLocale,
+): Promise<CoachAssessment | null> {
   if (!token) return null;
   try {
-    const res = await fetch(`${API_URL}/coach-assessment/me`, {
+    const res = await fetch(withLangQuery(`${API_URL}/coach-assessment/me`, locale), {
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = (await res.json()) as AssessmentResponse;
@@ -58,11 +63,12 @@ export async function fetchMyCoachAssessment(token: string | null | undefined): 
  */
 export async function submitCoachAssessment(
   token: string | null | undefined,
-  answers: { question_index: number; selected_option: number }[]
+  answers: { question_index: number; selected_option: number }[],
+  locale?: AppLocale,
 ): Promise<CoachAssessment | null> {
   if (!token) return null;
   try {
-    const res = await fetch(`${API_URL}/coach-assessment`, {
+    const res = await fetch(withLangQuery(`${API_URL}/coach-assessment`, locale), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -275,7 +275,7 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
             {reservation.totalPrice != null && reservation.totalPrice > 0 && (() => {
                 const totalCents = Math.round(reservation.totalPrice! * 100);
                 const paidCents = reservation.totalPaidCents ?? 0;
-                const isFullyPaid = paidCents >= totalCents;
+                const isFullyPaid = paidCents >= totalCents || reservation.status === 'confirmed' || reservation.status === 'flat_rate';
                 const size = isCompact ? 8 : isSmallZoom ? 20 : 12;
                 return (
                     <div

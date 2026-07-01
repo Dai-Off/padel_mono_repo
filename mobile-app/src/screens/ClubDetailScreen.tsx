@@ -21,12 +21,19 @@ import { Ionicons } from "@expo/vector-icons";
 import type { SearchCourtResult } from "../api/search";
 import { fetchSearchCourts } from "../api/search";
 import { fetchAvailableSlots } from "../api/availability";
-import { fetchClubById } from "../api/clubs";
-import { fetchPublicClubReviews, type PublicClubReview } from "../api/clubReviews";
+import { fetchClubById, fetchClubPublicInfo } from "../api/clubs";
+import { fetchPublicClubReviews } from "../api/clubReviews";
 import { fetchCourtsByClubId, type Court } from "../api/courts";
 import { fetchMatches, type MatchEnriched } from "../api/matches";
 import { mapMatchToPartido } from "../api/mapMatchToPartido";
-import { clubLocalDateTimeToUtcIso } from "../lib/clubTimeZone";
+import { resolveSlotStartEndUtc } from "../lib/bookingSlotTime";
+import {
+  addDaysToClubKey,
+  clubIanaTimeZone,
+  clubLocalDateTimeToUtcIso,
+  dayKeyInClubTz,
+  setClubTimeZone,
+} from "../lib/clubTimeZone";
 import {
   createIntentForNewMatch,
   confirmPaymentFromClient,
@@ -42,10 +49,12 @@ import {
 import type { BookingConfirmationData } from "./BookingConfirmationScreen";
 import { PrivateReservationModal } from "../components/partido/PrivateReservationModal";
 import type { PartidoItem } from "./PartidosScreen";
+import { formatLocale, useTranslation, type AppLocale } from "../i18n";
+import { es } from "../i18n/es";
+import { zhHK } from "../i18n/zh-HK";
 import { theme } from "../theme";
 import { filterSlotsStartingAfterNow } from "../domain/localSlotAvailability";
 import { getMatchBooking } from "../domain/matchLifecycle";
-import { toDateStringLocal as localCalendarYmd } from "../utils/dateLocal";
 import { useSlotPrice } from "../hooks/useSlotPrice";
 
 const DURATION_MIN = 60;
@@ -57,59 +66,69 @@ type ClubDetailScreenProps = {
   onPartidoPress?: (partido: PartidoItem) => void;
 };
 
-const TABS = [
-  "Home",
-  "Reservar",
-  "Partidos abiertos",
-  "Competiciones",
-] as const;
-type TabId = (typeof TABS)[number];
+const TAB_IDS = ["home", "book", "openMatches", "competitions"] as const;
+type TabId = (typeof TAB_IDS)[number];
 
-const DAYS = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"];
-const MONTHS = [
-  "Ene",
-  "Feb",
-  "Mar",
-  "Abr",
-  "May",
-  "Jun",
-  "Jul",
-  "Ago",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dic",
-];
+type TranslateFn = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
 
-function getCerramientoLabel(indoor: boolean): string {
-  return indoor ? "Indoor" : "Exterior";
+function getLocaleBundle(locale: AppLocale) {
+  return locale === "zh-HK" ? zhHK : es;
 }
 
-function getParedesLabel(glassType: string): string {
-  return glassType === "panoramic" ? "Cristal" : "Muro";
+function bookTabLabel(t: TranslateFn): string {
+  return t("common.bookAtTime", { time: "" })
+    .replace(/\s*(a las|\{time\})\s*$/i, "")
+    .trim();
+}
+
+function getTabLabel(tab: TabId, t: TranslateFn): string {
+  switch (tab) {
+    case "home":
+      return "Home";
+    case "book":
+      return bookTabLabel(t);
+    case "openMatches":
+      return t("partidos.detailOpenMatch");
+    case "competitions":
+      return t("common.comingSoon");
+  }
+}
+
+function getCerramientoLabel(indoor: boolean, t: TranslateFn): string {
+  return indoor ? t("common.indoor") : t("common.outdoor");
+}
+
+function getParedesLabel(glassType: string, t: TranslateFn): string {
+  return glassType === "panoramic"
+    ? t("common.wallCristal")
+    : t("common.wallMuro");
 }
 
 /** Formatea weekly_schedule (jsonb) a texto legible. Si está vacío devuelve null. */
 function formatWeeklySchedule(
   ws: Record<string, unknown> | null | undefined,
+  t: TranslateFn,
 ): string | null {
   if (!ws || typeof ws !== "object" || Object.keys(ws).length === 0)
     return null;
   const DAY_NAMES: Record<string, string> = {
-    "0": "Dom",
-    "1": "Lun",
-    "2": "Mar",
-    "3": "Mié",
-    "4": "Jue",
-    "5": "Vie",
-    "6": "Sáb",
-    mon: "Lun",
-    tue: "Mar",
-    wed: "Mié",
-    thu: "Jue",
-    fri: "Vie",
-    sat: "Sáb",
-    sun: "Dom",
+    "0": t("common.weekdaySun"),
+    "1": t("common.weekdayMon"),
+    "2": t("common.weekdayTue"),
+    "3": t("common.weekdayWed"),
+    "4": t("common.weekdayThu"),
+    "5": t("common.weekdayFri"),
+    "6": t("common.weekdaySat"),
+    mon: t("common.weekdayMon"),
+    tue: t("common.weekdayTue"),
+    wed: t("common.weekdayWed"),
+    thu: t("common.weekdayThu"),
+    fri: t("common.weekdayFri"),
+    sat: t("common.weekdaySat"),
+    sun: t("common.weekdaySun"),
   };
   const lines: string[] = [];
   const keys = Object.keys(ws).sort();
@@ -130,54 +149,72 @@ function formatWeeklySchedule(
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-function getNextDays(count: number) {
-  const out: { day: number; dayName: string; month: string; date: Date }[] = [];
-  const today = new Date();
+function getNextClubDays(
+  count: number,
+  days: readonly string[],
+  months: readonly string[],
+  timeZone: string,
+) {
+  const out: { day: number; dayName: string; month: string; dateStr: string }[] = [];
+  const todayKey = dayKeyInClubTz(new Date());
+  const weekdayToIndex: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
   for (let i = 0; i < count; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
+    const dateStr = addDaysToClubKey(todayKey, i);
+    const ref = new Date(clubLocalDateTimeToUtcIso(dateStr, "12:00", timeZone));
+    const weekdayShort = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+    }).format(ref);
+    const dow = weekdayToIndex[weekdayShort] ?? 0;
     out.push({
-      day: d.getDate(),
-      dayName: DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1],
-      month: MONTHS[d.getMonth()],
-      date: d,
+      day: parseInt(dateStr.slice(8, 10), 10),
+      dayName: days[dow === 0 ? 6 : dow - 1] ?? "",
+      month: months[parseInt(dateStr.slice(5, 7), 10) - 1] ?? "",
+      dateStr,
     });
   }
   return out;
 }
 
+function formatDateTimeForConfirmation(
+  dateStr: string,
+  time: string,
+  days: readonly string[],
+  months: readonly string[],
+  timeZone: string,
+): string {
+  const ref = new Date(clubLocalDateTimeToUtcIso(dateStr, "12:00", timeZone));
+  const weekdayShort = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+  }).format(ref);
+  const weekdayToIndex: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  const dow = weekdayToIndex[weekdayShort] ?? 0;
+  const dayName = days[dow === 0 ? 6 : dow - 1] ?? "";
+  const dayNum = parseInt(dateStr.slice(8, 10), 10);
+  const month = months[parseInt(dateStr.slice(5, 7), 10) - 1] ?? "";
+  return `${dayName}, ${dayNum} ${month} · ${time}`;
+}
+
 function matchBelongsToClub(match: MatchEnriched, clubId: string): boolean {
   const clubIdFromMatch = getMatchBooking(match)?.courts?.club_id;
   return clubIdFromMatch != null && clubIdFromMatch === clubId;
-}
-
-function formatDateTimeForConfirmation(date: Date, time: string): string {
-  const dayNames = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"];
-  const months = [
-    "Ene",
-    "Feb",
-    "Mar",
-    "Abr",
-    "May",
-    "Jun",
-    "Jul",
-    "Ago",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dic",
-  ];
-  const d = new Date(date);
-  d.setHours(
-    parseInt(time.slice(0, 2), 10),
-    parseInt(time.slice(3, 5) || "0", 10),
-    0,
-    0,
-  );
-  const dayName = dayNames[d.getDay()] ?? "Día";
-  const dayNum = d.getDate();
-  const month = months[d.getMonth()] ?? "";
-  return `${dayName}, ${dayNum} ${month} · ${time}`;
 }
 
 async function createPayLaterBooking(params: {
@@ -187,6 +224,7 @@ async function createPayLaterBooking(params: {
   endAtIso: string;
   totalPriceCents: number;
   token: string;
+  bookNoPayError: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(`${API_URL}/bookings`, {
@@ -217,7 +255,7 @@ async function createPayLaterBooking(params: {
       }),
     });
     const json = (await res.json()) as { ok?: boolean; error?: string };
-    if (!res.ok || !json.ok) return { ok: false, error: json.error ?? "No se pudo crear la reserva" };
+    if (!res.ok || !json.ok) return { ok: false, error: json.error ?? params.bookNoPayError };
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
@@ -237,6 +275,7 @@ interface CourtCardDynamicProps {
   token?: string;
   duration: number;
   onToggleDuration: () => void;
+  t: TranslateFn;
 }
 
 function CourtCardDynamic({
@@ -252,6 +291,7 @@ function CourtCardDynamic({
   token,
   duration,
   onToggleDuration,
+  t,
 }: CourtCardDynamicProps) {
   const quoteSlot =
     isExpanded && selectedTimeSlot ? selectedTimeSlot : undefined;
@@ -270,7 +310,7 @@ function CourtCardDynamic({
 
   const getPriceDisplay = () => {
     if (!hasSlotQuote) return priceInfo?.minPriceFormatted ?? "-";
-    if (loading) return "Calculando...";
+    if (loading) return t("common.loadingEllipsis");
     if (priceError) return "—";
     if (priceData && priceData.total_price_cents > 0) {
       return `${(priceData.total_price_cents / 100).toFixed(2)} €`;
@@ -301,8 +341,8 @@ function CourtCardDynamic({
         <View style={styles.courtRowLeft}>
           <Text style={styles.courtCardName}>{court.name}</Text>
           <Text style={styles.courtCardSub}>
-            {getCerramientoLabel(court.indoor)} |{" "}
-            {getParedesLabel(court.glass_type)} | Dobles
+            {getCerramientoLabel(court.indoor, t)} |{" "}
+            {getParedesLabel(court.glass_type, t)} | {t("common.doubles")}
           </Text>
         </View>
         <Ionicons
@@ -317,13 +357,15 @@ function CourtCardDynamic({
             <Text style={styles.courtPriceAmount}>{getPriceDisplay()}</Text>
             {hasSlotQuote ? (
               <Text style={styles.courtPriceHint}>
-                Total · {duration} min
+                Total · {t("common.durationMin", { minutes: duration })}
               </Text>
             ) : null}
           </View>
           <Pressable
             onPress={onToggleDuration}
-            accessibilityLabel={`Duración ${duration} minutos. Toca para cambiar entre 60 y 90 minutos`}
+            accessibilityLabel={t("search.clubDetailDurationA11y", {
+              duration,
+            })}
             style={({ pressed }) => [
               styles.courtDurationBtn,
               pressed && styles.pressed,
@@ -346,11 +388,13 @@ function CourtCardDynamic({
             {reserving ? (
               <ActivityIndicator size="small" color="#1A1A1A" />
             ) : !selectedTimeSlot ? (
-              <Text style={styles.courtReservarTextDisabled}>Elige hora</Text>
+              <Text style={styles.courtReservarTextDisabled}>
+                {t("search.filterTime")}
+              </Text>
             ) : loading ? (
               <ActivityIndicator size="small" color="#1A1A1A" />
             ) : (
-              <Text style={styles.courtReservarText}>Reservar</Text>
+              <Text style={styles.courtReservarText}>{bookTabLabel(t)}</Text>
             )}
           </Pressable>
         </View>
@@ -364,10 +408,13 @@ export function ClubDetailScreen({
   onClose,
   onPartidoPress,
 }: ClubDetailScreenProps) {
+  const { t, locale } = useTranslation();
+  const localeBundle = useMemo(() => getLocaleBundle(locale), [locale]);
+  const dateLocale = formatLocale(locale);
   const { session } = useAuth();
   const { profile } = useHomeData();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
-  const [activeTab, setActiveTab] = useState<TabId>("Home");
+  const [activeTab, setActiveTab] = useState<TabId>("home");
   const [clubPartidos, setClubPartidos] = useState<PartidoItem[]>([]);
   const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(
     null,
@@ -379,31 +426,40 @@ export function ClubDetailScreen({
   const [scheduleText, setScheduleText] = useState<string | null>(null);
   const [clubCourtsLoading, setClubCourtsLoading] = useState(true);
   const [duration, setDuration] = useState(DURATION_MIN);
-  const [clubReviews, setClubReviews] = useState<PublicClubReview[]>([]);
   const [reviewsAverage, setReviewsAverage] = useState<number | null>(null);
   const loadClubData = useCallback(async () => {
     setClubCourtsLoading(true);
     const token = session?.access_token;
-    const [club, courts, reviewsRes] = await Promise.all([
+    const [club, clubPublic, courts, reviewsRes] = await Promise.all([
       fetchClubById(court.clubId, token),
+      fetchClubPublicInfo(court.clubId),
       fetchCourtsByClubId(court.clubId),
       fetchPublicClubReviews(court.clubId),
     ]);
     setClubCourts(courts);
+    // La duración del turno la define el club (no un valor fijo): asegura que la
+    // disponibilidad y la reserva respeten el horario (inicio + duración ≤ cierre).
+    const clubDur = Number(club?.slot_duration_min);
+    if (Number.isFinite(clubDur) && clubDur > 0) setDuration(clubDur);
+    const tz =
+      clubPublic?.timezone?.trim() ||
+      club?.timezone?.trim() ||
+      undefined;
+    if (tz) {
+      setClubTimezone(tz);
+      setClubTimeZone(tz);
+    }
     setScheduleText(
       club?.weekly_schedule
-        ? formatWeeklySchedule(club.weekly_schedule as Record<string, unknown>)
+        ? formatWeeklySchedule(
+            club.weekly_schedule as Record<string, unknown>,
+            t,
+          )
         : null,
     );
-    if (reviewsRes) {
-      setClubReviews(reviewsRes.reviews.slice(0, 8));
-      setReviewsAverage(reviewsRes.summary.average);
-    } else {
-      setClubReviews([]);
-      setReviewsAverage(null);
-    }
+    setReviewsAverage(reviewsRes ? reviewsRes.summary.average : null);
     setClubCourtsLoading(false);
-  }, [court.clubId, session?.access_token]);
+  }, [court.clubId, session?.access_token, t]);
 
   useEffect(() => {
     loadClubData();
@@ -429,7 +485,7 @@ export function ClubDetailScreen({
   }, [court.clubId]);
 
   useEffect(() => {
-    if (activeTab === "Partidos abiertos") {
+    if (activeTab === "openMatches") {
       loadClubPartidos();
     }
   }, [activeTab, loadClubPartidos]);
@@ -440,6 +496,10 @@ export function ClubDetailScreen({
   const [rawSlotsByCourt, setRawSlotsByCourt] = useState<Record<string, string[]>>(
     {},
   );
+  const [slotUtcByTime, setSlotUtcByTime] = useState<
+    Record<string, { start_at: string; end_at: string }>
+  >({});
+  const [clubTimezone, setClubTimezone] = useState<string | undefined>(undefined);
   const [timeSlotsLoading, setTimeSlotsLoading] = useState(false);
   const [slotNow, setSlotNow] = useState(() => new Date());
   const [courtPrices, setCourtPrices] = useState<
@@ -452,34 +512,53 @@ export function ClubDetailScreen({
   const [restrictByLevel, setRestrictByLevel] = useState(false);
   const [eloMin, setEloMin] = useState(() => defaultFriendlyRange(3.5).eloMin);
   const [eloMax, setEloMax] = useState(() => defaultFriendlyRange(3.5).eloMax);
-  const dateOptions = getNextDays(7);
-
-  const selectedDate = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + selectedDateIndex);
-    return d;
-  }, [selectedDateIndex]);
-
-  const dateStrForSlots = useMemo(
-    () => localCalendarYmd(selectedDate),
-    [selectedDate],
+  const activeTz = clubTimezone ?? clubIanaTimeZone();
+  const dateOptions = useMemo(
+    () =>
+      getNextClubDays(
+        7,
+        localeBundle.search.clubDetailDays,
+        localeBundle.common.monthsShort,
+        activeTz,
+      ),
+    [localeBundle, activeTz],
   );
 
+  const dateStrForSlots = useMemo(
+    () => addDaysToClubKey(dayKeyInClubTz(new Date()), selectedDateIndex),
+    [selectedDateIndex],
+  );
+
+  const startAtUtcByTime = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [time, utc] of Object.entries(slotUtcByTime)) {
+      out[time] = utc.start_at;
+    }
+    return out;
+  }, [slotUtcByTime]);
+
   const timeSlotsForDate = useMemo(
-    () => filterSlotsStartingAfterNow(dateStrForSlots, rawTimeSlotsUnion, slotNow),
-    [dateStrForSlots, rawTimeSlotsUnion, slotNow],
+    () =>
+      filterSlotsStartingAfterNow(dateStrForSlots, rawTimeSlotsUnion, slotNow, {
+        clubTimezone,
+        startAtUtcByTime,
+      }),
+    [dateStrForSlots, rawTimeSlotsUnion, slotNow, clubTimezone, startAtUtcByTime],
   );
 
   const slotsByCourt = useMemo(() => {
     const o: Record<string, string[]> = {};
     for (const [id, slots] of Object.entries(rawSlotsByCourt)) {
-      o[id] = filterSlotsStartingAfterNow(dateStrForSlots, slots, slotNow);
+      o[id] = filterSlotsStartingAfterNow(dateStrForSlots, slots, slotNow, {
+        clubTimezone,
+        startAtUtcByTime,
+      });
     }
     return o;
-  }, [dateStrForSlots, rawSlotsByCourt, slotNow]);
+  }, [dateStrForSlots, rawSlotsByCourt, slotNow, clubTimezone, startAtUtcByTime]);
 
   useEffect(() => {
-    if (activeTab !== "Reservar") return;
+    if (activeTab !== "book") return;
     setSlotNow(new Date());
     const id = setInterval(() => setSlotNow(new Date()), 60_000);
     return () => clearInterval(id);
@@ -487,7 +566,7 @@ export function ClubDetailScreen({
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active" && activeTab === "Reservar") {
+      if (state === "active" && activeTab === "book") {
         setSlotNow(new Date());
       }
     });
@@ -504,10 +583,9 @@ export function ClubDetailScreen({
   }, [timeSlotsForDate, selectedTimeSlot]);
 
   const loadTimeSlotsForDate = useCallback(
-    async (date: Date) => {
+    async (dateStr: string) => {
       setTimeSlotsLoading(true);
       try {
-        const dateStr = localCalendarYmd(date);
         const slotsPerCourt: Record<string, string[]> = {};
         
         // Mantener fetchSearchCourts solo para precios
@@ -540,16 +618,34 @@ export function ClubDetailScreen({
         });
 
         const allSlots: string[] = [];
+        const utcByTime: Record<string, { start_at: string; end_at: string }> = {};
+        let resolvedClubTz: string | undefined;
         if (availability.ok) {
           for (const res of availability.results) {
-            const courtSlots = res.free_slots.map(s => s.start);
+            if (res.club_timezone?.trim()) resolvedClubTz = res.club_timezone.trim();
+            const courtSlots = res.free_slots.map((s) => s.start);
             allSlots.push(...courtSlots);
             slotsPerCourt[res.court_id] = courtSlots;
+            for (const s of res.free_slots) {
+              if (s.start_at) {
+                const end_at =
+                  s.end_at ??
+                  new Date(
+                    new Date(s.start_at).getTime() + duration * 60 * 1000,
+                  ).toISOString();
+                utcByTime[s.start] = { start_at: s.start_at, end_at };
+              }
+            }
           }
         }
 
         setRawTimeSlotsUnion([...new Set(allSlots)].sort());
         setRawSlotsByCourt(slotsPerCourt);
+        setSlotUtcByTime(utcByTime);
+        if (resolvedClubTz) {
+          setClubTimezone(resolvedClubTz);
+          setClubTimeZone(resolvedClubTz);
+        }
         setSlotNow(new Date());
       } catch (err) {
         __DEV__ && console.warn("[ClubDetail] Error loading availability:", err);
@@ -570,10 +666,10 @@ export function ClubDetailScreen({
   }, [selectedDateIndex, activeTab]);
 
   useEffect(() => {
-    if (activeTab === "Reservar") {
-      loadTimeSlotsForDate(selectedDate);
+    if (activeTab === "book") {
+      loadTimeSlotsForDate(dateStrForSlots);
     }
-  }, [activeTab, selectedDate, loadTimeSlotsForDate, duration]);
+  }, [activeTab, dateStrForSlots, loadTimeSlotsForDate, duration]);
 
   useEffect(() => {
     if (profile?.id) {
@@ -594,24 +690,33 @@ export function ClubDetailScreen({
     ) => {
       if (!selectedTimeSlot) {
         Alert.alert(
-          "Elige un horario",
-          "Selecciona primero una hora en la lista de arriba.",
+          t("search.filterTime"),
+          t("partidos.createDateTimeSub"),
         );
         return;
       }
-      const slotDateStr = localCalendarYmd(selectedDate);
+      const slotDateStr = dateStrForSlots;
       if (
-        filterSlotsStartingAfterNow(slotDateStr, [selectedTimeSlot], new Date())
-          .length === 0
+        filterSlotsStartingAfterNow(
+          slotDateStr,
+          [selectedTimeSlot],
+          new Date(),
+          {
+            clubTimezone: activeTz,
+            startAtUtcByTime: slotUtcByTime[selectedTimeSlot]
+              ? { [selectedTimeSlot]: slotUtcByTime[selectedTimeSlot].start_at }
+              : undefined,
+          },
+        ).length === 0
       ) {
         Alert.alert(
-          "Horario no disponible",
-          "Esa franja ya pasó o no está disponible. Elige otra hora.",
+          t("alerts.scheduleConflict.title"),
+          t("search.clubSlotUnavailable"),
         );
         return;
       }
       if (!session?.access_token) {
-        Alert.alert("Inicia sesión", "Debes iniciar sesión para reservar.");
+        Alert.alert(t("common.loginRequired"), t("search.clubLoginToBook"));
         return;
       }
       let playerId = organizerPlayerId ?? profile?.id ?? null;
@@ -621,16 +726,13 @@ export function ClubDetailScreen({
       }
       if (!playerId) {
         Alert.alert(
-          "Perfil de jugador",
-          "No encontramos tu perfil. Espera un momento e inténtalo de nuevo.",
+          t("common.playerFallback"),
+          t("search.clubProfileNotFound"),
         );
         return;
       }
       if (finalPriceCents <= 0) {
-        Alert.alert(
-          "Precio no disponible",
-          "No pudimos calcular el precio para este horario. Elige otra hora o inténtalo de nuevo.",
-        );
+        Alert.alert(t("common.error"), t("search.clubPriceError"));
         return;
       }
 
@@ -642,19 +744,26 @@ export function ClubDetailScreen({
             return;
           }
           Alert.alert(
-            "Forma de pago",
-            "Esta pista permite reservar sin pagar ahora. ¿Quieres pagar ahora o después del turno?",
+            t("common.chooseOption"),
+            t("search.clubPayChoiceTitle"),
             [
-              { text: "Cancelar", style: "cancel", onPress: () => resolve("cancel") },
-              { text: "Pagar después", onPress: () => resolve("pay_later") },
-              { text: "Pagar ahora", onPress: () => resolve("pay_now") },
+              { text: t("common.cancel"), style: "cancel", onPress: () => resolve("cancel") },
+              { text: t("search.clubPayLater"), onPress: () => resolve("pay_later") },
+              { text: t("search.clubPayNow"), onPress: () => resolve("pay_now") },
             ],
           );
         });
 
-      const dateStr = localCalendarYmd(selectedDate);
-      const start_at = clubLocalDateTimeToUtcIso(dateStr, selectedTimeSlot);
-      const end_at = new Date(new Date(start_at).getTime() + duration * 60 * 1000).toISOString();
+      const dateStr = dateStrForSlots;
+      const utcSlot = slotUtcByTime[selectedTimeSlot];
+      const { start_at, end_at } = resolveSlotStartEndUtc({
+        dateStr,
+        time: selectedTimeSlot,
+        durationMinutes: duration,
+        startAtUtc: utcSlot?.start_at,
+        endAtUtc: utcSlot?.end_at,
+        clubTimezone: activeTz,
+      });
       const totalPriceCents = Math.max(finalPriceCents, 100);
       const payChoice = await askPayLaterChoice();
       if (payChoice === "cancel") return;
@@ -668,24 +777,31 @@ export function ClubDetailScreen({
           endAtIso: end_at,
           totalPriceCents,
           token: session.access_token,
+          bookNoPayError: t("search.clubBookNoPayError"),
         });
         setReserving(false);
         if (!created.ok) {
-          Alert.alert("Error", created.error ?? "No se pudo reservar sin pago");
+          Alert.alert(t("common.error"), created.error ?? t("search.clubBookNoPayError"));
           return;
         }
-        await loadTimeSlotsForDate(selectedDate);
+        await loadTimeSlotsForDate(dateStrForSlots);
         setExpandedCourtId(null);
         setConfirmationModalData({
           courtName: c.name,
           clubName: court.clubName,
-          dateTimeFormatted: formatDateTimeForConfirmation(selectedDate, selectedTimeSlot),
-          duration: `${duration} min`,
+          dateTimeFormatted: formatDateTimeForConfirmation(
+            dateStrForSlots,
+            selectedTimeSlot,
+            localeBundle.search.clubDetailDays,
+            localeBundle.common.monthsShort,
+            activeTz,
+          ),
+          duration: t("common.durationMin", { minutes: duration }),
           priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
           matchVisibility: partidoPrivado ? "private" : "public",
           clubId: court.clubId,
           courtId: c.id,
-          date: localCalendarYmd(selectedDate),
+          date: dateStrForSlots,
           slot: selectedTimeSlot,
           durationMinutes: duration,
         });
@@ -712,14 +828,14 @@ export function ClubDetailScreen({
       if (!intentRes.ok || !intentRes.clientSecret) {
         setReserving(false);
         const errMsg =
-          intentRes.error ?? "No se pudo iniciar el pago. Inténtalo de nuevo.";
+          intentRes.error ?? t("common.paymentStartError");
         if (errMsg.includes("esa hora") || errMsg.includes("otro horario")) {
           Alert.alert(
-            "Horario no disponible",
-            "Ya tienes un partido a esa hora. Elige otro horario.",
+            t("alerts.scheduleConflict.title"),
+            t("alerts.scheduleConflict.body"),
           );
         } else {
-          Alert.alert("Error", errMsg);
+          Alert.alert(t("common.error"), errMsg);
         }
         return;
       }
@@ -733,10 +849,7 @@ export function ClubDetailScreen({
 
       if (initErr) {
         setReserving(false);
-        Alert.alert(
-          "Error",
-          "Error al configurar el pago. Inténtalo de nuevo.",
-        );
+        Alert.alert(t("common.error"), t("common.paymentConfiguredError"));
         return;
       }
 
@@ -746,10 +859,7 @@ export function ClubDetailScreen({
         if (presentErr.code === "Canceled") {
           // Usuario canceló, no mostrar error
         } else {
-          Alert.alert(
-            "Error",
-            "Error al procesar el pago. Inténtalo de nuevo.",
-          );
+          Alert.alert(t("common.error"), t("common.paymentProcessError"));
         }
         return;
       }
@@ -761,37 +871,41 @@ export function ClubDetailScreen({
       setReserving(false);
 
       if (!confirmRes.ok) {
-        Alert.alert(
-          "Error",
-          "No se pudo confirmar la reserva. Inténtalo de nuevo.",
-        );
+        Alert.alert(t("common.error"), t("search.clubBookingConfirmError"));
         return;
       }
 
       // Refrescar disponibilidad para que la pista desaparezca automáticamente
-      await loadTimeSlotsForDate(selectedDate);
+      await loadTimeSlotsForDate(dateStrForSlots);
       setExpandedCourtId(null);
 
       setConfirmationModalData({
         courtName: c.name,
         clubName: court.clubName,
         dateTimeFormatted: formatDateTimeForConfirmation(
-          selectedDate,
+          dateStrForSlots,
           selectedTimeSlot,
+          localeBundle.search.clubDetailDays,
+          localeBundle.common.monthsShort,
+          activeTz,
         ),
-        duration: `${duration} min`,
+        duration: t("common.durationMin", { minutes: duration }),
         priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
         matchVisibility: partidoPrivado ? "private" : "public",
         clubId: court.clubId,
         courtId: c.id,
-        date: localCalendarYmd(selectedDate),
+        date: dateStrForSlots,
         slot: selectedTimeSlot,
         durationMinutes: duration,
       });
     },
     [
       selectedTimeSlot,
-      selectedDate,
+      dateStrForSlots,
+      activeTz,
+      slotUtcByTime,
+      clubTimezone,
+      startAtUtcByTime,
       organizerPlayerId,
       profile?.id,
       session?.access_token,
@@ -800,9 +914,12 @@ export function ClubDetailScreen({
       restrictByLevel,
       eloMin,
       eloMax,
+      duration,
       initPaymentSheet,
       presentPaymentSheet,
       loadTimeSlotsForDate,
+      t,
+      localeBundle,
     ],
   );
 
@@ -817,7 +934,7 @@ export function ClubDetailScreen({
             pressed && styles.pressed,
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Volver"
+          accessibilityLabel={t("common.back")}
         >
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </Pressable>
@@ -847,13 +964,13 @@ export function ClubDetailScreen({
         style={styles.tabsScroll}
         contentContainerStyle={styles.tabsContent}
       >
-        {TABS.map((tab) => (
+        {TAB_IDS.map((tab) => (
           <Pressable
             key={tab}
             onPress={() => setActiveTab(tab)}
             style={({ pressed }) => [
               styles.tab,
-              tab === "Partidos abiertos" && styles.tabPartidosAbiertos,
+              tab === "openMatches" && styles.tabPartidosAbiertos,
               activeTab === tab ? styles.tabActive : styles.tabInactive,
               pressed && styles.pressed,
             ]}
@@ -861,14 +978,14 @@ export function ClubDetailScreen({
             <Text
               style={[
                 styles.tabText,
-                tab === "Partidos abiertos" && styles.tabPartidosAbiertosText,
+                tab === "openMatches" && styles.tabPartidosAbiertosText,
                 activeTab === tab
                   ? styles.tabTextActive
                   : styles.tabTextInactive,
               ]}
-              numberOfLines={tab === "Partidos abiertos" ? undefined : 2}
+              numberOfLines={tab === "openMatches" ? undefined : 2}
             >
-              {tab}
+              {getTabLabel(tab, t)}
             </Text>
           </Pressable>
         ))}
@@ -900,7 +1017,7 @@ export function ClubDetailScreen({
             <View style={styles.heroContent}>
               <View style={styles.statusRow}>
                 <View style={styles.statusDot} />
-                <Text style={styles.statusText}>Abierto ahora</Text>
+                <Text style={styles.statusText}>{t("common.today")}</Text>
               </View>
               <Text style={styles.heroTitle}>{court.clubName}</Text>
               <View style={styles.heroLocation}>
@@ -917,18 +1034,23 @@ export function ClubDetailScreen({
                 <View style={styles.heroStat} collapsable={false}>
                   <Ionicons name="star" size={12} color="#fbbf24" style={styles.heroStatStar} />
                   <Text style={[styles.heroStatText, styles.heroStatTextRating]}>
-                    {reviewsAverage != null ? reviewsAverage.toFixed(1) : "—"}
+                    {reviewsAverage != null
+                      ? reviewsAverage.toLocaleString(dateLocale, {
+                          minimumFractionDigits: 1,
+                          maximumFractionDigits: 1,
+                        })
+                      : "—"}
                   </Text>
                 </View>
                 <View style={styles.heroStat} collapsable={false}>
                   <Text style={[styles.heroStatText, styles.heroStatTextCourts]}>
                     {clubCourtsLoading
-                      ? "..."
+                      ? t("common.loadingEllipsis")
                       : clubCourts.length === 0
-                        ? "Sin pistas"
+                        ? t("partidos.createNoCourts")
                         : clubCourts.length === 1
-                          ? "1 Pista"
-                          : `${clubCourts.length} Pistas`}
+                          ? `1 ${t("common.courtFallback")}`
+                          : `${clubCourts.length} ${t("common.courtFallback")}`}
                   </Text>
                 </View>
                 {court.distanceKm != null && (
@@ -943,7 +1065,7 @@ export function ClubDetailScreen({
           </LinearGradient>
         </View>
 
-        {activeTab === "Reservar" ? (
+        {activeTab === "book" ? (
           <>
             <View style={styles.section}>
               <ScrollView
@@ -1033,7 +1155,7 @@ export function ClubDetailScreen({
                 </ScrollView>
               ) : (
                 <Text style={styles.partidosEmptySubtitle}>
-                  Sin horarios disponibles
+                  {t("partidos.createNoSlots")}
                 </Text>
               )}
             </View>
@@ -1047,11 +1169,11 @@ export function ClubDetailScreen({
                       color="#f97316"
                     />
                     <Text style={styles.alertSectionTitle}>
-                      Alertas prioritarias
+                      {t("alerts.favorites.title")}
                     </Text>
                   </View>
                   <Text style={styles.alertSub}>
-                    Configura tu alerta con un click
+                    {t("common.comingSoonSection")}
                   </Text>
                 </View>
                 <Switch
@@ -1063,17 +1185,19 @@ export function ClubDetailScreen({
               </View>
             </View>
             <View style={styles.section}>
-              <Text style={styles.reservaTitle}>Reserva una pista</Text>
+              <Text style={styles.reservaTitle}>{t("partidos.yourReservation")}</Text>
               <Text style={styles.reservaSub}>
                 {partidoPrivado
-                  ? "Crea un partido privado e invita a tus amigos"
-                  : "Publica un partido abierto para encontrar jugadores"}
+                  ? t("partidos.createPrivateSub")
+                  : t("partidos.noOpenMatchesHint")}
               </Text>
               <View style={styles.reservaToggleRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.reservaToggleTitle}>Partido privado</Text>
+                  <Text style={styles.reservaToggleTitle}>
+                    {t("partidos.createPrivateLabel")}
+                  </Text>
                   <Text style={styles.reservaToggleSub}>
-                    Si lo apagas, aparecerá en Buscar partido
+                    {t("partidos.createPrivateSub")}
                   </Text>
                 </View>
                 <Switch
@@ -1098,8 +1222,7 @@ export function ClubDetailScreen({
               <View style={styles.courtList}>
                 {!selectedTimeSlot ? (
                   <Text style={styles.partidosEmptySubtitle}>
-                    Selecciona primero un horario para ver qué pistas están
-                    libres.
+                    {t("alerts.createMatch.noSlots.body")}
                   </Text>
                 ) : clubCourtsLoading ? (
                   <ActivityIndicator
@@ -1118,7 +1241,7 @@ export function ClubDetailScreen({
                     if (courtsToShow.length === 0 && selectedTimeSlot) {
                       return (
                         <Text style={styles.partidosEmptySubtitle}>
-                          No hay pistas disponibles para este horario.
+                          {t("alerts.createMatch.noSlots.title")}
                         </Text>
                       );
                     }
@@ -1142,32 +1265,33 @@ export function ClubDetailScreen({
                         onToggleDuration={() =>
                           setDuration((prev) => (prev === 60 ? 90 : 60))
                         }
+                        t={t}
                       />
                     ));
                   })()
                 ) : (
                   <Text style={styles.partidosEmptySubtitle}>
-                    Sin pistas en este club
+                    {t("partidos.createNoCourts")}
                   </Text>
                 )}
               </View>
             </View>
           </>
-        ) : activeTab === "Partidos abiertos" ? (
+        ) : activeTab === "openMatches" ? (
           <>
             <View style={styles.section}>
               <Text style={styles.partidosSectionTitle}>
-                Partidos abiertos en {court.clubName}
+                {t("partidos.noOpenMatches")} · {court.clubName}
               </Text>
               <Text style={styles.partidosSectionSub}>
-                Únete a un partido en este club
+                {t("partidos.noOpenMatchesHint")}
               </Text>
             </View>
             {partidosLoading ? (
               <View style={[styles.section, styles.partidosEmptySection]}>
                 <ActivityIndicator size="large" color={theme.auth.accent} />
                 <Text style={[styles.partidosEmptySubtitle, { marginTop: 12 }]}>
-                  Cargando partidos...
+                  {t("common.loadingEllipsis")}
                 </Text>
               </View>
             ) : clubPartidos.length > 0 ? (
@@ -1194,10 +1318,10 @@ export function ClubDetailScreen({
                     <Text style={styles.partidosEmptyEmoji}>🎾</Text>
                   </View>
                   <Text style={styles.partidosEmptyTitle}>
-                    No hay pistas disponibles hoy
+                    {t("partidos.noOpenMatches")}
                   </Text>
                   <Text style={styles.partidosEmptySubtitle}>
-                    Prueba otro día o busca en otro club
+                    {t("partidos.noOpenMatchesHint")}
                   </Text>
                 </View>
               </View>
@@ -1210,11 +1334,11 @@ export function ClubDetailScreen({
                   color="#f97316"
                 />
                 <Text style={styles.partidosAlertTitle}>
-                  Alertas prioritarias
+                  {t("alerts.favorites.title")}
                 </Text>
               </View>
               <Text style={styles.partidosAlertDesc}>
-                Configura tu alerta con tus preferencias predefinidas
+                {t("common.comingSoonSection")}
               </Text>
               <View style={styles.partidosAlertRow}>
                 <Pressable
@@ -1223,7 +1347,9 @@ export function ClubDetailScreen({
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Text style={styles.manageAlertsText}>Gestionar alertas</Text>
+                  <Text style={styles.manageAlertsText}>
+                    {t("common.comingSoon")}
+                  </Text>
                 </Pressable>
                 <Switch
                   value={partidosAlertsEnabled}
@@ -1234,12 +1360,11 @@ export function ClubDetailScreen({
               </View>
             </View>
           </>
-        ) : activeTab === "Competiciones" ? (
+        ) : activeTab === "competitions" ? (
           <>
             <View style={styles.partidosFiltersWrap}>
               <Text style={styles.partidosCompeticionesHint}>
-                Los filtros de torneos están en la pestaña Torneos de la app. Aquí verás
-                competiciones del club cuando estén disponibles.
+                {t("common.comingSoonSection")}
               </Text>
             </View>
             <View style={styles.partidosEmptySection}>
@@ -1248,10 +1373,10 @@ export function ClubDetailScreen({
                   <Text style={styles.partidosEmptyEmoji}>🏆</Text>
                 </View>
                 <Text style={styles.partidosEmptyTitle}>
-                  No hay competiciones
+                  {t("common.comingSoon")}
                 </Text>
                 <Text style={styles.partidosEmptySubtitle}>
-                  Próximamente podrás ver competiciones de este club
+                  {t("common.comingSoonSection")}
                 </Text>
               </View>
             </View>
@@ -1259,21 +1384,23 @@ export function ClubDetailScreen({
         ) : (
           <>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Información del club</Text>
+              <Text style={styles.sectionTitle}>
+                {t("partidos.detailTabInfo")} · {t("common.clubFallback")}
+              </Text>
               <View style={styles.tagsRow}>
                 <View style={[styles.tag, styles.tagSport]} collapsable={false}>
-                  <Text style={styles.tagText}>🎾 Pádel</Text>
+                  <Text style={styles.tagText}>🎾 {t("common.sportPadel")}</Text>
                 </View>
                 <View style={[styles.tag, styles.tagSport]} collapsable={false}>
-                  <Text style={styles.tagText}>🎾 Tenis</Text>
+                  <Text style={styles.tagText}>🎾 {t("common.sportTenis")}</Text>
                 </View>
               </View>
               <Text style={styles.pistasLabel}>
                 {clubCourts.length === 0
-                  ? "Pista disponible"
+                  ? t("common.courtFallback")
                   : clubCourts.length === 1
-                    ? "1 pista"
-                    : `${clubCourts.length} pistas`}
+                    ? `1 ${t("common.courtFallback")}`
+                    : `${clubCourts.length} ${t("common.courtFallback")}`}
               </Text>
               <View style={styles.amenitiesRow}>
                 <View
@@ -1287,7 +1414,7 @@ export function ClubDetailScreen({
                       color="#6b7280"
                     />
                   </View>
-                  <Text style={styles.amenityText}>Accesible</Text>
+                  <Text style={styles.amenityText}>{t("common.comingSoon")}</Text>
                 </View>
                 <View
                   style={[styles.amenity, styles.amenityMinMaterial]}
@@ -1300,7 +1427,7 @@ export function ClubDetailScreen({
                       color="#6b7280"
                     />
                   </View>
-                  <Text style={styles.amenityText}>Alquiler de material</Text>
+                  <Text style={styles.amenityText}>{t("common.proShop")}</Text>
                 </View>
                 <View
                   style={[styles.amenity, styles.amenityMinParking]}
@@ -1309,18 +1436,18 @@ export function ClubDetailScreen({
                   <View style={styles.amenityIconWrap}>
                     <Ionicons name="car-outline" size={14} color="#6b7280" />
                   </View>
-                  <Text style={styles.amenityText}>Parking</Text>
+                  <Text style={styles.amenityText}>{t("alerts.location.title")}</Text>
                 </View>
               </View>
               <View style={styles.tagsRow}>
                 <View style={[styles.tag, styles.tagMeta]} collapsable={false}>
                   <Text style={styles.tagText}>
-                    {getCerramientoLabel(court.indoor)}
+                    {getCerramientoLabel(court.indoor, t)}
                   </Text>
                 </View>
                 <View style={[styles.tag, styles.tagMeta]} collapsable={false}>
                   <Text style={styles.tagText}>
-                    {getParedesLabel(court.glassType)}
+                    {getParedesLabel(court.glassType, t)}
                   </Text>
                 </View>
               </View>
@@ -1332,7 +1459,7 @@ export function ClubDetailScreen({
                   ]}
                 >
                   <Ionicons name="navigate" size={20} color="#fff" />
-                  <Text style={styles.actionLabel}>CÓMO LLEGAR</Text>
+                  <Text style={styles.actionLabel}>{t("alerts.location.title")}</Text>
                 </Pressable>
                 <Pressable
                   style={({ pressed }) => [
@@ -1341,7 +1468,7 @@ export function ClubDetailScreen({
                   ]}
                 >
                   <Ionicons name="globe-outline" size={20} color="#6b7280" />
-                  <Text style={styles.actionLabelOutline}>WEB</Text>
+                  <Text style={styles.actionLabelOutline}>{t("alerts.web.title")}</Text>
                 </Pressable>
                 <Pressable
                   style={({ pressed }) => [
@@ -1350,96 +1477,24 @@ export function ClubDetailScreen({
                   ]}
                 >
                   <Ionicons name="call-outline" size={20} color="#6b7280" />
-                  <Text style={styles.actionLabelOutline}>LLAMAR</Text>
+                  <Text style={styles.actionLabelOutline}>{t("alerts.phone.title")}</Text>
                 </Pressable>
               </View>
               <View style={styles.mapPlaceholder}>
-                <Text style={styles.mapPlaceholderText}>Mapa de ubicación</Text>
+                <Text style={styles.mapPlaceholderText}>{t("alerts.location.title")}</Text>
               </View>
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Horarios</Text>
+              <Text style={styles.sectionTitle}>{t("search.filterTime")}</Text>
               <View style={[styles.scheduleRow, { borderBottomWidth: 0 }]}>
-                <Text style={styles.scheduleDay}>Horarios</Text>
+                <Text style={styles.scheduleDay}>{t("search.filterTime")}</Text>
                 <Text style={styles.scheduleHours} numberOfLines={3}>
-                  {scheduleText ?? "Consulta en el club"}
+                  {scheduleText ?? t("common.comingSoonSection")}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Reseñas</Text>
-              {clubReviews.length === 0 ? (
-                <Text style={styles.partidosEmptySubtitle}>Aún no hay reseñas públicas.</Text>
-              ) : (
-                clubReviews.map((rev) => {
-                  const playerName = `${rev.player.first_name ?? ""} ${rev.player.last_name ?? ""}`.trim() || "Jugador";
-                  return (
-                    <View key={rev.id} style={styles.reviewCard}>
-                      <View style={styles.reviewHead}>
-                        <Text style={styles.reviewAuthor}>{playerName}</Text>
-                        <Text style={styles.reviewStars}>{"★".repeat(rev.rating)}</Text>
-                      </View>
-                      {rev.comment ? (
-                        <Text style={styles.reviewComment}>{rev.comment}</Text>
-                      ) : null}
-                      {rev.club_response ? (
-                        <View style={styles.reviewClubReply}>
-                          <Text style={styles.reviewClubReplyLabel}>Respuesta del club</Text>
-                          <Text style={styles.reviewClubReplyText}>{rev.club_response}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })
-              )}
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Promociones</Text>
-              <View style={styles.partidosEmptyState}>
-                <Text style={styles.partidosEmptySubtitle}>
-                  No hay promociones disponibles
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Top Jugadores</Text>
-              <View style={styles.partidosEmptyState}>
-                <Text style={styles.partidosEmptySubtitle}>
-                  No hay datos de jugadores
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Resultados recientes</Text>
-              <View style={styles.partidosEmptyState}>
-                <Text style={styles.partidosEmptySubtitle}>
-                  No hay resultados recientes
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                ¿Tienes cuenta en este Club?
-              </Text>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.accountCard,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.accountText}>
-                  Asocia tu cuenta y recibe los mismos beneficios que te ofrece
-                  el club.
-                </Text>
-                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
-              </Pressable>
-            </View>
           </>
         )}
       </ScrollView>

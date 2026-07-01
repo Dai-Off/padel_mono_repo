@@ -11,8 +11,8 @@ export type MatchmakingLeagueConfigRow = {
 
 const DEFAULT_ROWS: MatchmakingLeagueConfigRow[] = [
   { code: 'bronce', sort_order: 0, label: 'Bronce', elo_min: 0, elo_max: 2, lps_to_promote: 100 },
-  { code: 'plata', sort_order: 1, label: 'Plata', elo_min: 2, elo_max: 4, lps_to_promote: 100 },
-  { code: 'oro', sort_order: 2, label: 'Oro', elo_min: 4, elo_max: 5.5, lps_to_promote: 100 },
+  { code: 'plata', sort_order: 1, label: 'Plata', elo_min: 2, elo_max: 4, lps_to_promote: 125 },
+  { code: 'oro', sort_order: 2, label: 'Oro', elo_min: 4, elo_max: 5.5, lps_to_promote: 150 },
   { code: 'elite', sort_order: 3, label: 'Elite', elo_min: 5.5, elo_max: 20, lps_to_promote: null },
 ];
 

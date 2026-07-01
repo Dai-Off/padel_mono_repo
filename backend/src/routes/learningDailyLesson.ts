@@ -6,6 +6,8 @@ import {
   selectQuestions, sanitizeContent, checkAnswer, getCorrectAnswer, timePenalty,
 } from './learningAlgorithm';
 import { getTodayRange } from './learningTimezone';
+import { resolveLocale } from '../lib/locale';
+import { localizeQuestionContent, ContentI18n } from '../lib/learningQuestionI18n';
 import {
   computeSeasonPassLessonSpDelta,
   getMultiplier,
@@ -28,6 +30,8 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     if (onboardingError) return res.status(403).json({ ok: false, error: onboardingError, requires_onboarding: true });
 
     const timezone = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
+    // Idioma del jugador (query ?lang= o Accept-Language; fallback 'es').
+    const locale = resolveLocale(req);
 
     const { start, end } = getTodayRange(timezone);
     const supabase = getSupabaseServiceRoleClient();
@@ -139,7 +143,7 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     const [contentRes, puzzlesRes] = await Promise.all([
       supabase
         .from('learning_questions')
-        .select('id, content, clubs:created_by_club(name, city)')
+        .select('id, content, content_locale, content_i18n, clubs:created_by_club(name, city)')
         .in('id', selectedIds),
       selectedPuzzleIds.length > 0
         ? supabase
@@ -157,6 +161,8 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
         String(r.id),
         {
           content: (r.content ?? {}) as Record<string, unknown>,
+          content_locale: (r.content_locale ?? null) as string | null,
+          content_i18n: (r.content_i18n ?? {}) as ContentI18n,
           // supabase-js puede devolver el embed del club como objeto o como
           // array; normalizamos igual que en today-results.
           clubs: r.clubs as { name?: string; city?: string } | { name?: string; city?: string }[] | null,
@@ -185,6 +191,10 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
       } else {
         content = extra?.content ?? {};
       }
+      // Traducir los campos de texto al idioma del jugador (fallback al
+      // canónico). La clave de respuesta no se toca. Para puzzles la traducción
+      // vive igualmente en learning_questions.content_i18n (extra).
+      content = localizeQuestionContent(q.type, content, extra?.content_locale, extra?.content_i18n, locale);
       const clubRaw = extra?.clubs ?? null;
       const club = Array.isArray(clubRaw) ? (clubRaw[0] ?? null) : clubRaw;
       return {
@@ -225,6 +235,7 @@ router.get('/daily-lesson/today-results', requireAuth, async (req: Request, res:
     if (onboardingError) return res.status(403).json({ ok: false, error: onboardingError, requires_onboarding: true });
 
     const timezone = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
+    const locale = resolveLocale(req);
     const { start, end } = getTodayRange(timezone);
     const supabase = getSupabaseServiceRoleClient();
 
@@ -264,6 +275,8 @@ router.get('/daily-lesson/today-results', requireAuth, async (req: Request, res:
       has_video: boolean;
       video_url: string | null;
       content: Record<string, unknown>;
+      content_locale: string | null;
+      content_i18n: ContentI18n;
       created_by_club: string;
       clubs: { name: string; city: string } | { name: string; city: string }[] | null;
     };
@@ -272,7 +285,7 @@ router.get('/daily-lesson/today-results', requireAuth, async (req: Request, res:
       const questionIds = logs.map((l) => l.question_id);
       const { data: qData, error: qErr } = await supabase
         .from('learning_questions')
-        .select('id, type, level, area, has_video, video_url, content, created_by_club, clubs:created_by_club(name, city)')
+        .select('id, type, level, area, has_video, video_url, content, content_locale, content_i18n, created_by_club, clubs:created_by_club(name, city)')
         .in('id', questionIds);
       if (qErr) return res.status(500).json({ ok: false, error: qErr.message });
       questions = (qData ?? []) as RawQ[];
@@ -311,13 +324,14 @@ router.get('/daily-lesson/today-results', requireAuth, async (req: Request, res:
       .filter((q): q is RawQ => !!q)
       .map((q) => {
         const club = Array.isArray(q.clubs) ? q.clubs[0] : q.clubs;
+        const localized = localizeQuestionContent(q.type, q.content, q.content_locale, q.content_i18n, locale);
         return {
           id: q.id,
           type: q.type,
           area: q.area,
           has_video: q.has_video,
           video_url: q.video_url,
-          content: sanitizeContent(q.type, q.content),
+          content: sanitizeContent(q.type, localized),
           club_name: club?.name ?? null,
           club_city: club?.city ?? null,
         };
@@ -354,6 +368,86 @@ router.get('/daily-lesson/today-results', requireAuth, async (req: Request, res:
       },
       shared_streaks: [],
     });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// POST /daily-lesson/localize
+// Devuelve EXACTAMENTE las preguntas indicadas por question_ids (mismo orden),
+// localizadas al idioma pedido. Sirve para re-entregar la lección actual en
+// otro idioma SIN rebarajar ni reseleccionar (la selección normal es aleatoria).
+// El cliente la usa al cambiar de idioma a media lección: conserva orden, ids,
+// respuestas dadas y progreso. La clave de respuesta no cambia (índices/booleans).
+router.post('/daily-lesson/localize', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) {
+      return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
+    }
+
+    const locale = resolveLocale(req);
+    const rawIds = req.body?.question_ids;
+    const ids: string[] = Array.isArray(rawIds) ? rawIds.filter((x: unknown): x is string => typeof x === 'string') : [];
+    if (ids.length === 0) return res.json({ ok: true, questions: [] });
+
+    const supabase = getSupabaseServiceRoleClient();
+    // Por ids, sin filtrar por status: una lección a medias puede contener una
+    // pregunta que se haya despublicado entretanto; igual queremos servirla.
+    const [contentRes, puzzlesRes] = await Promise.all([
+      supabase
+        .from('learning_questions')
+        .select('id, type, area, has_video, video_url, content, content_locale, content_i18n, clubs:created_by_club(name, city)')
+        .in('id', ids),
+      supabase
+        .from('learning_puzzles')
+        .select('question_id, statement, intro_frame, initial_frame, options, schema_version')
+        .in('question_id', ids),
+    ]);
+
+    if (contentRes.error) return res.status(500).json({ ok: false, error: contentRes.error.message });
+    if (puzzlesRes.error) return res.status(500).json({ ok: false, error: puzzlesRes.error.message });
+
+    const rowById = new Map((contentRes.data ?? []).map((r: any) => [String(r.id), r]));
+    const puzzleByQ = new Map((puzzlesRes.data ?? []).map((p: any) => [String(p.question_id), p]));
+
+    // Mantener el orden EXACTO de question_ids (= orden de la lección en curso).
+    const questions = ids
+      .map((id) => {
+        const r = rowById.get(String(id));
+        if (!r) return null;
+        let content: Record<string, unknown>;
+        if (r.type === 'puzzle') {
+          const p = puzzleByQ.get(String(id));
+          content = p
+            ? {
+                schema_version: p.schema_version,
+                statement: p.statement,
+                intro_frame: p.intro_frame,
+                initial_frame: p.initial_frame,
+                options: p.options,
+              }
+            : {};
+        } else {
+          content = (r.content ?? {}) as Record<string, unknown>;
+        }
+        content = localizeQuestionContent(r.type, content, r.content_locale, r.content_i18n as ContentI18n, locale);
+        const clubRaw = r.clubs as { name?: string; city?: string } | { name?: string; city?: string }[] | null;
+        const club = Array.isArray(clubRaw) ? (clubRaw[0] ?? null) : clubRaw;
+        return {
+          id: r.id,
+          type: r.type,
+          area: r.area,
+          has_video: r.has_video,
+          video_url: r.video_url,
+          content: sanitizeContent(r.type, content),
+          club_name: club?.name ?? null,
+          club_city: club?.city ?? null,
+        };
+      })
+      .filter((q): q is NonNullable<typeof q> => q !== null);
+
+    return res.json({ ok: true, questions });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

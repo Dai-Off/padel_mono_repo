@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CommunityPost, fetchReelsFeed, toggleLike, toggleBookmark } from '../../api/community';
 import { formatPlayerLabel } from '../../lib/username';
 import { CommentSheet } from './CommentSheet';
+import { useTranslation } from '../../i18n';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
 
 /** Iniciales (máx 2) del autor del clip. */
@@ -45,6 +46,7 @@ interface ClipViewerProps {
  * Los botones "Seguir" y "Compartir" son solo visuales por ahora.
  */
 export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, token, onClose, onPressAuthor }) => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [clips, setClips] = useState<CommunityPost[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -127,7 +129,7 @@ export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, tok
           <TouchableOpacity onPress={onClose} style={styles.iconBtn}>
             <Ionicons name="close" size={22} color="#FFF" />
           </TouchableOpacity>
-          <Text style={styles.topTitle}>Clips</Text>
+          <Text style={styles.topTitle}>{t('community.clipsViewerTitle')}</Text>
           <TouchableOpacity onPress={() => setMuted(m => !m)} style={styles.iconBtn}>
             <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={20} color={muted ? '#FFF' : '#F18F34'} />
           </TouchableOpacity>
@@ -157,6 +159,7 @@ interface ClipCellProps {
 }
 
 const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellHeight, onOpenComments, onPressAuthor }) => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const url = clip.images?.[0]?.media_url ?? null;
 
@@ -308,13 +311,13 @@ const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellH
           <Text style={styles.author}>{formatPlayerLabel(clip.player)}</Text>
           {/* "Seguir" — solo visual */}
           <View style={styles.followBtn}>
-            <Text style={styles.followBtnText}>Seguir</Text>
+            <Text style={styles.followBtnText}>{t('common.follow')}</Text>
           </View>
         </View>
         {!!clip.caption && <Text style={styles.caption} numberOfLines={2}>{clip.caption}</Text>}
         <View style={styles.soundRow}>
           <Ionicons name="musical-notes" size={12} color="rgba(255,255,255,0.7)" />
-          <Text style={styles.soundText}>Sonido original</Text>
+          <Text style={styles.soundText}>{t('common.originalSound')}</Text>
         </View>
       </View>
     </View>

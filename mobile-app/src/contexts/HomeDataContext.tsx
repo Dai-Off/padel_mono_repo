@@ -16,7 +16,12 @@ import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
-import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
+import {
+  getMatchBooking,
+  getMatchListPhase,
+  shouldIncludeInHomeMisPartidos,
+  shouldIncludePartidoInHomeCarousel,
+} from '../domain/matchLifecycle';
 import { normalizeMatchEnriched } from '../api/normalizeMatch';
 import { defaultPartidosDiscoveryDateRange } from '../domain/partidosFilters';
 import {
@@ -192,12 +197,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         const b = getMatchBooking(m);
         return Boolean(b?.start_at && b?.end_at);
       });
-      const mineVisible = mineRawBase.filter((m) => {
-        const b = getMatchBooking(m)!;
-        const phase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
-        const hasMyFeedback = (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true;
-        return !(phase === 'past' && hasMyFeedback);
-      });
+      const mineVisible = mineRawBase.filter((m) => shouldIncludeInHomeMisPartidos(m));
       const mineRaw = [
         ...mineVisible
           .filter((m) => {
@@ -223,7 +223,8 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       const viewerPlayerId = playerProfile?.id ?? null;
       const mapped = mineRaw
         .map((m) => mapMatchToPartido(m, { viewerPlayerId }))
-        .filter((p): p is PartidoItem => p != null);
+        .filter((p): p is PartidoItem => p != null)
+        .filter(shouldIncludePartidoInHomeCarousel);
       return enrichPartidosWithProfileAvatar(mapped, playerProfile);
     },
     [],

@@ -10,6 +10,7 @@ import {
   AuthFooter,
 } from '../components/auth';
 import { applyRecoveryPassword } from '../api/auth';
+import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 
 export type RecoveryPayload = {
@@ -24,6 +25,7 @@ type ResetPasswordScreenProps = {
 };
 
 export function ResetPasswordScreen({ recovery, onBackToLogin }: ResetPasswordScreenProps) {
+  const { t } = useTranslation();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -34,15 +36,15 @@ export function ResetPasswordScreen({ recovery, onBackToLogin }: ResetPasswordSc
 
   const handleSubmit = async () => {
     if (!hasCredential) {
-      setError('Enlace incompleto. Solicita un nuevo correo de recuperación.');
+      setError(t('auth.resetIncompleteLink'));
       return;
     }
     if (password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres');
+      setError(t('common.passwordMin6'));
       return;
     }
     if (password !== confirm) {
-      setError('Las contraseñas no coinciden');
+      setError(t('common.passwordsMismatch'));
       return;
     }
 
@@ -58,10 +60,10 @@ export function ResetPasswordScreen({ recovery, onBackToLogin }: ResetPasswordSc
       if (res.ok) {
         setSuccess(true);
       } else {
-        setError(res.error ?? 'No se pudo actualizar la contraseña');
+        setError(res.error ?? t('auth.resetUpdateError'));
       }
     } catch {
-      setError('Error de conexión con el servidor');
+      setError(t('common.connectionErrorServer'));
     } finally {
       setLoading(false);
     }
@@ -77,7 +79,7 @@ export function ResetPasswordScreen({ recovery, onBackToLogin }: ResetPasswordSc
         {error ? <ErrorBanner message={error} variant="error" /> : null}
         {success ? (
           <ErrorBanner
-            message="Contraseña actualizada. Ya puedes iniciar sesión con la nueva clave."
+            message={t('auth.resetSuccess')}
             variant="info"
           />
         ) : null}
@@ -85,18 +87,18 @@ export function ResetPasswordScreen({ recovery, onBackToLogin }: ResetPasswordSc
         {!success ? (
           <>
             <AuthInput
-              label="Nueva contraseña"
+              label={t('auth.resetNewPasswordLabel')}
               icon="lock-closed-outline"
-              placeholder="Mínimo 6 caracteres"
+              placeholder={t('auth.resetNewPasswordPlaceholder')}
               secureTextEntry
               value={password}
               onChangeText={setPassword}
               editable={!loading}
             />
             <AuthInput
-              label="Confirmar contraseña"
+              label={t('auth.confirmPasswordLabel')}
               icon="lock-closed-outline"
-              placeholder="Repite la contraseña"
+              placeholder={t('auth.resetConfirmPlaceholder')}
               secureTextEntry
               value={confirm}
               onChangeText={setConfirm}
@@ -110,15 +112,15 @@ export function ResetPasswordScreen({ recovery, onBackToLogin }: ResetPasswordSc
                 disabled={loading || !hasCredential}
                 icon="checkmark-circle-outline"
               >
-                Guardar contraseña
+                {t('auth.resetSavePassword')}
               </AuthButton>
             </View>
           </>
         ) : null}
 
         <AuthFormLink
-          prompt={success ? 'Listo.' : '¿Prefieres volver?'}
-          action={success ? 'Ir al inicio de sesión' : 'Volver al inicio de sesión'}
+          prompt={success ? t('auth.resetReadyPrompt') : t('auth.resetPreferBackPrompt')}
+          action={success ? t('auth.resetGoLogin') : t('auth.resetBackLogin')}
           onPress={onBackToLogin}
           disabled={loading}
         />

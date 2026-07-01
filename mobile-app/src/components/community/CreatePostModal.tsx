@@ -17,9 +17,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { createPost } from '../../api/community';
 import { useAuth } from '../../contexts/AuthContext';
 import { MediaFile, framesForDuration, sampleTimes, extractFrame } from '../../lib/videoFrames';
+import { useTranslation } from '../../i18n';
 
 const { width } = Dimensions.get('window');
 
@@ -33,16 +35,16 @@ interface CreatePostModalProps {
   allowedTypes?: PostType[];
 }
 
-const TITLE_BY_TYPE: Record<PostType, string> = {
-  post: 'Nuevo Post',
-  story: 'Nueva historia',
-  reel: 'Nuevo Clip',
+const TITLE_KEY_BY_TYPE: Record<PostType, string> = {
+  post: 'community.createPostTitlePost',
+  story: 'community.createPostTitleStory',
+  reel: 'community.createPostTitleReel',
 };
 
-const TAB_LABEL_BY_TYPE: Record<PostType, string> = {
-  post: 'Post',
-  story: 'Historia',
-  reel: 'Clip',
+const TAB_KEY_BY_TYPE: Record<PostType, string> = {
+  post: 'community.createPostTabPost',
+  story: 'community.createPostTabStory',
+  reel: 'community.createPostTabReel',
 };
 
 type PickerCfg = { mediaTypes: ('images' | 'videos')[]; multiple: boolean; limit: number };
@@ -58,6 +60,7 @@ const MEDIA_CONFIG: Record<PostType, PickerCfg> = {
 };
 
 export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onClose, onSuccess, allowedTypes = ['post', 'story', 'reel'] }) => {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const token = session?.access_token;
   const insets = useSafeAreaInsets();
@@ -125,7 +128,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
   const openGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para publicar.');
+      Alert.alert(t('common.permissionDenied'), t('common.permissionGalleryPublish'));
       return;
     }
 
@@ -159,7 +162,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso denegado', 'Necesitamos acceso a tu cámara.');
+      Alert.alert(t('common.permissionDenied'), t('common.permissionCamera'));
       return;
     }
 
@@ -199,7 +202,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
     setIsCoverSheetVisible(false);
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería.');
+      Alert.alert(t('common.permissionDenied'), t('common.permissionGallery'));
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -229,7 +232,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
       );
       setFrameOptions(frames);
     } catch {
-      Alert.alert('Error', 'No se pudieron generar los fotogramas.');
+      Alert.alert(t('common.error'), t('community.createPostFramesError'));
     } finally {
       setBusyCover(false);
     }
@@ -251,7 +254,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
       setCover({ ...auto, name: `cover-${Date.now()}.jpg` });
       setCoverIsAuto(true);
     } catch {
-      Alert.alert('Error', 'No se pudo generar la portada.');
+      Alert.alert(t('common.error'), t('community.createPostCoverGenError'));
     } finally {
       setBusyCover(false);
     }
@@ -260,14 +263,18 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
   const handlePost = async () => {
     if (selectedImages.length === 0) {
       Alert.alert(
-        'Error',
-        isVideoOnly ? 'Selecciona un vídeo' : allowsVideo ? 'Selecciona una imagen o un vídeo' : 'Selecciona al menos una imagen'
+        t('common.error'),
+        isVideoOnly
+          ? t('community.createPostSelectVideo')
+          : allowsVideo
+            ? t('community.createPostSelectImageOrVideo')
+            : t('community.createPostSelectImage'),
       );
       return;
     }
 
     if (!token) {
-      Alert.alert('Error', 'Debes estar autenticado para publicar');
+      Alert.alert(t('common.error'), t('community.createPostAuthRequired'));
       return;
     }
 
@@ -278,7 +285,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
 
       if (hasVideo) {
         if (!cover) {
-          Alert.alert('Portada necesaria', 'No se pudo preparar la portada del vídeo. Inténtalo de nuevo.');
+          Alert.alert(t('community.createPostCoverRequired'), t('community.createPostCoverError'));
           return;
         }
         thumbnail = cover;
@@ -304,10 +311,10 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
         resetState();
         onClose();
       } else {
-        Alert.alert('Error', res.error || 'No se pudo crear la publicación');
+        Alert.alert(t('common.error'), res.error || t('community.createPostPublishError'));
       }
     } catch {
-      Alert.alert('Error', 'No se pudo preparar el vídeo. Inténtalo de nuevo.');
+      Alert.alert(t('common.error'), t('community.createPostVideoError'));
     } finally {
       setLoading(false);
     }
@@ -335,21 +342,21 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
       transparent={true}
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView behavior="padding" style={styles.overlay}>
         <View style={styles.content}>
           <LinearGradient
             colors={['rgba(241, 143, 52, 0.1)', 'transparent']}
             style={[styles.header, { paddingTop: 20 + insets.top }]}
           >
             <TouchableOpacity onPress={onClose}>
-              <Text style={styles.cancelButton}>Cancelar</Text>
+              <Text style={styles.cancelButton}>{t('community.createPostCancel')}</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>{TITLE_BY_TYPE[selectedType]}</Text>
+            <Text style={styles.title}>{t(TITLE_KEY_BY_TYPE[selectedType])}</Text>
             <TouchableOpacity onPress={handlePost} disabled={loading}>
               {loading ? (
                 <ActivityIndicator size="small" color="#F18F34" />
               ) : (
-                <Text style={styles.postButton}>Compartir</Text>
+                <Text style={styles.postButton}>{t('community.createPostShare')}</Text>
               )}
             </TouchableOpacity>
           </LinearGradient>
@@ -363,14 +370,19 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
                   onPress={() => setSelectedType(type)}
                 >
                   <Text style={[styles.typeTabText, selectedType === type && styles.activeTypeTabText]}>
-                    {TAB_LABEL_BY_TYPE[type]}
+                    {t(TAB_KEY_BY_TYPE[type])}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
           )}
 
-          <View style={styles.scrollContent}>
+          <KeyboardAwareScrollView
+            style={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bottomOffset={24}
+          >
             <View style={styles.mediaSection}>
               <FlatList
                 // Tipos de una sola pieza (story/reel): ocultamos "Añadir" cuando ya hay una.
@@ -407,7 +419,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
                   ) : (
                     <TouchableOpacity style={styles.addButton} onPress={handleAddMedia}>
                       <Ionicons name={isVideoOnly ? 'videocam' : 'camera'} size={30} color="rgba(255,255,255,0.3)" />
-                      <Text style={styles.addMediaText}>Añadir</Text>
+                      <Text style={styles.addMediaText}>{t('community.createPostAdd')}</Text>
                     </TouchableOpacity>
                   )
                 )}
@@ -425,14 +437,14 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
                 ) : (
                   <Ionicons name="image-outline" size={18} color="#F18F34" />
                 )}
-                <Text style={styles.coverButtonText}>Cambiar portada</Text>
+                <Text style={styles.coverButtonText}>{t('community.createPostChangeCover')}</Text>
               </TouchableOpacity>
             )}
 
             <View style={styles.formSection}>
               <TextInput
                 style={styles.captionInput}
-                placeholder={isVideoOnly ? 'Escribe una descripción...' : 'Escribe un pie de foto...'}
+                placeholder={isVideoOnly ? t('community.createPostCaptionVideo') : t('community.createPostCaptionPhoto')}
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 multiline
                 value={caption}
@@ -443,14 +455,14 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
                 <Ionicons name="location-outline" size={20} color="#F18F34" />
                 <TextInput
                   style={styles.input}
-                  placeholder="Agregar ubicación"
+                  placeholder={t('community.createPostLocationPlaceholder')}
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   value={location}
                   onChangeText={setLocation}
                 />
               </View>
             </View>
-          </View>
+          </KeyboardAwareScrollView>
         </View>
 
         {/* Bottom sheet propio para elegir origen de la media (sustituye al Alert nativo) */}
@@ -464,21 +476,27 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
             <View style={[styles.sheet, { paddingBottom: 16 + insets.bottom }]}>
               <View style={styles.sheetHandle} />
               <Text style={styles.sheetTitle}>
-                {isVideoOnly ? 'AÑADIR VÍDEO' : allowsVideo ? 'AÑADIR IMAGEN O VÍDEO' : 'AÑADIR IMAGEN'}
+                {isVideoOnly
+                  ? t('community.createPostMediaSheetVideo')
+                  : allowsVideo
+                    ? t('community.createPostMediaSheetImageOrVideo')
+                    : t('community.createPostMediaSheetImage')}
               </Text>
 
               <TouchableOpacity style={styles.sheetOption} onPress={() => pickFrom('camera')}>
                 <Ionicons name={isVideoOnly ? 'videocam-outline' : 'camera-outline'} size={22} color="#F18F34" />
-                <Text style={styles.sheetOptionText}>{isVideoOnly ? 'Grabar vídeo' : 'Cámara'}</Text>
+                <Text style={styles.sheetOptionText}>
+                  {isVideoOnly ? t('community.createPostRecordVideo') : t('common.camera')}
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.sheetOption} onPress={() => pickFrom('gallery')}>
                 <Ionicons name="images-outline" size={22} color="#F18F34" />
-                <Text style={styles.sheetOptionText}>Galería</Text>
+                <Text style={styles.sheetOptionText}>{t('community.createPostGallery')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.sheetCancel} onPress={() => setIsMediaSheetVisible(false)}>
-                <Text style={styles.sheetCancelText}>Cancelar</Text>
+                <Text style={styles.sheetCancelText}>{t('community.createPostCancel')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -494,25 +512,25 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
             />
             <View style={[styles.sheet, { paddingBottom: 16 + insets.bottom }]}>
               <View style={styles.sheetHandle} />
-              <Text style={styles.sheetTitle}>PORTADA DEL CLIP</Text>
+              <Text style={styles.sheetTitle}>{t('community.createPostCoverSheetTitle')}</Text>
 
               <TouchableOpacity style={styles.sheetOption} onPress={pickCoverImage}>
                 <Ionicons name="image-outline" size={22} color="#F18F34" />
-                <Text style={styles.sheetOptionText}>Subir imagen</Text>
+                <Text style={styles.sheetOptionText}>{t('community.createPostUploadImage')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.sheetOption} onPress={openFrameChooser}>
                 <Ionicons name="film-outline" size={22} color="#F18F34" />
-                <Text style={styles.sheetOptionText}>Elegir fotograma</Text>
+                <Text style={styles.sheetOptionText}>{t('community.createPostPickFrame')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.sheetOption} onPress={restoreAutoCover}>
                 <Ionicons name="refresh-outline" size={22} color="#F18F34" />
-                <Text style={styles.sheetOptionText}>Restaurar automática</Text>
+                <Text style={styles.sheetOptionText}>{t('community.createPostRestoreAuto')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.sheetCancel} onPress={() => setIsCoverSheetVisible(false)}>
-                <Text style={styles.sheetCancelText}>Cancelar</Text>
+                <Text style={styles.sheetCancelText}>{t('community.createPostCancel')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -528,7 +546,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
             />
             <View style={[styles.sheet, { paddingBottom: 16 + insets.bottom }]}>
               <View style={styles.sheetHandle} />
-              <Text style={styles.sheetTitle}>ELIGE UN FOTOGRAMA</Text>
+              <Text style={styles.sheetTitle}>{t('community.createPostFrameSheetTitle')}</Text>
 
               <FlatList
                 data={frameOptions}
@@ -544,12 +562,12 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
               />
 
               <TouchableOpacity style={styles.sheetCancel} onPress={() => setFrameOptions(null)}>
-                <Text style={styles.sheetCancelText}>Cancelar</Text>
+                <Text style={styles.sheetCancelText}>{t('community.createPostCancel')}</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };

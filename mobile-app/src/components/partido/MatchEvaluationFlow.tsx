@@ -3,7 +3,6 @@ import type { Dispatch, SetStateAction } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -14,9 +13,12 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { PartidoItem, PartidoPlayer } from '../../screens/PartidosScreen';
+import { SafeScrollView } from '../ui/SafeScrollView';
+import { useTranslation } from '../../i18n';
 
 const BG = '#0F0F0F';
 const ACCENT = '#F18F34';
@@ -42,40 +44,33 @@ const TOTAL_SECTIONS = 3;
 
 type TeammateSlot = { playerIndex: number; order: number };
 
-const LEVEL_OPTIONS: {
+type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
+
+function getLevelOptions(t: TranslateFn): {
   key: TeammateLevelRating;
   emoji: string;
   title: string;
   sub: string;
-}[] = [
-  { key: 'above', emoji: '⬆️', title: 'Por encima de mi nivel', sub: 'Jugaba mejor que yo' },
-  { key: 'match', emoji: '✅', title: 'Acertado', sub: 'Nivel similar al mío' },
-  { key: 'below', emoji: '⬇️', title: 'Por debajo de mi nivel', sub: 'Jugaba peor que yo' },
-];
+}[] {
+  return [
+    { key: 'above', emoji: '⬆️', title: t('partidos.evalLevelAbove'), sub: t('partidos.evalLevelAboveSub') },
+    { key: 'match', emoji: '✅', title: t('partidos.evalLevelMatch'), sub: t('partidos.evalLevelMatchSub') },
+    { key: 'below', emoji: '⬇️', title: t('partidos.evalLevelBelow'), sub: t('partidos.evalLevelBelowSub') },
+  ];
+}
 
-const TEAMMATE_EXTRA_QUESTIONS = [
-  '¿Qué aspecto destacarías de su juego hoy?',
-  '¿Cómo ha sido la compenetración en pista?',
-  '¿Qué tal anduvo de movilidad y desplazamiento?',
-  '¿Qué golpe o técnica le resultó más efectivo?',
-  '¿Cómo manejó los momentos de mayor presión?',
-  '¿Qué tal estuvo su consistencia en el saque?',
-  '¿Cómo calificarías su actitud y compañerismo?',
-  '¿Qué aspecto técnico crees que podría mejorar?',
-  '¿Cómo se desenvolvió en el juego de volea?',
-  '¿Qué tal estuvo en la lectura táctica del partido?',
-];
+const EVAL_EXTRA_Q_COUNT = 10;
 
-function pickExtraQuestion(matchId: string, playerIndex: number): string {
-  if (!matchId) return TEAMMATE_EXTRA_QUESTIONS[0];
+function pickExtraQuestion(matchId: string, playerIndex: number, t: TranslateFn): string {
+  if (!matchId) return t('partidos.evalExtraQ0');
   let hash = 0;
   const str = `${matchId}-${playerIndex}`;
   for (let i = 0; i < str.length; i++) {
     hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0; // Convert to 32bit integer
+    hash |= 0;
   }
-  const idx = Math.abs(hash) % TEAMMATE_EXTRA_QUESTIONS.length;
-  return TEAMMATE_EXTRA_QUESTIONS[idx] ?? TEAMMATE_EXTRA_QUESTIONS[0];
+  const idx = Math.abs(hash) % EVAL_EXTRA_Q_COUNT;
+  return t(`partidos.evalExtraQ${idx}`);
 }
 
 type Props = {
@@ -133,11 +128,14 @@ function isValidCompletedPadelSet(us: number, them: number): boolean {
   return false;
 }
 
-function validateCompletedPadelMatch(sets: Array<{ us: number; them: number }>): string | null {
-  if (sets.length < 2) return 'Debes cargar al menos 2 sets.';
-  if (sets.length > 3) return 'Solo se permiten hasta 3 sets.';
+function validateCompletedPadelMatch(
+  sets: Array<{ us: number; them: number }>,
+  t: TranslateFn,
+): string | null {
+  if (sets.length < 2) return t('partidos.evalValidateMin2Sets');
+  if (sets.length > 3) return t('partidos.evalValidateMax3Sets');
   if (!sets.every((s) => isValidCompletedPadelSet(s.us, s.them))) {
-    return 'Set inválido. Usa 6-0..6-4, 7-5, 7-6 o empates (ej. 5-5, 6-6).';
+    return t('partidos.evalValidateInvalidSet');
   }
 
   let usWins = 0;
@@ -154,7 +152,7 @@ function validateCompletedPadelMatch(sets: Array<{ us: number; them: number }>):
 
   if (sets.length === 2) {
     if (!((usWins === 2 && themWins === 0) || (themWins === 2 && usWins === 0))) {
-      return 'Con 2 sets, el resultado debe quedar 2-0 o 1-1.';
+      return t('partidos.evalValidate2SetResult');
     }
     return null;
   }
@@ -162,9 +160,9 @@ function validateCompletedPadelMatch(sets: Array<{ us: number; them: number }>):
   // Aquí sets.length === 3
   const firstWinner = sets[0].us > sets[0].them ? 'US' : sets[0].them > sets[0].us ? 'THEM' : 'DRAW';
   const secondWinner = sets[1].us > sets[1].them ? 'US' : sets[1].them > sets[1].us ? 'THEM' : 'DRAW';
-  
+
   if (firstWinner !== 'DRAW' && firstWinner === secondWinner) {
-    return 'Si los dos primeros sets los gana el mismo equipo, no puede haber tercer set.';
+    return t('partidos.evalValidateNoThirdSet');
   }
   return null;
 }
@@ -193,13 +191,14 @@ export function MatchEvaluationFlow({
   onVoteScore,
   onCompleteFeedback,
 }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const teammates = useMemo(() => buildTeammateList(partido, currentPlayerId), [partido, currentPlayerId]);
 
   const [showSuccess, setShowSuccess] = useState(false);
 
   /** 0 = compañeros (sub-pasos internos), 1 = marcador, 2 = comentario final */
-  const [sectionIndex, setSectionIndex] = useState(0);
+  const [sectionIndex, setSectionIndex] = useState(partido.hasMyFeedback ? 1 : 0);
   /** Dentro de la pantalla 1: índice del compañero actual */
   const [teammatePageIndex, setTeammatePageIndex] = useState(0);
   const [ratings, setRatings] = useState<Record<number, { level: TeammateLevelRating | null; note: string }>>(
@@ -224,7 +223,7 @@ export function MatchEvaluationFlow({
 
   const reset = useCallback(() => {
     setShowSuccess(false);
-    setSectionIndex(0);
+    setSectionIndex(partido.hasMyFeedback ? 1 : 0);
     setTeammatePageIndex(0);
     setRatings({});
     setSets([
@@ -234,7 +233,7 @@ export function MatchEvaluationFlow({
     ]);
     setFeedbackText('');
     setSubmitting(false);
-  }, []);
+  }, [partido.hasMyFeedback]);
 
   useEffect(() => {
     if (visible) {
@@ -292,6 +291,10 @@ export function MatchEvaluationFlow({
       return;
     }
     if (sectionIndex === 1) {
+      if (partido.hasMyFeedback) {
+        handleClose();
+        return;
+      }
       if (scoreStatus === 'pending') {
         setSubmitting(true);
         const parsed = visibleSets
@@ -316,7 +319,7 @@ export function MatchEvaluationFlow({
         if (!propRes.ok) {
           // Revert back to step 2 if proposal failed
           setSectionIndex(1);
-          Alert.alert('No se pudo guardar el marcador', propRes.error ?? 'Error de conexión');
+          Alert.alert(t('alerts.matchEval.saveScoreFail'), propRes.error ?? t('common.connectionError'));
           return;
         }
         return;
@@ -330,18 +333,18 @@ export function MatchEvaluationFlow({
     const voteRes = await onVoteScore(vote);
     setSubmitting(false);
     if (!voteRes.ok) {
-      Alert.alert('No se pudo registrar el voto', voteRes.error ?? 'Error de conexión');
+      Alert.alert(t('alerts.matchEval.voteFail'), voteRes.error ?? t('common.connectionError'));
     }
   };
 
   const finish = async () => {
     if (submitting) return;
-    const teammateRatings = teammates.map((t) => {
-      const p = partido.players[t.playerIndex];
-      const r = ratings[t.playerIndex];
+    const teammateRatings = teammates.map((slot) => {
+      const p = partido.players[slot.playerIndex];
+      const r = ratings[slot.playerIndex];
       return {
-        playerIndex: t.playerIndex,
-        playerName: p?.name ?? 'Jugador',
+        playerIndex: slot.playerIndex,
+        playerName: p?.name ?? t('common.playerFallback'),
         level: (r?.level ?? 'match') as TeammateLevelRating,
         note: r?.note?.trim() ?? '',
       };
@@ -354,7 +357,7 @@ export function MatchEvaluationFlow({
     });
     setSubmitting(false);
     if (!submitResult.ok) {
-      Alert.alert('No se pudo guardar', submitResult.error ?? 'Intenta de nuevo en unos segundos.');
+      Alert.alert(t('alerts.matchEval.saveFail'), submitResult.error ?? t('alerts.matchEval.retryLater'));
       return;
     }
     setShowSuccess(true);
@@ -362,12 +365,15 @@ export function MatchEvaluationFlow({
 
   const nextLabelForStep = (): string => {
     if (sectionIndex === 0) {
-      if (teammates.length === 0) return 'Siguiente paso';
-      if (teammatePageIndex < teammates.length - 1) return 'Siguiente jugador';
-      return 'Siguiente paso';
+      if (teammates.length === 0) return t('partidos.createNext');
+      if (teammatePageIndex < teammates.length - 1) return t('partidos.createNext');
+      return t('partidos.createNext');
     }
-    if (sectionIndex === 1) return 'Siguiente paso';
-    return 'Finalizar';
+    if (sectionIndex === 1) {
+      if (partido.hasMyFeedback) return t('partidos.evalFinish');
+      return t('partidos.createNext');
+    }
+    return t('partidos.evalFinish');
   };
 
   const canAdvanceTeammate = (playerIndex: number) => ratings[playerIndex]?.level != null;
@@ -375,14 +381,14 @@ export function MatchEvaluationFlow({
   const canAdvanceScore = (): { ok: boolean; reason: string | null } => {
     if (scoreStatus !== 'pending') {
       if (scoreStatus === 'pending_votes' && !isScoreProposer && !hasVoted) {
-        return { ok: false, reason: 'Debes confirmar o rechazar el marcador para continuar.' };
+        return { ok: false, reason: t('partidos.evalAgreeResultSub') };
       }
       return { ok: true, reason: null };
     }
     const withAnyValue = visibleSets.filter((row) => row.us.trim() !== '' || row.them.trim() !== '');
-    if (withAnyValue.length === 0) return { ok: false, reason: 'Debes cargar el resultado del partido.' };
+    if (withAnyValue.length === 0) return { ok: false, reason: t('partidos.evalScoreSub') };
     if (withAnyValue.some((row) => row.us.trim() === '' || row.them.trim() === '')) {
-      return { ok: false, reason: 'Completa ambos números en cada set cargado.' };
+      return { ok: false, reason: t('alerts.matchEval.saveScoreFail') };
     }
     const parsed = withAnyValue
       .map((row) => ({
@@ -391,9 +397,9 @@ export function MatchEvaluationFlow({
       }))
       .filter((s) => !Number.isNaN(s.us) && !Number.isNaN(s.them));
     if (parsed.length !== withAnyValue.length) {
-      return { ok: false, reason: 'Hay sets con valores no válidos.' };
+      return { ok: false, reason: t('alerts.matchEval.saveScoreFail') };
     }
-    const reason = validateCompletedPadelMatch(parsed);
+    const reason = validateCompletedPadelMatch(parsed, t);
     return { ok: reason == null, reason };
   };
 
@@ -428,15 +434,13 @@ export function MatchEvaluationFlow({
               <View style={styles.successIconRing}>
                 <Ionicons name="checkmark-circle" size={48} color={SUCCESS_GREEN} />
               </View>
-              <Text style={styles.successTitle}>¡Gracias por evaluar!</Text>
-              <Text style={styles.successSubtitle}>
-                Tus respuestas nos ayudan a nivelar mejor los partidos y mejorar la experiencia de todos en WeMatch.
-              </Text>
+              <Text style={styles.successTitle}>{t('partidos.evalThanks')}</Text>
+              <Text style={styles.successSubtitle}>{t('partidos.evalLevelSub')}</Text>
               <Pressable
                 onPress={handleVolverInicio}
                 style={({ pressed }) => [styles.successCtaWrap, pressed && styles.pressed]}
                 accessibilityRole="button"
-                accessibilityLabel="Volver a inicio"
+                accessibilityLabel={t('partidos.evalBackHome')}
               >
                 <LinearGradient
                   colors={[ACCENT, GRADIENT_BTN_END]}
@@ -444,7 +448,7 @@ export function MatchEvaluationFlow({
                   end={{ x: 1, y: 0.5 }}
                   style={styles.successCtaGradient}
                 >
-                  <Text style={styles.successCtaText}>Volver a inicio</Text>
+                  <Text style={styles.successCtaText}>{t('partidos.evalBackHome')}</Text>
                 </LinearGradient>
               </Pressable>
             </View>
@@ -454,11 +458,11 @@ export function MatchEvaluationFlow({
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.headerSticky}>
           <View style={styles.headerRow}>
-            <Pressable onPress={handleClose} style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]} accessibilityLabel="Cerrar">
+            <Pressable onPress={handleClose} style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]} accessibilityLabel={t('common.close')}>
               <Ionicons name="close" size={22} color="#fff" />
             </Pressable>
             <View style={styles.headerCenter}>
-              <Text style={styles.headerKicker}>Evaluación de Partido</Text>
+              <Text style={styles.headerKicker}>{t('partidos.evalTitle')}</Text>
               <Text style={styles.headerStep}>
                 {stepNumber} de {TOTAL_SECTIONS}
               </Text>
@@ -477,10 +481,10 @@ export function MatchEvaluationFlow({
 
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           keyboardVerticalOffset={0}
         >
-          <ScrollView
+          <SafeScrollView
             style={styles.scroll}
             contentContainerStyle={[
               styles.scrollContent,
@@ -491,6 +495,7 @@ export function MatchEvaluationFlow({
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            bottomOffset={sectionIndex === 2 ? 120 : 24}
           >
             {sectionIndex === 0 && teammates.length === 0 && (
               <EmptyTeammatesSection />
@@ -547,7 +552,7 @@ export function MatchEvaluationFlow({
                 />
               </Pressable>
             )}
-          </ScrollView>
+          </SafeScrollView>
         </KeyboardAvoidingView>
 
         {sectionIndex === 2 && (
@@ -558,7 +563,7 @@ export function MatchEvaluationFlow({
                 disabled={submitting}
                 style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
               >
-                <Text style={styles.secondaryBtnText}>Omitir</Text>
+                <Text style={styles.secondaryBtnText}>{t('partidos.evalSkip')}</Text>
               </Pressable>
               <Pressable
                 onPress={finish}
@@ -569,7 +574,7 @@ export function MatchEvaluationFlow({
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <>
-                    <Text style={styles.finalBtnText}>Finalizar</Text>
+                    <Text style={styles.finalBtnText}>{t('partidos.evalFinish')}</Text>
                     <Ionicons name="chevron-forward" size={20} color="#fff" />
                   </>
                 )}
@@ -584,13 +589,14 @@ export function MatchEvaluationFlow({
 }
 
 function EmptyTeammatesSection() {
+  const { t } = useTranslation();
   return (
     <View style={styles.section}>
       <View style={styles.heroIcon}>
         <Ionicons name="people" size={28} color={ACCENT} />
       </View>
-      <Text style={styles.title}>¿Cómo has visto el nivel de tus compañeros?</Text>
-      <Text style={styles.subtitle}>No hay otros jugadores para valorar en este partido.</Text>
+      <Text style={styles.title}>{t('partidos.evalLevelQuestion')}</Text>
+      <Text style={styles.subtitle}>{t('partidos.evalLevelEmptySub')}</Text>
     </View>
   );
 }
@@ -614,18 +620,20 @@ function TeammateStepContent({
   matchId: string;
   playerIndex: number;
 }) {
+  const { t } = useTranslation();
   const dots = Array.from({ length: teammatesTotal }, (_, i) => i);
-  const extraQ = pickExtraQuestion(matchId, playerIndex);
+  const extraQ = pickExtraQuestion(matchId, playerIndex, t);
   const noteEnabled = rating.level != null;
-  const placeholder = 'Opcional - Escribe tu respuesta...';
+  const placeholder = t('partidos.evalOptionalPlaceholder');
+  const levelOptions = getLevelOptions(t);
 
   return (
     <View style={styles.section}>
       <View style={styles.heroIcon}>
         <Ionicons name="people" size={28} color={ACCENT} />
       </View>
-      <Text style={styles.title}>¿Cómo has visto el nivel de tus compañeros?</Text>
-      <Text style={styles.subtitle}>Nos ayuda a nivelar mejor los partidos</Text>
+      <Text style={styles.title}>{t('partidos.evalLevelQuestion')}</Text>
+      <Text style={styles.subtitle}>{t('partidos.evalLevelSub')}</Text>
 
       <View style={styles.dotRow}>
         {dots.map((i) => (
@@ -645,7 +653,7 @@ function TeammateStepContent({
           <Text style={styles.avatarTxt}>{initials(player)}</Text>
         </View>
         <View>
-          <Text style={styles.playerName}>{player.name || 'Jugador'}</Text>
+          <Text style={styles.playerName}>{player.name || t('common.playerFallback')}</Text>
           <Text style={styles.playerMeta}>
             Jugador {teammateOrder + 1} de {teammatesTotal}
           </Text>
@@ -653,7 +661,7 @@ function TeammateStepContent({
       </View>
 
       <View style={styles.options}>
-        {LEVEL_OPTIONS.map((opt) => {
+        {levelOptions.map((opt) => {
           const selected = rating.level === opt.key;
           return (
             <Pressable
@@ -702,6 +710,7 @@ function ScoreStepContent({
   onChangeSets: Dispatch<SetStateAction<{ us: string; them: string }[]>>;
   validationReason: string | null;
 }) {
+  const { t } = useTranslation();
   const setRow = (i: number, field: 'us' | 'them', v: string) => {
     const cleaned = v.replace(/[^\d]/g, '').slice(0, 1);
     const normalized =
@@ -718,19 +727,19 @@ function ScoreStepContent({
       <View style={styles.heroIcon}>
         <Ionicons name="trophy" size={28} color={ACCENT} />
       </View>
-      <Text style={styles.title}>¿Cuál fue el resultado?</Text>
-      <Text style={styles.subtitle}>Introduce el marcador por sets</Text>
+      <Text style={styles.title}>{t('partidos.evalScoreQuestion')}</Text>
+      <Text style={styles.subtitle}>{t('partidos.evalScoreSub')}</Text>
 
       <View style={styles.setHeaderRow}>
-        <Text style={styles.setHeadMuted}>Set</Text>
-        <Text style={[styles.setHeadAccent, styles.setColUs]}>Nosotros</Text>
+        <Text style={styles.setHeadMuted}>{t('partidos.evalSetHeader')}</Text>
+        <Text style={[styles.setHeadAccent, styles.setColUs]}>{t('partidos.evalUs')}</Text>
         <View style={styles.setDash} />
-        <Text style={[styles.setHeadMuted, styles.setColThem]}>Ellos</Text>
+        <Text style={[styles.setHeadMuted, styles.setColThem]}>{t('partidos.evalThem')}</Text>
       </View>
 
       {sets.slice(0, showThirdSet ? 3 : 2).map((row, i) => (
         <View key={i} style={styles.setGrid}>
-          <Text style={styles.setLabel}>Set {i + 1}</Text>
+          <Text style={styles.setLabel}>{t('partidos.evalSetN', { n: i + 1 })}</Text>
           <TextInput
             value={row.us}
             onChangeText={(t) => setRow(i, 'us', t)}
@@ -766,18 +775,19 @@ function FeedbackStepContent({
   text: string;
   onChangeText: (t: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.section}>
       <View style={styles.heroIcon}>
         <Ionicons name="chatbubble-outline" size={28} color={ACCENT} />
       </View>
-      <Text style={styles.title}>¿Cómo ha ido el partido?</Text>
-      <Text style={styles.subtitle}>Cuéntanos lo que quieras, sin límite</Text>
+      <Text style={styles.title}>{t('partidos.evalHowMatch')}</Text>
+      <Text style={styles.subtitle}>{t('partidos.evalHowMatchSub')}</Text>
 
       <TextInput
         value={text}
         onChangeText={onChangeText}
-        placeholder="Ej: Buen partido, bastante igualado..."
+        placeholder={t('partidos.evalFeedbackPlaceholder')}
         placeholderTextColor="rgba(255,255,255,0.3)"
         style={styles.textarea}
         multiline
@@ -1300,18 +1310,19 @@ function ScoreVoteStep({
   onVote: (vote: 'confirm' | 'reject') => void;
   submitting: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.section}>
       <View style={styles.heroIcon}>
         <Ionicons name="checkbox-outline" size={28} color={ACCENT} />
       </View>
-      <Text style={styles.title}>¿Estás de acuerdo con el resultado?</Text>
-      <Text style={styles.subtitle}>Un jugador ha propuesto este marcador:</Text>
+      <Text style={styles.title}>{t('partidos.evalAgreeResult')}</Text>
+      <Text style={styles.subtitle}>{t('partidos.evalAgreeResultSub')}</Text>
 
       <View style={styles.scoreBoardCard}>
         {sets.map((s, idx) => (
           <View key={idx} style={styles.scoreBoardRow}>
-            <Text style={styles.scoreBoardSetLabel}>Set {idx + 1}</Text>
+            <Text style={styles.scoreBoardSetLabel}>{t('partidos.evalSetN', { n: idx + 1 })}</Text>
             <View style={styles.scoreBoardValues}>
               <Text style={styles.scoreBoardValueUs}>{s.us}</Text>
               <Text style={styles.scoreBoardDash}>-</Text>
@@ -1337,7 +1348,7 @@ function ScoreVoteStep({
           ) : (
             <>
               <Ionicons name="close-circle" size={24} color="#f87171" />
-              <Text style={styles.voteBtnTextReject}>Rechazar</Text>
+              <Text style={styles.voteBtnTextReject}>{t('partidos.evalReject')}</Text>
             </>
           )}
         </Pressable>
@@ -1356,7 +1367,7 @@ function ScoreVoteStep({
           ) : (
             <>
               <Ionicons name="checkmark-circle" size={24} color="#34d399" />
-              <Text style={styles.voteBtnTextConfirm}>Confirmar</Text>
+              <Text style={styles.voteBtnTextConfirm}>{t('partidos.evalConfirm')}</Text>
             </>
           )}
         </Pressable>
@@ -1374,6 +1385,7 @@ function ScoreWaitingBanner({
   hasVoted: boolean;
   voteCounts?: { confirm: number; reject: number } | null;
 }) {
+  const { t } = useTranslation();
   const confirms = voteCounts?.confirm ?? 0;
   const totalVotes = confirms + (voteCounts?.reject ?? 0);
   return (
@@ -1381,17 +1393,17 @@ function ScoreWaitingBanner({
       <View style={styles.heroIcon}>
         <Ionicons name="time-outline" size={28} color={ACCENT} />
       </View>
-      <Text style={styles.title}>Esperando confirmación</Text>
+      <Text style={styles.title}>{t('partidos.evalWaiting')}</Text>
       <Text style={styles.subtitle}>
         {hasVoted
-          ? `Ya registramos tu voto. Esperando que los demás confirmen (han votado ${totalVotes}/3).`
-          : `Esperando que tus rivales confirmen el marcador (han votado ${totalVotes}/3).`}
+          ? t('partidos.evalVoteRegistered', { total: totalVotes })
+          : t('partidos.evalVoteWaitingRivals', { total: totalVotes })}
       </Text>
 
       <View style={styles.scoreBoardCard}>
         {sets.map((s, idx) => (
           <View key={idx} style={styles.scoreBoardRow}>
-            <Text style={styles.scoreBoardSetLabel}>Set {idx + 1}</Text>
+            <Text style={styles.scoreBoardSetLabel}>{t('partidos.evalSetN', { n: idx + 1 })}</Text>
             <View style={styles.scoreBoardValues}>
               <Text style={styles.scoreBoardValueUs}>{s.us}</Text>
               <Text style={styles.scoreBoardDash}>-</Text>
@@ -1411,6 +1423,7 @@ function ScoreResultBanner({
   sets: Array<{ us: number; them: number }>;
   status: string;
 }) {
+  const { t } = useTranslation();
   const isConfirmed = status === 'confirmed';
   return (
     <View style={styles.section}>
@@ -1421,18 +1434,18 @@ function ScoreResultBanner({
           color={isConfirmed ? '#10b981' : '#ef4444'}
         />
       </View>
-      <Text style={styles.title}>{isConfirmed ? '¡Marcador confirmado!' : 'Sin acuerdo en el marcador'}</Text>
+      <Text style={styles.title}>
+        {isConfirmed ? t('partidos.evalConfirm') : t('partidos.evalReject')}
+      </Text>
       <Text style={styles.subtitle}>
-        {isConfirmed
-          ? 'El resultado del partido ha sido validado.'
-          : 'No se logró un consenso sobre el resultado de este partido.'}
+        {isConfirmed ? t('partidos.evalAgreeResultSub') : t('partidos.evalLevelEmptySub')}
       </Text>
 
       {sets.length > 0 && (
         <View style={styles.scoreBoardCard}>
           {sets.map((s, idx) => (
             <View key={idx} style={styles.scoreBoardRow}>
-              <Text style={styles.scoreBoardSetLabel}>Set {idx + 1}</Text>
+              <Text style={styles.scoreBoardSetLabel}>{t('partidos.evalSetN', { n: idx + 1 })}</Text>
               <View style={styles.scoreBoardValues}>
                 <Text style={styles.scoreBoardValueUs}>{s.us}</Text>
                 <Text style={styles.scoreBoardDash}>-</Text>

@@ -29,6 +29,7 @@ import { ComingSoon } from '../components/community/ComingSoon';
 import { ClipsGrid } from '../components/community/ClipsGrid';
 import { ClipViewer } from '../components/community/ClipViewer';
 import { StoryEditor } from '../components/community/StoryEditor';
+import { useTranslation } from '../i18n';
 
 interface CommunityScreenProps {
   onBack: () => void;
@@ -38,6 +39,7 @@ interface CommunityScreenProps {
 }
 
 export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMessagesPress, onOpenPlayer }) => {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const token = session?.access_token;
   
@@ -152,7 +154,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color="#FFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Comunidad</Text>
+        <Text style={styles.headerTitle}>{t('community.title')}</Text>
         <TouchableOpacity onPress={onMessagesPress} style={styles.backBtn}>
           <Ionicons name="chatbubble-outline" size={22} color="#FFF" />
         </TouchableOpacity>
@@ -176,7 +178,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
           ListEmptyComponent={() => (
             <View style={styles.emptyContainer}>
               <Ionicons name="images-outline" size={48} color="rgba(255,255,255,0.1)" />
-              <Text style={styles.emptyText}>No hay publicaciones aún</Text>
+              <Text style={styles.emptyText}>{t('community.feedEmpty')}</Text>
             </View>
           )}
           refreshControl={
@@ -206,7 +208,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
       ) : (
         <View style={{ flex: 1 }}>
           {renderHeader()}
-          <ComingSoon title="Próximamente Noticias" icon="newspaper-outline" />
+          <ComingSoon title={t('community.newsComingSoon')} icon="newspaper-outline" />
         </View>
       )}
 

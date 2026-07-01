@@ -48,6 +48,7 @@ import {
   resolveOrganizerFromBooking,
 } from './utils/bookingDisplay';
 import { shouldShowRawBookingInGrid } from './utils/reservationListFilters';
+import { normalizeReservationTypeSlug } from './utils/reservationTypeSlug';
 import {
   pixelsToTime,
   timeToPixels,
@@ -70,10 +71,12 @@ import { authService } from '../../services/auth';
 import { getSupabaseClient } from '../../lib/supabase';
 import {
   clubIanaTimeZone,
+  setClubTimeZone,
   formatTimeHHmmInClubTz,
   dayKeyInClubTz,
   nowMinutesInClubTz,
   clubClockLabel,
+  clubTimeZoneShortLabel,
   gridBoundsForClubDay,
   zonedTimeToUtc,
 } from '../../lib/clubTimeZone';
@@ -128,6 +131,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [typeColorOverrides, setTypeColorOverrides] = useState<Record<string, string>>({});
     const [typeConfigs, setTypeConfigs] = useState<Record<string, { color: string | null; display_name: string; is_system: boolean }>>({});
     const [weeklySchedule, setWeeklySchedule] = useState<unknown>({});
+    const [slotDurationMin, setSlotDurationMin] = useState<number | undefined>(undefined);
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
 
@@ -163,11 +167,14 @@ const useClubData = (dateOrStr: Date | string) => {
                         // Fail silently — cards fall back to hardcoded colors
                     }
                     try {
-                        const clubRes = await apiFetchWithAuth<{ ok: boolean; club?: { weekly_schedule?: unknown } }>(
+                        const clubRes = await apiFetchWithAuth<{ ok: boolean; club?: { weekly_schedule?: unknown; timezone?: string | null; slot_duration_min?: number | null } }>(
                             `/clubs/${encodeURIComponent(id)}`,
                         );
                         if (clubRes?.ok && clubRes.club) {
+                            setClubTimeZone(clubRes.club.timezone);
                             setWeeklySchedule(clubRes.club.weekly_schedule ?? {});
+                            const dur = Number(clubRes.club.slot_duration_min);
+                            setSlotDurationMin(Number.isFinite(dur) && dur > 0 ? dur : undefined);
                         }
                     } catch {
                         setWeeklySchedule({});
@@ -346,9 +353,10 @@ const useClubData = (dateOrStr: Date | string) => {
     }, [authResolved, clubId, dateStr, fetchCourts, fetchBookingsForDate, prefetchWindow]);
 
     // Force-refresh: invalidate cache for current date and re-fetch
-    const refresh = useCallback(async () => {
-        delete bookingsCache[dateStr];
-        await fetchData();
+    const refresh = useCallback(async (opts?: { date?: string }) => {
+        const d = opts?.date ?? dateStr;
+        delete bookingsCache[d];
+        if (d === dateStr) await fetchData();
     }, [dateStr, fetchData]);
 
     useEffect(() => {
@@ -440,7 +448,8 @@ const useClubData = (dateOrStr: Date | string) => {
                         if (rawDate !== dateStr) return;
                         if (
                             raw.court_contention_status === 'won' ||
-                            (raw.reservation_type === 'open_match' && raw.status === 'confirmed')
+                            (raw.status === 'confirmed' &&
+                                (raw.reservation_type === 'open_match' || raw.reservation_type === 'standard'))
                         ) {
                             delete bookingsCache[dateStr];
                             fetchData();
@@ -584,6 +593,7 @@ const useClubData = (dateOrStr: Date | string) => {
         refresh,
         clubId,
         weeklySchedule,
+        slotDurationMin,
         toggleCourtHidden,
         addHiddenCourt,
         removeCourt,
@@ -637,7 +647,7 @@ function mapBookings(
     return visible.map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = resolveOrganizerFromBooking(b);
-        const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
+        const bookingType = normalizeReservationTypeSlug(b.reservation_type ?? b.booking_type ?? 'standard');
         const tournName = linkedTournamentDisplayName(b);
         const tournamentId = linkedTournamentId(b);
         const playerName = resolveBookingGridLabel(b, tournName);
@@ -657,7 +667,7 @@ function mapBookings(
             id: b.id,
             courtId: b.court_id,
             courtName: courtMap.get(b.court_id) || b.court_id,
-            bookingDate: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`,
+            bookingDate: dayKeyInClubTz(start),
             startTime: formatLocalTimeHHmm(start),
             durationMinutes: (new Date(b.end_at).getTime() - start.getTime()) / 60000,
             playerName,
@@ -678,9 +688,14 @@ function mapBookings(
                 const bpTotal = participants.reduce((sum: number, p: any) => sum + (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0), 0);
                 if (bpTotal > 0) return bpTotal;
                 // 3rd priority: for app payments, payment_status='paid' + share_amount_cents is the source of truth
-                return participants
+                const fromShare = participants
                     .filter((p: any) => p.payment_status === 'paid')
                     .reduce((sum: number, p: any) => sum + (p.share_amount_cents ?? 0), 0);
+                if (fromShare > 0) return fromShare;
+                // Reserva confirmada sin desglose (p. ej. pago manual recién persistido)
+                const totalCents = b.total_price_cents ?? 0;
+                if (totalCents > 0 && (b.status === 'confirmed' || b.status === 'flat_rate')) return totalCents;
+                return 0;
             })(),
             detailedPlayers: (() => {
                 if (bookingType === 'tournament') {
@@ -804,6 +819,7 @@ function GrillaViewInner() {
     refresh,
     clubId,
     weeklySchedule,
+    slotDurationMin,
     toggleCourtHidden,
     addHiddenCourt,
     removeCourt,
@@ -886,7 +902,9 @@ function GrillaViewInner() {
     tick();
     const id = setInterval(tick, 60000);
     return () => clearInterval(id);
-  }, []);
+    // weeklySchedule cambia al cargar el club (junto con su zona horaria),
+    // así que recalculamos el marcador "ahora" con la zona ya fijada.
+  }, [weeklySchedule]);
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [recentlyDroppedId, setRecentlyDroppedId] = useState<string | null>(null);
@@ -1123,17 +1141,34 @@ function GrillaViewInner() {
       }
   }, []);
 
-  const handleDeleteBooking = async (bookingId: string, _sendEmail: boolean) => {
-      removeBookingsFromCache([bookingId]);
-      setSelectedModalReservationId(null);
-      setEditingBookingData(null);
+  const handleDeleteBooking = async (
+      bookingId: string,
+      _sendEmail: boolean,
+      cashRefunds?: Record<string, 'cash_hand' | 'wallet'>,
+      applyRefund?: boolean,
+      refundPercent?: number,
+  ) => {
       try {
-          const res = await apiFetch<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
+          const body: Record<string, unknown> = { cash_refunds: cashRefunds ?? {} };
+          if (typeof applyRefund === 'boolean') body.apply_refund = applyRefund;
+          if (typeof refundPercent === 'number') body.refund_percent = refundPercent;
+          const res = await apiFetch<any>(`/bookings/${bookingId}`, {
+              method: 'DELETE',
+              body: JSON.stringify(body),
+          });
           if (!res.ok) {
-              refresh();
               throw new Error(res.error || 'Unknown error');
           }
+          removeBookingsFromCache([bookingId]);
+          setSelectedModalReservationId(null);
+          setEditingBookingData(null);
+          if (res.policy_message && res.refund_applied === false) {
+              toast.warning(res.policy_message);
+          } else if (res.refund_applied === true && res.refund_eligible === false) {
+              toast.success('Reserva cancelada con reembolso manual aplicado.');
+          }
       } catch (err) {
+          refresh();
           console.error('Error deleting booking:', err);
           throw err;
       }
@@ -1144,14 +1179,18 @@ function GrillaViewInner() {
           (id) => !id.startsWith('school-slot-') && !id.startsWith('school-private-slot-'),
       );
       if (deletable.length === 0) return;
-      removeBookingsFromCache(deletable);
-      const results = await Promise.all(
-          deletable.map((id) => apiFetch<any>(`/bookings/${id}`, { method: 'DELETE' })),
-      );
-      const failed = results.filter((r) => !r.ok);
-      if (failed.length > 0) {
+      try {
+          const results = await Promise.all(
+              deletable.map((id) => apiFetch<any>(`/bookings/${id}`, { method: 'DELETE' })),
+          );
+          const failed = results.filter((r) => !r.ok);
+          if (failed.length > 0) {
+              throw new Error(`Failed to delete ${failed.length} booking(s)`);
+          }
+          removeBookingsFromCache(deletable);
+      } catch (err) {
           refresh();
-          throw new Error(`Failed to delete ${failed.length} booking(s)`);
+          throw err;
       }
   }, [removeBookingsFromCache, refresh]);
 
@@ -1337,20 +1376,21 @@ function GrillaViewInner() {
           const court = courts.find((c) => c.id === b.court_id);
           const start = new Date(b.start_at);
           const end = new Date(b.end_at);
-          const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
+          const bookingType = normalizeReservationTypeSlug(b.reservation_type ?? b.booking_type ?? 'standard');
           const mapped: Reservation = {
               id: bookingId,
               courtId: b.court_id,
               courtName: court?.name ?? '',
-              startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+              startTime: formatTimeHHmmInClubTz(start),
               durationMinutes: Math.round((end.getTime() - start.getTime()) / 60000),
               status: b.status,
               booking_type: bookingType,
               reservation_type: bookingType,
+              source_channel: b.source_channel ?? 'manual',
               playerName: '',
               isPaidIcon: b.status === 'confirmed',
           };
-          setSelectedDate(start);
+          setSelectedDate(new Date(`${dayKeyInClubTz(start)}T12:00:00Z`));
           setReservations((prev) => (prev.some((r) => r.id === bookingId) ? prev : [...prev, mapped]));
           setEditingBookingData(b);
           setSelectedModalReservationId(bookingId);
@@ -1367,6 +1407,34 @@ function GrillaViewInner() {
       next.delete('booking');
       setSearchParams(next, { replace: true });
   }, [searchParams, courts.length, openBookingById, setSearchParams]);
+
+function sumParticipantPaymentsCents(participants: unknown): number {
+    if (!Array.isArray(participants)) return 0;
+    return participants.reduce(
+        (sum, p) =>
+            sum + (Number((p as { paid_amount_cents?: number }).paid_amount_cents) || 0) +
+            (Number((p as { wallet_amount_cents?: number }).wallet_amount_cents) || 0),
+        0,
+    );
+}
+
+/** Resuelve el total a persistir: respeta el cobro manual aunque la tarifa difiera unos céntimos. */
+function resolveManualBookingTotalCents(
+    bookingData: {
+        total_price_cents?: number;
+        source_channel?: string;
+        participants?: unknown;
+    },
+    tariffCents: number | null,
+): number {
+    const modalTotal = Number(bookingData.total_price_cents ?? 0);
+    const collected = sumParticipantPaymentsCents(bookingData.participants);
+    if (bookingData.source_channel === 'manual' && collected > 0 && modalTotal > 0 && collected >= modalTotal) {
+        return collected;
+    }
+    if (tariffCents != null && Number.isFinite(tariffCents)) return tariffCents;
+    return modalTotal;
+}
 
   const handleCreateBooking = async (bookingData: any): Promise<CreateBookingBatchResult> => {
       try {
@@ -1408,21 +1476,26 @@ function GrillaViewInner() {
                   }
               }
               for (const courtId of courtIds) {
-                  const startAt = new Date(`${dateText}T${bookingData.start_at}`).toISOString();
+                  const [slotHour, slotMinute] = String(bookingData.start_at).split(':');
+                  const startAt = zonedTimeToUtc(
+                      `${dateText}T${String(slotHour ?? '00').padStart(2, '0')}:${String(slotMinute ?? '00').padStart(2, '0')}:00`,
+                  ).toISOString();
                   const endAt = new Date(new Date(startAt).getTime() + bookingData.duration_minutes * 60000).toISOString();
                   let totalPriceCents = bookingData.total_price_cents;
+                  let tariffCents: number | null = null;
                   if (clubId && courtId) {
                       try {
                           const slotPrice = await apiFetchWithAuth<any>(
                               `/tariffs/slot-price?club_id=${clubId}&court_id=${courtId}&date=${dateText}&slot=${bookingData.start_at}&duration_minutes=${bookingData.duration_minutes}&reservation_type=${bookingData.booking_type || 'standard'}`
                           );
                           if (typeof slotPrice.total_price_cents === 'number') {
-                              totalPriceCents = slotPrice.total_price_cents;
+                              tariffCents = slotPrice.total_price_cents;
                           }
                       } catch {
                           // Keep current total_price_cents as fallback
                       }
                   }
+                  totalPriceCents = resolveManualBookingTotalCents(bookingData, tariffCents);
 
                   const payload = {
                       ...bookingData,
@@ -1458,11 +1531,14 @@ function GrillaViewInner() {
           if (createdBookings.length > 0) {
               const mapped = mapBookings(createdBookings, courts);
               if (mapped.length > 0) {
-                  setReservations(prev => {
-                      const existing = new Set(prev.map(r => r.id));
-                      const additions = mapped.filter(r => !existing.has(r.id));
+                  const mergeNew = (prev: Reservation[]) => {
+                      const existing = new Set(prev.map((r) => r.id));
+                      const additions = mapped.filter((r) => !existing.has(r.id));
                       return additions.length > 0 ? [...prev, ...additions] : prev;
-                  });
+                  };
+                  setGridReservations(mergeNew);
+                  setListReservations(mergeNew);
+                  setReservations(mergeNew);
               }
           }
           if (createdBookings.length === 0 && skippedHolidayDates.length > 0) {
@@ -1558,14 +1634,14 @@ function GrillaViewInner() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
+      activationConstraint: isMobileDevice
+        ? { delay: 500, tolerance: 10 }
+        : { distance: 8 },
     }),
     useSensor(SmartTouchSensor, {
       activationConstraint: {
-        delay: 250,
-        tolerance: 5,
+        delay: 500,
+        tolerance: 10,
       },
     })
   );
@@ -1983,10 +2059,8 @@ function GrillaViewInner() {
           pendingOverrideDrop.startTime,
           pendingOverrideDrop.status,
         );
-        if (res.displaced?.action === 'relocated') {
-          toast.success(`Partido incompleto movido a ${res.displaced.new_court_name}`);
-        } else if (res.displaced?.action === 'cancelled') {
-          toast.warning('Partido incompleto cancelado (sin pista disponible). Jugadores reembolsados.');
+        if (res.displaced?.action === 'cancelled') {
+          toast.warning('Partido incompleto cancelado. Jugadores reembolsados.');
         }
       } else {
         toast.error(res.error || 'Error al procesar el movimiento');
@@ -2245,16 +2319,17 @@ function GrillaViewInner() {
     isDisabled: boolean,
   ) => {
     if (isDisabled || gridBounds.closed) return;
+    const effectiveSlotMin = slotDurationMin && slotDurationMin > 0 ? slotDurationMin : 90;
     const startMin = parseTimeStrInBounds(timeStr, gridBounds);
-    if (startMin < gridBounds.openMin || startMin + 90 > gridBounds.closeMin) return;
+    if (startMin < gridBounds.openMin || startMin + effectiveSlotMin > gridBounds.closeMin) return;
     const newId = `new-${Date.now()}`;
     setReservations(prev => [...prev, {
       id: newId, courtId, courtName,
-      startTime: timeStr, durationMinutes: 90,
+      startTime: timeStr, durationMinutes: effectiveSlotMin,
       playerName: '', status: 'available', booking_type: 'standard',
     }]);
     setSelectedModalReservationId(newId);
-  }, [gridBounds]);
+  }, [gridBounds, slotDurationMin]);
 
   const handleLogout = () => {
     authService.logout();
@@ -2264,7 +2339,7 @@ function GrillaViewInner() {
   if (loading || !authResolved) return <PageSpinner />;
 
   return (
-    <GridBoundsProvider weeklySchedule={weeklySchedule} dateStr={selectedDateKey}>
+    <GridBoundsProvider weeklySchedule={weeklySchedule} dateStr={selectedDateKey} slotDurationMin={slotDurationMin}>
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
       <div className="grilla-shell h-dvh flex flex-col bg-gray-100 font-sans overflow-hidden">
         {!isMobileDevice && (
@@ -2473,10 +2548,10 @@ function GrillaViewInner() {
                     <div className="flex flex-wrap items-center gap-1 md:gap-2">
                       <span
                         className="flex items-center gap-1 px-2 py-0.5 rounded border border-[#006A6A]/30 bg-[#006A6A]/5 text-[10px] font-mono font-semibold text-[#006A6A] shrink-0"
-                        title="Hora actual del club (España)"
+                        title="Hora actual del club"
                       >
                         {clubClock}
-                        <span className="font-sans font-medium text-gray-500">España</span>
+                        <span className="font-sans font-medium text-gray-500">{clubTimeZoneShortLabel()}</span>
                       </span>
                       <span className="text-gray-300 select-none">|</span>
                       <span className="text-[10px] font-medium text-gray-500 shrink-0 mr-1">{t('toolbar.dateLabel')}</span>
@@ -2814,6 +2889,7 @@ function GrillaViewInner() {
                     style={{
                       height: `${nativeGridHeight}px`,
                       zoom: scale,
+                      width: '100%',
                       // Fallback para navs muy antiguos (transform rompe position: sticky)
                       ...(typeof CSS !== 'undefined' && CSS.supports && !CSS.supports('zoom', '1') ? {
                         transform: `scale(${scale})`,
@@ -2822,7 +2898,7 @@ function GrillaViewInner() {
                       } : {})
                     }}
                     className={clsx(
-                      "flex relative pl-4 md:pl-8 overflow-hidden",
+                      "flex relative w-full min-w-0 pl-4 md:pl-8",
                       focusedCourtId && !activeId && "touch-pan-y"
                     )}
                     onTouchStart={focusedCourtId && !activeId ? onTouchStart : undefined}
@@ -2831,7 +2907,7 @@ function GrillaViewInner() {
                   >
                     <TimeAxis position="left" isCompact={false} />
 
-                    <div className="flex relative z-10 mb-0 overflow-hidden">
+                    <div className="flex flex-1 w-full min-w-0 relative z-10 mb-0">
                       <GridBackground />
                       {visibleCourts.map(court => (
                         <CourtColumn
@@ -2894,6 +2970,7 @@ function GrillaViewInner() {
         <ReservationModal
           clubId={clubId}
           gridDate={formatDateForInput(selectedDate)}
+          weeklySchedule={weeklySchedule}
           isOpen={selectedModalReservationId !== null}
           onGridRefresh={refresh}
           onClose={() => {

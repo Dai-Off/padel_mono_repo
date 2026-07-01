@@ -2,22 +2,10 @@ import { StyleSheet, View } from 'react-native';
 import { FilterBottomSheet } from '../filters/FilterBottomSheet';
 import { FilterPill } from '../filters/FilterPill';
 import type { ClubMultiSelectFilters } from './ClubMultiSelectPicker';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 export type ClubQuickPickerKind = 'sport' | 'cerramiento' | null;
-
-const SPORT_OPTIONS = [
-  { id: 'all' as const, label: 'Todos' },
-  { id: 'padel' as const, label: 'Pádel' },
-  { id: 'tenis' as const, label: 'Tenis' },
-  { id: 'pickleball' as const, label: 'Pickleball' },
-];
-
-const CERRAMIENTO_OPTIONS = [
-  { id: 'all' as const, label: 'Todos' },
-  { id: 'indoor' as const, label: 'Interior' },
-  { id: 'outdoor' as const, label: 'Exterior' },
-];
 
 type ClubQuickPickersProps = {
   kind: ClubQuickPickerKind;
@@ -27,7 +15,21 @@ type ClubQuickPickersProps = {
 };
 
 export function ClubQuickPickers({ kind, filters, onClose, onApply }: ClubQuickPickersProps) {
+  const { t } = useTranslation();
   const visible = kind != null;
+
+  const sportOptions = [
+    { id: 'all' as const, label: t('common.sportAll') },
+    { id: 'padel' as const, label: t('common.sportPadel') },
+    { id: 'tenis' as const, label: t('common.sportTenis') },
+    { id: 'pickleball' as const, label: t('common.sportPickleball') },
+  ];
+
+  const cerramientoOptions = [
+    { id: 'all' as const, label: t('common.sportAll') },
+    { id: 'indoor' as const, label: t('common.interior') },
+    { id: 'outdoor' as const, label: t('common.outdoor') },
+  ];
 
   const pickSport = (sport: ClubMultiSelectFilters['sport']) => {
     onApply({ ...filters, sport });
@@ -41,9 +43,9 @@ export function ClubQuickPickers({ kind, filters, onClose, onApply }: ClubQuickP
 
   if (kind === 'sport') {
     return (
-      <FilterBottomSheet visible={visible} title="Deporte" onClose={onClose}>
+      <FilterBottomSheet visible={visible} title={t('search.filterSport')} onClose={onClose}>
         <View style={styles.chipRow}>
-          {SPORT_OPTIONS.map((opt) => (
+          {sportOptions.map((opt) => (
             <FilterPill
               key={opt.id}
               label={opt.label}
@@ -58,9 +60,9 @@ export function ClubQuickPickers({ kind, filters, onClose, onApply }: ClubQuickP
 
   if (kind === 'cerramiento') {
     return (
-      <FilterBottomSheet visible={visible} title="Cerramiento" onClose={onClose}>
+      <FilterBottomSheet visible={visible} title={t('search.sectionEnclosure')} onClose={onClose}>
         <View style={styles.chipRow}>
-          {CERRAMIENTO_OPTIONS.map((opt) => (
+          {cerramientoOptions.map((opt) => (
             <FilterPill
               key={opt.id}
               label={opt.label}

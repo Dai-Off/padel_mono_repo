@@ -7,6 +7,7 @@ import { SkillPolarChart } from './SkillPolarChart';
 import { CoachAssessment } from '../../api/coachAssessment';
 import { PeerFeedbackInsight } from '../../api/peerFeedbackInsight';
 import { generateFigmaWeeklyPlan, SkillCategory } from '../../lib/coachPlanContent';
+import { formatLocale, useTranslation } from '../../i18n';
 
 interface AICoachSectionProps {
   assessment: CoachAssessment;
@@ -21,10 +22,27 @@ const CATEGORY_COLORS: Record<SkillCategory, string> = {
 };
 
 const DIFFICULTY_COLORS = {
-  Bajo: { bg: 'rgba(16, 185, 129, 0.1)', text: '#10B981', border: 'rgba(16, 185, 129, 0.2)' },
-  Medio: { bg: 'rgba(245, 158, 11, 0.1)', text: '#F59E0B', border: 'rgba(245, 158, 11, 0.2)' },
-  Alto: { bg: 'rgba(239, 68, 68, 0.1)', text: '#EF4444', border: 'rgba(239, 68, 68, 0.2)' },
+  low: { bg: 'rgba(16, 185, 129, 0.1)', text: '#10B981', border: 'rgba(16, 185, 129, 0.2)' },
+  medium: { bg: 'rgba(245, 158, 11, 0.1)', text: '#F59E0B', border: 'rgba(245, 158, 11, 0.2)' },
+  high: { bg: 'rgba(239, 68, 68, 0.1)', text: '#EF4444', border: 'rgba(239, 68, 68, 0.2)' },
 };
+
+const PLAN_LABEL_KEYS: Record<string, string> = {
+  matches: 'profile.coachProgMatchesWeek',
+  classes: 'profile.coachProgClassesAttended',
+  lessons: 'profile.coachProgDailyLesson',
+  tournaments: 'profile.coachProgTournamentsEnrolled',
+  m_matches: 'profile.coachProgMatchesMonth',
+  m_classes: 'profile.coachProgClassesAttended',
+  m_tournaments: 'profile.coachProgTournamentsPlayed',
+  m_courses: 'profile.coachProgCoursesCompleted',
+};
+
+function difficultyKey(difficulty: 'Bajo' | 'Medio' | 'Alto'): 'low' | 'medium' | 'high' {
+  if (difficulty === 'Bajo') return 'low';
+  if (difficulty === 'Alto') return 'high';
+  return 'medium';
+}
 
 const ICON_MAP: Record<string, string> = {
   'target': 'locate-outline',
@@ -34,6 +52,8 @@ const ICON_MAP: Record<string, string> = {
 };
 
 export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peerInsight }) => {
+  const { t, locale } = useTranslation();
+  const dateLocale = formatLocale(locale);
   // Por defecto siempre "Resumen de Hoy" al abrir el perfil.
   const [activeTab, setActiveTab] = useState<'today' | 'plan'>('today');
 
@@ -55,11 +75,17 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
     : assessment.improvements;
 
   const sourceLabel = showPeerData
-    ? (peerInsight.insight_source === 'openai' ? 'IA' : 'Feedback')
-    : 'Evaluación';
+    ? (peerInsight.insight_source === 'openai' ? t('profile.coachVirtualIa') : t('profile.coachPeerPerception'))
+    : t('profile.coachAnalysisTitle');
+
+  const planLabel = (key: string, fallback: string) =>
+    PLAN_LABEL_KEYS[key] ? t(PLAN_LABEL_KEYS[key]) : fallback;
+
+  const monthLabel = (monthIndex: number) =>
+    new Date(2025, monthIndex, 1).toLocaleDateString(dateLocale, { month: 'long' });
 
   // Generar plan con fidelidad de Figma
-  const plan = generateFigmaWeeklyPlan(assessment);
+  const plan = generateFigmaWeeklyPlan(assessment, t);
 
   return (
     <View style={styles.container}>
@@ -71,8 +97,8 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
             <Ionicons name="bulb-outline" size={20} color="#fff" />
           </LinearGradient>
           <View style={styles.titleContainer}>
-            <Text style={styles.title}>Coach Virtual IA</Text>
-            <Text style={styles.subtitle}>Tu entrenador personal 24/7</Text>
+            <Text style={styles.title}>{t('profile.coachVirtualIa')}</Text>
+            <Text style={styles.subtitle}>{t('profile.coachSubtitle')}</Text>
           </View>
         </View>
 
@@ -84,7 +110,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
             <Text style={styles.statValue}>
               +{assessment.stats?.improvementPercentage ?? 0}%
             </Text>
-            <Text style={styles.statLabel}>Mejora</Text>
+            <Text style={styles.statLabel}>{t('profile.coachImprove')}</Text>
           </View>
           <View style={styles.statBox}>
             <View style={styles.statIconWrapper}>
@@ -93,7 +119,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
             <Text style={styles.statValue}>
               {assessment.stats?.completedObjectives ?? 0}/{assessment.stats?.totalObjectives ?? 10}
             </Text>
-            <Text style={styles.statLabel}>Objetivos</Text>
+            <Text style={styles.statLabel}>{t('profile.coachGoals')}</Text>
           </View>
           <View style={styles.statBox}>
             <View style={styles.statIconWrapper}>
@@ -102,7 +128,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
             <Text style={styles.statValue}>
               {assessment.stats?.matchCount ?? 0}
             </Text>
-            <Text style={styles.statLabel}>Partidos</Text>
+            <Text style={styles.statLabel}>{t('profile.coachMatches')}</Text>
           </View>
         </View>
       </View>
@@ -117,7 +143,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
             <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.tabGradient} />
           )}
           <Text style={[styles.tabText, activeTab === 'today' && styles.tabTextActive]}>
-            Resumen de Hoy
+            {t('profile.coachTodaySummary')}
           </Text>
         </Pressable>
         <Pressable 
@@ -127,7 +153,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
           {activeTab === 'plan' && (
             <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.tabGradient} />
           )}
-          <Text style={[styles.tabText, activeTab === 'plan' && styles.tabTextActive]}>Plan</Text>
+          <Text style={[styles.tabText, activeTab === 'plan' && styles.tabTextActive]}>{t('profile.coachTabPlan')}</Text>
         </Pressable>
       </View>
 
@@ -140,7 +166,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
               <View style={styles.analysisIconBox}>
                 <Ionicons name="analytics-outline" size={14} color="#F18F34" />
               </View>
-              <Text style={styles.analysisTitle}>Análisis de tu Nivel Actual</Text>
+              <Text style={styles.analysisTitle}>{t('profile.coachAnalysisTitle')}</Text>
             </View>
             
             <SkillPolarChart
@@ -160,24 +186,24 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
               </View>
               <View style={styles.recContent}>
                 <View style={styles.recHeaderRow}>
-                  <Text style={styles.recTitle}>Recomendación {sourceLabel}:</Text>
+                  <Text style={styles.recTitle}>{t('profile.coachRecommendation', { source: sourceLabel })}</Text>
                   {showPeerData && peerInsight.feedback_created_at && (
                     <Text style={styles.recDate}>
-                      {new Date(peerInsight.feedback_created_at).toLocaleDateString()}
+                      {new Date(peerInsight.feedback_created_at).toLocaleDateString(dateLocale)}
                     </Text>
                   )}
                 </View>
                 <Text style={styles.recText}>
-                  {recommendation || 'Continúa entrenando para mejorar tus habilidades.'}
+                  {recommendation || t('profile.coachNoData')}
                 </Text>
                 {showPeerData && (
                   <Text style={styles.peerCountText}>
-                    Basado en el feedback de {peerInsight.peer_count} compañero{peerInsight.peer_count !== 1 ? 's' : ''}
+                    {t('profile.coachPeerPerception')} ({peerInsight.peer_count})
                   </Text>
                 )}
                 {!showPeerData && activeTab === 'today' && (
                     <Text style={styles.emptyText}>
-                      Cuando juegues un partido con feedback, veremos aquí un resumen claro para tu próximo paso.
+                      {t('profile.coachNoData')}
                     </Text>
                 )}
               </View>
@@ -191,7 +217,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                   <View style={[styles.analysisIconBox, { backgroundColor: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.2)' }]}>
                     <Ionicons name="people-outline" size={14} color="#3B82F6" />
                   </View>
-                  <Text style={styles.analysisTitle}>Percepción de tus Compañeros</Text>
+                  <Text style={styles.analysisTitle}>{t('profile.coachPeerPerception')}</Text>
                 </View>
                 
                 <View style={styles.perceivedBadgeRow}>
@@ -201,30 +227,30 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                         peerInsight.last_perceived === -1 ? styles.badgeLow : styles.badgeMid
                     ]}>
                         <Text style={styles.perceivedBadgeText}>
-                            {peerInsight.last_perceived === 1 ? 'Nivel Superior' : 
-                             peerInsight.last_perceived === -1 ? 'Bajo lo Esperado' : 'Nivel Acertado'}
+                            {peerInsight.last_perceived === 1 ? t('profile.coachDistHigh') : 
+                             peerInsight.last_perceived === -1 ? t('profile.coachDistLow') : t('profile.coachDistNormal')}
                         </Text>
                     </View>
-                    <Text style={styles.perceivedSubtext}>Última tendencia</Text>
+                    <Text style={styles.perceivedSubtext}>{t('profile.coachLastTrend')}</Text>
                 </View>
 
                 <View style={styles.distributionContainer}>
                     <View style={styles.distItem}>
-                        <Text style={styles.distLabel}>Alto</Text>
+                        <Text style={styles.distLabel}>{t('profile.coachDistHigh')}</Text>
                         <View style={styles.distBarTrack}>
                             <View style={[styles.distBarFill, { width: `${(peerInsight.distribution.high / peerInsight.peer_count) * 100}%`, backgroundColor: '#10B981' }]} />
                         </View>
                         <Text style={styles.distValue}>{peerInsight.distribution.high}</Text>
                     </View>
                     <View style={styles.distItem}>
-                        <Text style={styles.distLabel}>Normal</Text>
+                        <Text style={styles.distLabel}>{t('profile.coachDistNormal')}</Text>
                         <View style={styles.distBarTrack}>
                             <View style={[styles.distBarFill, { width: `${(peerInsight.distribution.mid / peerInsight.peer_count) * 100}%`, backgroundColor: '#F97316' }]} />
                         </View>
                         <Text style={styles.distValue}>{peerInsight.distribution.mid}</Text>
                     </View>
                     <View style={styles.distItem}>
-                        <Text style={styles.distLabel}>Bajo</Text>
+                        <Text style={styles.distLabel}>{t('profile.coachDistLow')}</Text>
                         <View style={styles.distBarTrack}>
                             <View style={[styles.distBarFill, { width: `${(peerInsight.distribution.low / peerInsight.peer_count) * 100}%`, backgroundColor: '#EF4444' }]} />
                         </View>
@@ -241,7 +267,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                 <View style={[styles.listIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
                   <Ionicons name="checkmark-circle" size={12} color="#10B981" />
                 </View>
-                <Text style={styles.listTitle}>Fortalezas</Text>
+                <Text style={styles.listTitle}>{t('profile.coachStrengths')}</Text>
               </View>
               <View style={styles.listItems}>
                 {strengths.map((strength, index) => (
@@ -251,7 +277,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                   </View>
                 ))}
                 {strengths.length === 0 && (
-                    <Text style={styles.emptySmallText}>Sin datos aún</Text>
+                    <Text style={styles.emptySmallText}>{t('profile.coachNoData')}</Text>
                 )}
               </View>
             </View>
@@ -261,7 +287,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                 <View style={[styles.listIconBox, { backgroundColor: 'rgba(249, 115, 22, 0.1)' }]}>
                   <Ionicons name="alert-circle" size={12} color="#F97316" />
                 </View>
-                <Text style={styles.listTitle}>A mejorar</Text>
+                <Text style={styles.listTitle}>{t('profile.coachToImprove')}</Text>
               </View>
               <View style={styles.listItems}>
                 {improvements.map((improvement, index) => (
@@ -271,7 +297,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                   </View>
                 ))}
                 {improvements.length === 0 && (
-                    <Text style={styles.emptySmallText}>Sin datos aún</Text>
+                    <Text style={styles.emptySmallText}>{t('profile.coachNoData')}</Text>
                 )}
               </View>
             </View>
@@ -283,24 +309,24 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
               <View style={[styles.analysisIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
                 <Ionicons name="stats-chart-outline" size={14} color="#10B981" />
               </View>
-              <Text style={styles.analysisTitle}>Progreso Últimos 3 Meses</Text>
+              <Text style={styles.analysisTitle}>{t('profile.coachProgress3Months')}</Text>
             </View>
             <View style={styles.progressRow}>
-              <Text style={styles.monthLabel}>Noviembre</Text>
+              <Text style={styles.monthLabel}>{monthLabel(10)}</Text>
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: '40%' }]} />
               </View>
               <Text style={styles.progressValue}>+5%</Text>
             </View>
             <View style={styles.progressRow}>
-              <Text style={styles.monthLabel}>Diciembre</Text>
+              <Text style={styles.monthLabel}>{monthLabel(11)}</Text>
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: '64%' }]} />
               </View>
               <Text style={styles.progressValue}>+8%</Text>
             </View>
             <View style={styles.progressRow}>
-              <Text style={styles.monthLabel}>Enero</Text>
+              <Text style={styles.monthLabel}>{monthLabel(0)}</Text>
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: '96%' }]} />
               </View>
@@ -321,9 +347,9 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                 <Ionicons name="calendar-outline" size={14} color="#F18F34" />
               </View>
               <View style={styles.planHeaderTitleWrap}>
-                <Text style={styles.analysisTitle}>Plan de Esta Semana</Text>
+                <Text style={styles.analysisTitle}>{t('profile.coachWeekPlan')}</Text>
                 <View style={styles.personalizedBadge}>
-                  <Text style={styles.personalizedBadgeText}>Personalizado</Text>
+                  <Text style={styles.personalizedBadgeText}>{t('common.featured')}</Text>
                 </View>
               </View>
             </View>
@@ -336,7 +362,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                     <View style={styles.figmaGoalHeader}>
                       <View style={styles.figmaGoalTitleRow}>
                         <Ionicons name={ICON_MAP[item.icon] as any} size={14} color="#F18F34" style={styles.goalIcon} />
-                        <Text style={styles.figmaGoalLabel}>{item.label}</Text>
+                        <Text style={styles.figmaGoalLabel}>{planLabel(item.key, item.label)}</Text>
                       </View>
                       <Text style={styles.figmaGoalValue}>{item.actual}/{item.target}</Text>
                     </View>
@@ -350,10 +376,10 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                     </View>
                     <View style={styles.figmaGoalFooter}>
                       <Text style={styles.figmaGoalFooterText}>
-                        Actual: <Text style={styles.figmaGoalFooterStrong}>{item.actual}</Text>
+                        {t('profile.coachImprove')}: <Text style={styles.figmaGoalFooterStrong}>{item.actual}</Text>
                       </Text>
                       <Text style={styles.figmaGoalFooterText}>
-                        Meta: <Text style={styles.figmaGoalFooterStrong}>{item.target}</Text>
+                        {t('profile.coachGoals')}: <Text style={styles.figmaGoalFooterStrong}>{item.target}</Text>
                       </Text>
                     </View>
                   </View>
@@ -369,7 +395,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
               <View style={[styles.analysisIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
                 <Ionicons name="trophy-outline" size={14} color="#F59E0B" />
               </View>
-              <Text style={styles.analysisTitle}>Plan Mensual</Text>
+              <Text style={styles.analysisTitle}>{t('profile.coachProgress3Months')}</Text>
             </View>
 
             <View style={styles.goalsContainer}>
@@ -380,7 +406,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                     <View style={styles.figmaGoalHeader}>
                       <View style={styles.figmaGoalTitleRow}>
                         <Ionicons name={ICON_MAP[item.icon] as any} size={14} color="#F18F34" style={styles.goalIcon} />
-                        <Text style={styles.figmaGoalLabel}>{item.label}</Text>
+                        <Text style={styles.figmaGoalLabel}>{planLabel(item.key, item.label)}</Text>
                       </View>
                       <Text style={styles.figmaGoalValue}>{item.actual}/{item.target}</Text>
                     </View>
@@ -394,10 +420,10 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                     </View>
                     <View style={styles.figmaGoalFooter}>
                       <Text style={styles.figmaGoalFooterText}>
-                        Actual: <Text style={styles.figmaGoalFooterStrong}>{item.actual}</Text>
+                        {t('profile.coachImprove')}: <Text style={styles.figmaGoalFooterStrong}>{item.actual}</Text>
                       </Text>
                       <Text style={styles.figmaGoalFooterText}>
-                        Meta: <Text style={styles.figmaGoalFooterStrong}>{item.target}</Text>
+                        {t('profile.coachGoals')}: <Text style={styles.figmaGoalFooterStrong}>{item.target}</Text>
                       </Text>
                     </View>
                   </View>
@@ -412,19 +438,19 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
               <View style={[styles.analysisIconBox, { backgroundColor: 'rgba(59, 130, 246, 0.1)' }]}>
                 <Ionicons name="fitness-outline" size={14} color="#3B82F6" />
               </View>
-              <Text style={styles.analysisTitle}>Ejercicios Recomendados</Text>
+              <Text style={styles.analysisTitle}>{t('profile.coachStrengths')}</Text>
             </View>
 
             <View style={styles.figmaDrillsList}>
               {plan.drills.map((drill, idx) => {
-                const diffColor = DIFFICULTY_COLORS[drill.difficulty];
+                const diffColor = DIFFICULTY_COLORS[difficultyKey(drill.difficulty)];
                 return (
                   <View key={idx} style={styles.figmaDrillCard}>
                     <View style={styles.figmaDrillHeader}>
                       <Text style={styles.figmaDrillName}>{drill.name}</Text>
                       <View style={[styles.diffBadge, { backgroundColor: diffColor.bg, borderColor: diffColor.border }]}>
                         <Text style={[styles.diffBadgeText, { color: diffColor.text }]}>
-                          {drill.difficulty}
+                          {drill.difficultyLabel}
                         </Text>
                       </View>
                     </View>

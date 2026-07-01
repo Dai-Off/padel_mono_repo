@@ -1,6 +1,10 @@
 import { StyleSheet, View } from 'react-native';
 import { Skeleton } from '../../ui/Skeleton';
 import { INICIO_STACK_GAP } from './constants';
+import {
+  INICIO_WIDGET_CAROUSEL_DOTS_H,
+  INICIO_WIDGET_CAROUSEL_HEIGHT,
+} from './InicioWidgetsCarousel';
 
 /**
  * Skeleton de la pantalla Home. Imita la disposición real de cada sección
@@ -23,9 +27,15 @@ export function HomeSkeleton() {
         <Skeleton height={120} variant="dark" borderRadius={16} style={styles.matchCard} />
       </View>
 
-      {/* Widget carousel (lección diaria + season pass + liga). Altura 160 px
-          como el carrusel real. */}
-      <Skeleton height={160} variant="dark" borderRadius={24} />
+      {/* Widget carousel (lección diaria + season pass + liga). */}
+      <View>
+        <Skeleton height={INICIO_WIDGET_CAROUSEL_HEIGHT} variant="dark" borderRadius={24} />
+        <View style={styles.carouselDots}>
+          <Skeleton width={6} height={6} variant="dark" borderRadius={3} />
+          <Skeleton width={5} height={5} variant="dark" borderRadius={2.5} />
+          <Skeleton width={5} height={5} variant="dark" borderRadius={2.5} />
+        </View>
+      </View>
 
       {/* Quick actions: grid 2x2 de tarjetas pequeñas. */}
       <View style={styles.quickGrid}>
@@ -63,6 +73,14 @@ const styles = StyleSheet.create({
   },
   matchCard: {
     flex: 1,
+  },
+  carouselDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: INICIO_WIDGET_CAROUSEL_DOTS_H,
+    marginTop: 2,
   },
   quickGrid: {
     flexDirection: 'row',

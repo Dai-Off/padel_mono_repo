@@ -4,22 +4,13 @@ import { fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { canAccessClub } from '../lib/clubAccess';
+import { RESERVATION_SYSTEM_TYPES } from '../lib/clubPricing';
 
 const router = Router();
 router.use(attachAuthContext);
 router.use(requireClubOwnerOrAdminOrPortalStaff);
 
-const SYSTEM_TYPES = [
-  { reservation_type: 'standard', display_name: 'Pista privada', color: '#005bc5', sort_order: 10, default_online: true },
-  { reservation_type: 'open_match', display_name: 'Partido abierto', color: '#7c3aed', sort_order: 20, default_online: true },
-  { reservation_type: 'pozo', display_name: 'Americanas', color: '#ea580c', sort_order: 30, default_online: false },
-  { reservation_type: 'fixed_recurring', display_name: 'Turno fijo', color: '#166534', sort_order: 40, default_online: false },
-  { reservation_type: 'school_group', display_name: 'Escuela grupo', color: '#fdf2f8', sort_order: 50, default_online: false },
-  { reservation_type: 'school_individual', display_name: 'Clase particular', color: '#fdf2f8', sort_order: 60, default_online: false },
-  { reservation_type: 'flat_rate', display_name: 'Tarifa plana', color: '#be185d', sort_order: 70, default_online: false },
-  { reservation_type: 'tournament', display_name: 'Torneo', color: '#b45309', sort_order: 80, default_online: false },
-  { reservation_type: 'blocked', display_name: 'Bloqueo administrativo', color: '#4b5563', sort_order: 90, default_online: false },
-];
+const SYSTEM_TYPES = RESERVATION_SYSTEM_TYPES;
 
 async function getMergedPrices(supabase: any, clubId: string): Promise<Record<string, any>> {
   const { data: rows, error } = await supabase

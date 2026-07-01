@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, View } from 'react-native';
+import { formatLocale, useTranslation, type AppLocale } from '../../i18n';
 import { addDaysLocal, dateKeyLocal, startOfLocalDay } from '../../utils/formatSearch';
 import { theme } from '../../theme';
 import { FilterPill } from './FilterPill';
@@ -11,10 +12,10 @@ type DateStripPickerProps = {
   daysCount?: number;
 };
 
-function weekdayShort(d: Date, index: number): string {
-  if (index === 0) return 'Hoy';
-  if (index === 1) return 'Mañ';
-  return d.toLocaleDateString('es', { weekday: 'short' }).replace('.', '');
+function weekdayShort(d: Date, index: number, todayLabel: string, locale: AppLocale): string {
+  if (index === 0) return todayLabel;
+  if (index === 1) return d.toLocaleDateString(formatLocale(locale), { weekday: 'short' }).slice(0, 3);
+  return d.toLocaleDateString(formatLocale(locale), { weekday: 'short' }).replace('.', '');
 }
 
 /** Franja horizontal de fechas (estilo Playtomic). `null` = hoy. */
@@ -23,7 +24,9 @@ export function DateStripPicker({
   onSelect,
   daysCount = DEFAULT_DAYS,
 }: DateStripPickerProps) {
+  const { t, locale } = useTranslation();
   const todayBase = startOfLocalDay(new Date());
+  const todayLabel = t('common.today');
 
   return (
     <ScrollView
@@ -41,7 +44,7 @@ export function DateStripPicker({
           <View key={dateKeyLocal(d)} style={styles.item}>
             <FilterPill
               variant="date"
-              label={weekdayShort(d, i)}
+              label={weekdayShort(d, i, todayLabel, locale)}
               dayNumber={d.getDate()}
               selected={selected}
               onPress={() => onSelect(i === 0 ? null : d)}

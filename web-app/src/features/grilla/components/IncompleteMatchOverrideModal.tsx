@@ -36,7 +36,7 @@ export const IncompleteMatchOverrideModal: React.FC<IncompleteMatchOverrideModal
     const playerCount = conflict.detailedPlayers?.length ?? (conflict.playerName ? 1 : 0);
 
     return (
-        <div style={vvStyle} className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
+        <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
             <div className="absolute inset-0" onClick={onClose} />
 
             <div className="relative flex flex-col w-full bg-white rounded-t-3xl shadow-2xl sm:max-w-[500px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in overflow-hidden">

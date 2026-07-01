@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchReels, CommunityPost } from '../../api/community';
+import { useTranslation } from '../../i18n';
 
 const { width } = Dimensions.get('window');
 const COLUMNS = 3;
@@ -26,6 +27,7 @@ interface ClipsGridProps {
 }
 
 export const ClipsGrid: React.FC<ClipsGridProps> = ({ token, ListHeaderComponent, onPressClip }) => {
+  const { t } = useTranslation();
   const [clips, setClips] = useState<CommunityPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -108,7 +110,7 @@ export const ClipsGrid: React.FC<ClipsGridProps> = ({ token, ListHeaderComponent
       ListEmptyComponent={() => (
         <View style={styles.empty}>
           <Ionicons name="play-circle-outline" size={48} color="rgba(255,255,255,0.1)" />
-          <Text style={styles.emptyText}>No hay clips todavía</Text>
+          <Text style={styles.emptyText}>{t('community.clipsEmpty')}</Text>
         </View>
       )}
       refreshControl={

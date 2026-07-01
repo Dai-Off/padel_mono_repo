@@ -51,6 +51,7 @@ export type MatchBookingExpanded = {
   total_price_cents: number;
   currency: string;
   status?: string;
+  timezone?: string | null;
   reservation_type?: string | null;
   court_id: string;
   courts?: {
@@ -65,9 +66,12 @@ export type MatchBookingExpanded = {
       name: string;
       address: string;
       city: string;
+      lat?: number | null;
+      lng?: number | null;
       logo_url?: string | null;
       photo_urls?: unknown;
       display_image_url?: string | null;
+      timezone?: string | null;
     } | null;
   } | null;
 };
@@ -283,18 +287,50 @@ type CancelMatchResponse = {
   error?: string;
   refund_errors?: string[];
   cancelled_entire_match?: boolean;
+  refund_eligible?: boolean;
+  policy_message?: string;
   match?: { id: string; status?: string };
 };
 
-/**
- * Partido público: cualquier jugador. Si quedas solo, se cancela todo; si hay más, solo sales tú.
- * Partido privado: solo organizador; cancelación total.
- */
+export type MatchCancelPreview = {
+  ok?: boolean;
+  refund_eligible?: boolean;
+  policy_message?: string;
+  notice_hours?: number;
+  incomplete_public_exempt?: boolean;
+  match_player_count?: number;
+  hours_until_start?: number;
+  error?: string;
+};
+
+/** GET /matches/:id/cancel-preview — aviso de reembolso antes de salir o cancelar. */
+export async function fetchMatchCancelPreview(
+  matchId: string,
+  token: string | null | undefined,
+): Promise<MatchCancelPreview> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matches/${matchId}/cancel-preview`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    const json = (await res.json()) as MatchCancelPreview;
+    if (!res.ok) {
+      return { ok: false, error: json.error ?? 'No se pudo consultar la política' };
+    }
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
 export async function cancelMatchAsOrganizer(
   matchId: string,
   token: string | null | undefined
 ): Promise<
-  | { ok: true; cancelledEntireMatch: boolean }
+  | { ok: true; cancelledEntireMatch: boolean; refundEligible: boolean }
   | { ok: false; error: string; refund_errors?: string[] }
 > {
   if (!token) return { ok: false, error: 'Token requerido' };
@@ -311,6 +347,7 @@ export async function cancelMatchAsOrganizer(
       return {
         ok: true,
         cancelledEntireMatch: json.cancelled_entire_match !== false,
+        refundEligible: json.refund_eligible !== false,
       };
     }
     return {

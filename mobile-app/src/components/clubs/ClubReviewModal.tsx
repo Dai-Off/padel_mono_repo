@@ -2,9 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -12,12 +10,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import {
   deleteMyClubReview,
   submitClubReview,
   type MyClubReview,
 } from '../../api/clubReviews';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 const ACCENT = theme.auth.accent;
@@ -75,6 +75,7 @@ export function ClubReviewModal({
   onSaved,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
@@ -88,11 +89,11 @@ export function ClubReviewModal({
 
   const handleSave = async () => {
     if (!accessToken) {
-      Alert.alert('Inicia sesión', 'Debes iniciar sesión para dejar una reseña.');
+      Alert.alert(t('alerts.login.titleAlt'), t('search.clubReviewsLogin'));
       return;
     }
     if (rating < 1) {
-      Alert.alert('Valoración', 'Selecciona de 1 a 5 estrellas.');
+      Alert.alert(t('alerts.review.ratingTitle'), t('search.reviewSelectStars'));
       return;
     }
     setSaving(true);
@@ -103,7 +104,7 @@ export function ClubReviewModal({
     });
     setSaving(false);
     if (!res.ok) {
-      Alert.alert('Reseña', res.error);
+      Alert.alert(t('alerts.review.title'), res.error);
       return;
     }
     onSaved(res.review);
@@ -113,19 +114,19 @@ export function ClubReviewModal({
   const handleDelete = () => {
     if (!accessToken || !existingReview?.id) return;
     Alert.alert(
-      'Eliminar reseña',
-      '¿Quieres quitar tu valoración de este club?',
+      t('search.reviewDeleteTitle'),
+      t('search.reviewDeleteBody'),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Eliminar',
+          text: t('common.discard'),
           style: 'destructive',
           onPress: async () => {
             setDeleting(true);
             const res = await deleteMyClubReview(accessToken, existingReview.id);
             setDeleting(false);
             if (!res.ok) {
-              Alert.alert('Reseña', res.error);
+              Alert.alert(t('alerts.review.title'), res.error);
               return;
             }
             onSaved(null);
@@ -142,13 +143,13 @@ export function ClubReviewModal({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
         style={styles.keyboard}
       >
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <View style={styles.handle} />
           <Text style={styles.title}>
-            {existingReview ? 'Editar tu reseña' : 'Valorar club'}
+            {existingReview ? t('search.reviewEdit') : t('search.reviewRate')}
           </Text>
           <Text style={styles.subtitle} numberOfLines={2}>
             {clubName}
@@ -159,12 +160,12 @@ export function ClubReviewModal({
 
           <StarPicker value={rating} onChange={setRating} />
 
-          <Text style={styles.label}>Comentario (opcional)</Text>
+          <Text style={styles.label}>{t('search.reviewCommentOptional')}</Text>
           <TextInput
             style={styles.input}
             value={comment}
             onChangeText={setComment}
-            placeholder="Instalaciones, trato, pistas…"
+            placeholder={t('search.reviewCommentPlaceholder')}
             placeholderTextColor="#9ca3af"
             multiline
             maxLength={4000}
@@ -184,7 +185,7 @@ export function ClubReviewModal({
               <ActivityIndicator color="#fff" />
             ) : (
               <Text style={styles.primaryBtnText}>
-                {existingReview ? 'Guardar cambios' : 'Publicar reseña'}
+                {existingReview ? t('search.reviewSave') : t('search.reviewPublish')}
               </Text>
             )}
           </Pressable>
@@ -196,13 +197,13 @@ export function ClubReviewModal({
               style={({ pressed }) => [styles.deleteBtn, pressed && styles.pressed]}
             >
               <Text style={styles.deleteBtnText}>
-                {deleting ? 'Eliminando…' : 'Eliminar mi reseña'}
+                {deleting ? t('search.reviewDeleting') : t('search.reviewDelete')}
               </Text>
             </Pressable>
           ) : null}
 
           <Pressable onPress={onClose} disabled={busy} style={styles.cancelBtn}>
-            <Text style={styles.cancelBtnText}>Cancelar</Text>
+            <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>

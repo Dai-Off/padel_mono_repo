@@ -1,4 +1,6 @@
 import type { PublicTournamentRow, TournamentPrize } from '../api/tournaments';
+import { formatLocale, type AppLocale } from '../i18n/constants';
+import type { TranslateFn } from './partidosFilters';
 
 export type TournamentFormatFilter = 'all' | 'liga' | 'americano' | 'eliminatoria' | 'torneo';
 export type TournamentLevelFilter = 'all' | 'principiante' | 'medio' | 'avanzado';
@@ -25,45 +27,53 @@ export function inferTournamentFormatKey(description: string | null | undefined)
   return 'torneo';
 }
 
-export function formatFormatLabel(key: TournamentFormatFilter): string {
+export function formatFormatLabel(key: TournamentFormatFilter, t: TranslateFn): string {
   switch (key) {
     case 'liga':
-      return 'Liga';
+      return t('torneos.formatLiga');
     case 'americano':
-      return 'Americano';
+      return t('torneos.formatAmericano');
     case 'eliminatoria':
-      return 'Eliminatoria';
+      return t('torneos.formatEliminatoria');
     case 'torneo':
-      return 'Torneo';
+      return t('torneos.formatTournament');
     default:
-      return 'Torneo';
+      return t('torneos.formatTournament');
   }
 }
 
-export function formatShortDateEs(iso: string): string {
+export function formatShortDate(locale: AppLocale, iso: string): string {
   try {
     const d = new Date(iso);
-    return new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+    return new Intl.DateTimeFormat(formatLocale(locale), {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(d);
   } catch {
     return '';
   }
 }
 
-export function formatEloRange(eloMin: number | null | undefined, eloMax: number | null | undefined): string {
-  if (eloMin == null && eloMax == null) return 'Libre';
+export function formatEloRange(
+  eloMin: number | null | undefined,
+  eloMax: number | null | undefined,
+  t: TranslateFn,
+): string {
+  if (eloMin == null && eloMax == null) return t('common.eloFree');
   const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
   return `${eloMin != null ? fmt(Number(eloMin)) : '—'} - ${eloMax != null ? fmt(Number(eloMax)) : '—'}`;
 }
 
-export function clubLocationLabel(row: PublicTournamentRow): string {
+export function clubLocationLabel(row: PublicTournamentRow, t: TranslateFn): string {
   const c = row.clubs;
-  if (!c) return 'Club';
+  if (!c) return t('common.clubFallback');
   const one = Array.isArray(c) ? c[0] : c;
-  if (!one) return 'Club';
+  if (!one) return t('common.clubFallback');
   const name = String((one as { name?: string }).name ?? '');
   const city = String((one as { city?: string }).city ?? '');
   if (name && city) return `${name}`;
-  return name || city || 'Club';
+  return name || city || t('common.clubFallback');
 }
 
 /** Dirección legible para detalle (datos del club embebidos). */
@@ -81,12 +91,15 @@ export function formatClubFullAddress(row: PublicTournamentRow): string {
   return String((one as { name?: string }).name ?? '').trim();
 }
 
-export function formatGenderLabel(gender: PublicTournamentRow['gender']): string | null {
+export function formatGenderLabel(
+  gender: PublicTournamentRow['gender'],
+  t: TranslateFn,
+): string | null {
   if (gender == null || gender === '') return null;
   const g = String(gender).toLowerCase();
-  if (g === 'male') return 'Masculino';
-  if (g === 'female') return 'Femenino';
-  if (g === 'mixed') return 'Mixto';
+  if (g === 'male') return t('torneos.genderMale');
+  if (g === 'female') return t('torneos.genderFemale');
+  if (g === 'mixed') return t('torneos.genderMixed');
   return gender;
 }
 
@@ -106,21 +119,21 @@ export function formatTournamentInscriptionPrice(
   return `${amount.toFixed(2)} ${currency}`;
 }
 
-export function formatTournamentStatus(status: string | undefined): string {
+export function formatTournamentStatus(status: string | undefined, t: TranslateFn): string {
   const s = String(status ?? '');
   const map: Record<string, string> = {
-    open: 'Abierto',
-    closed: 'Cerrado',
-    cancelled: 'Cancelado',
+    open: t('torneos.statusOpen'),
+    closed: t('torneos.statusClosed'),
+    cancelled: t('torneos.statusCancelled'),
   };
   return map[s] ?? s;
 }
 
-export function formatIsoDateTimeEs(iso: string | null | undefined): string | null {
+export function formatIsoDateTime(locale: AppLocale, iso: string | null | undefined): string | null {
   if (!iso?.trim()) return null;
   try {
     const d = new Date(iso);
-    return new Intl.DateTimeFormat('es', {
+    return new Intl.DateTimeFormat(formatLocale(locale), {
       day: 'numeric',
       month: 'short',
       year: 'numeric',
@@ -133,9 +146,9 @@ export function formatIsoDateTimeEs(iso: string | null | undefined): string | nu
 }
 
 /** `duration_min` del torneo (API). */
-export function formatDurationMinutes(minutes: number): string {
-  if (minutes >= 120) return `${Math.round(minutes / 60)} h`;
-  return `${minutes} min`;
+export function formatDurationMinutes(minutes: number, t: TranslateFn): string {
+  if (minutes >= 120) return t('common.durationHours', { hours: Math.round(minutes / 60) });
+  return t('common.durationMin', { minutes });
 }
 
 export function parsePrizesFromRow(row: PublicTournamentRow): TournamentPrize[] {
@@ -185,7 +198,7 @@ export function matchesFormatFilter(row: PublicTournamentRow, filter: Tournament
   return inferTournamentFormatKey(row.description) === filter;
 }
 
-export function tournamentTitle(row: PublicTournamentRow): string {
+export function tournamentTitle(row: PublicTournamentRow, t: TranslateFn): string {
   const n = String(row.name ?? '').trim();
   if (n.length > 0) return n;
   const d = (row.description ?? '').trim();
@@ -193,14 +206,14 @@ export function tournamentTitle(row: PublicTournamentRow): string {
     const first = d.split('\n')[0]?.trim();
     if (first && first.length <= 120) return first;
   }
-  return 'Torneo';
+  return t('torneos.tournamentFallback');
 }
 
-export function matchesSearch(row: PublicTournamentRow, q: string): boolean {
+export function matchesSearch(row: PublicTournamentRow, q: string, t: TranslateFn): boolean {
   const s = q.trim().toLowerCase();
   if (!s) return true;
-  const title = tournamentTitle(row).toLowerCase();
-  const loc = clubLocationLabel(row).toLowerCase();
+  const title = tournamentTitle(row, t).toLowerCase();
+  const loc = clubLocationLabel(row, t).toLowerCase();
   const c = row.clubs;
   const one = c && !Array.isArray(c) ? c : Array.isArray(c) ? c[0] : null;
   const city = one ? String((one as { city?: string }).city ?? '').toLowerCase() : '';

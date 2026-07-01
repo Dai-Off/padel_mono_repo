@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExplanationCard } from './ExplanationCard';
+import { useTranslation } from '../../i18n';
 
 type Props = {
   content: {
@@ -12,12 +13,12 @@ type Props = {
   onAnswered: (correct: boolean, selectedAnswer: unknown) => void;
 };
 
-const OPTIONS = [
-  { label: 'Verdadero', value: true },
-  { label: 'Falso', value: false },
-] as const;
-
 export function TrueFalseQuestion({ content, onAnswered }: Props) {
+  const { t } = useTranslation();
+  const options = [
+    { label: t('learning.trueFalseTrue'), value: true as const },
+    { label: t('learning.trueFalseFalse'), value: false as const },
+  ];
   const [selected, setSelected] = useState<boolean | null>(null);
   const answered = selected !== null;
 
@@ -52,7 +53,7 @@ export function TrueFalseQuestion({ content, onAnswered }: Props) {
     <View>
       <Text style={styles.statement}>{content.statement}</Text>
       <View style={styles.options}>
-        {OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <Pressable
             key={String(opt.value)}
             onPress={() => handleSelect(opt.value)}

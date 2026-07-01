@@ -16,6 +16,14 @@ import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
 import { CreateMatchModal } from './CreateMatchModal';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { PlayerSearch } from './ReservationModal';
+import { CashRefundModal, type CashRefundConfirmPayload } from './CashRefundModal';
+import {
+    buildSyntheticMatchPlayer,
+    nextFreeSlotIndex,
+    resolveMatchPlayerSlots,
+    slotIndexFromTeamPosition,
+    usedSlotIndexes,
+} from '../utils/matchPlayerSlots';
 
 interface MatchesManagementModalProps {
     clubId: string | null;
@@ -33,6 +41,11 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
     const [addingToSlot, setAddingToSlot] = useState<{ matchId: string, team: string, index: number, bookingId: string } | null>(null);
     const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
     const [removingFromMatch, setRemovingFromMatch] = useState<any | null>(null);
+    const [pendingPlayerRemove, setPendingPlayerRemove] = useState<{
+        matchId: string;
+        bookingId: string;
+        playerId: string;
+    } | null>(null);
 
     // Estado local de la fecha
     const [currentDate, setCurrentDate] = useState(() => new Date(dateStr + 'T12:00:00'));
@@ -43,6 +56,35 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
     }, [isOpen, dateStr]);
 
     const currentDateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
+
+    const executeRemovePlayer = async ({ cashRefunds, applyRefund }: CashRefundConfirmPayload) => {
+        if (!pendingPlayerRemove) return;
+        setLoading(true);
+        try {
+            await apiFetchWithAuth(`/matches/${pendingPlayerRemove.matchId}/admin-remove-player`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    player_id: pendingPlayerRemove.playerId,
+                    booking_id: pendingPlayerRemove.bookingId,
+                    cash_refund_action: cashRefunds[pendingPlayerRemove.playerId],
+                    apply_refund: applyRefund,
+                }),
+            });
+            await fetchMatches();
+            setRemovingFromMatch(null);
+            setPendingPlayerRemove(null);
+        } catch (err) {
+            console.error('Error removing player:', err);
+            alert('Error al remover jugador');
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const startRemovePlayer = (match: any, playerId: string, bookingId: string) => {
+        setPendingPlayerRemove({ matchId: match.id, bookingId, playerId });
+    };
 
     const fetchMatches = useCallback(async () => {
         if (!clubId) return;
@@ -94,25 +136,12 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                         return person?.id && !existingPlayerIds.has(person.id);
                     });
                     if (missing.length > 0) {
-                        let teamACount = existingMps.filter((mp: any) => mp.team === 'A').length;
-                        let teamBCount = existingMps.filter((mp: any) => mp.team === 'B').length;
-                        const extras = missing.map((p: any) => {
-                            const person = Array.isArray(p.players) ? p.players[0] : p.players;
-                            let team: 'A' | 'B';
-                            if (teamACount < 2) { team = 'A'; teamACount++; }
-                            else if (teamBCount < 2) { team = 'B'; teamBCount++; }
-                            else if (teamACount <= teamBCount) { team = 'A'; teamACount++; }
-                            else { team = 'B'; teamBCount++; }
-                            return {
-                                id: p.id,
-                                team,
-                                players: {
-                                    id: person?.id,
-                                    first_name: person?.first_name,
-                                    last_name: person?.last_name,
-                                    elo_rating: person?.elo_rating
-                                }
-                            };
+                        const usedSlots = usedSlotIndexes(existingMps);
+                        const extras = missing.flatMap((p: any) => {
+                            const slot = nextFreeSlotIndex(usedSlots);
+                            if (slot == null) return [];
+                            usedSlots.add(slot);
+                            return [buildSyntheticMatchPlayer(p, slot)];
                         });
                         m.match_players = [...existingMps, ...extras];
                     }
@@ -129,19 +158,9 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                     // Transform booking participants into mock match players
                     const mockPlayers: any[] = [];
                     const participants = b.booking_participants || [];
-                    for (let i = 0; i < participants.length; i++) {
+                    for (let i = 0; i < participants.length && i < 4; i++) {
                          const p = participants[i];
-                         const person = Array.isArray(p.players) ? p.players[0] : p.players;
-                         mockPlayers.push({
-                             id: p.id,
-                             team: i % 2 === 0 ? 'A' : 'B',
-                             players: {
-                                  id: person?.id,
-                                  first_name: person?.first_name,
-                                  last_name: person?.last_name,
-                                  elo_rating: person?.elo_rating
-                             }
-                         });
+                         mockPlayers.push(buildSyntheticMatchPlayer(p, i));
                     }
 
                     allMatches.push({
@@ -295,9 +314,7 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                                     const paymentTransactions = booking?.payment_transactions || [];
                                     const totalPaid = paymentTransactions.reduce((acc: number, pt: any) => pt.status === 'succeeded' ? acc + (pt.amount_cents || 0) : acc, 0) / 100;
                                     
-                                    const players = match.match_players || [];
-                                    const teamA = players.filter((p: any) => p.team === 'A');
-                                    const teamB = players.filter((p: any) => p.team === 'B');
+                                    const playerSlots = resolveMatchPlayerSlots(match.match_players || []);
 
                                     // Render Player Avatar Block
                                     const renderPlayer = (mp: any, index: number, matchBookingId: string, team: string, matchId: string) => {
@@ -352,13 +369,13 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="flex items-center gap-4">
                                                     <div className="flex items-center -space-x-2">
-                                                        {renderPlayer(teamA[0], 0, booking?.id, 'A', match.id)}
-                                                        {renderPlayer(teamA[1], 1, booking?.id, 'A', match.id)}
+                                                        {renderPlayer(playerSlots[0], 0, booking?.id, 'A', match.id)}
+                                                        {renderPlayer(playerSlots[1], 1, booking?.id, 'A', match.id)}
                                                     </div>
                                                     <span className="text-[11px] font-bold tracking-wider text-gray-300">VS</span>
                                                     <div className="flex items-center -space-x-2">
-                                                        {renderPlayer(teamB[0], 0, booking?.id, 'B', match.id)}
-                                                        {renderPlayer(teamB[1], 1, booking?.id, 'B', match.id)}
+                                                        {renderPlayer(playerSlots[2], 0, booking?.id, 'B', match.id)}
+                                                        {renderPlayer(playerSlots[3], 1, booking?.id, 'B', match.id)}
                                                     </div>
                                                 </div>
                                             </td>
@@ -452,7 +469,10 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                                             body: JSON.stringify({
                                                 player_id: player.id,
                                                 team: addingToSlot.team,
-                                                slot_index: addingToSlot.index,
+                                                slot_index: slotIndexFromTeamPosition(
+                                                    addingToSlot.team as 'A' | 'B',
+                                                    addingToSlot.index,
+                                                ),
                                                 booking_id: addingToSlot.bookingId
                                             })
                                         });
@@ -507,25 +527,12 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                                             <button 
                                                 className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                                                 title="Remover"
-                                                onClick={async () => {
-                                                    setLoading(true);
-                                                    try {
-                                                        const matchBooking = Array.isArray(removingFromMatch.bookings) ? removingFromMatch.bookings[0] : removingFromMatch.bookings;
-                                                        await apiFetchWithAuth(`/matches/${removingFromMatch.id}/admin-remove-player`, {
-                                                            method: 'POST',
-                                                            body: JSON.stringify({
-                                                                player_id: player.id,
-                                                                booking_id: matchBooking?.id
-                                                            })
-                                                        });
-                                                        await fetchMatches();
-                                                        setRemovingFromMatch(null);
-                                                    } catch(err) {
-                                                        console.error(err);
-                                                        alert('Error al remover jugador');
-                                                    } finally {
-                                                        setLoading(false);
-                                                    }
+                                                onClick={() => {
+                                                    const matchBooking = Array.isArray(removingFromMatch.bookings)
+                                                        ? removingFromMatch.bookings[0]
+                                                        : removingFromMatch.bookings;
+                                                    if (!matchBooking?.id) return;
+                                                    startRemovePlayer(removingFromMatch, player.id, matchBooking.id);
                                                 }}
                                             >
                                                 <Trash2 size={16} />
@@ -538,11 +545,26 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                     </div>
                 </div>
             )}
+
+            {pendingPlayerRemove && (
+                <CashRefundModal
+                    isOpen={!!pendingPlayerRemove}
+                    bookingId={pendingPlayerRemove.bookingId}
+                    playerId={pendingPlayerRemove.playerId}
+                    title="Devolución en efectivo"
+                    subtitle="Este jugador pagó en efectivo en mostrador."
+                    confirmLabel="Remover jugador"
+                    onClose={() => !loading && setPendingPlayerRemove(null)}
+                    onNoCashPlayers={(payload) => void executeRemovePlayer(payload)}
+                    onConfirm={executeRemovePlayer}
+                />
+            )}
             
             {isCreateMatchOpen && (
                 <CreateMatchModal
                     clubId={clubId}
                     isOpen={isCreateMatchOpen}
+                    initialDate={currentDateStr}
                     onClose={() => {
                         setIsCreateMatchOpen(false);
                         fetchMatches();

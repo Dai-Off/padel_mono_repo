@@ -170,3 +170,33 @@ export async function applyRecoveryPassword(params: {
     return { ok: false, httpStatus: 0, error: 'network' };
   }
 }
+
+export type DeleteAccountResponse = {
+  ok: boolean;
+  grace_days?: number;
+  deletion_requested_at?: string;
+  already_requested?: boolean;
+  message?: string;
+  error?: string;
+};
+
+/** Solicita eliminación de cuenta (período de gracia antes de anonimizar). */
+export async function requestAccountDeletion(
+  accessToken: string,
+  reason?: string,
+): Promise<DeleteAccountResponse & { httpStatus: number }> {
+  try {
+    const res = await fetch(`${API_URL}/account/delete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+    const json = (await res.json()) as DeleteAccountResponse;
+    return { ...json, httpStatus: res.status };
+  } catch {
+    return { ok: false, httpStatus: 0, error: 'Error de conexión' };
+  }
+}

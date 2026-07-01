@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import {
   formatNationalInput,
@@ -17,6 +18,7 @@ import {
   type CountryCode,
   type PhoneCountryOption,
 } from '../../lib/phoneNumber';
+import { useTranslation } from '../../i18n';
 
 const ACCENT = '#F18F34';
 const CARD_BG = 'rgba(255,255,255,0.04)';
@@ -37,8 +39,10 @@ export function PhoneNumberField({
   onCountryChange,
   onNationalChange,
   error,
-  label = 'Teléfono',
+  label,
 }: PhoneNumberFieldProps) {
+  const { t } = useTranslation();
+  const resolvedLabel = label ?? t('alerts.phone.title');
   const insets = useSafeAreaInsets();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -77,12 +81,12 @@ export function PhoneNumberField({
 
   return (
     <>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label}>{resolvedLabel}</Text>
       <View style={[styles.row, error ? styles.rowError : null]}>
         <Pressable
           style={({ pressed }) => [styles.countryBtn, pressed && styles.pressed]}
           onPress={() => setPickerOpen(true)}
-          accessibilityLabel="Elegir país"
+          accessibilityLabel={t('profile.phoneCountryTitle')}
         >
           <Text style={styles.flag}>{selected?.flag ?? '🌐'}</Text>
           <Text style={styles.callingCode}>{selected?.callingCode ?? '+?'}</Text>
@@ -92,19 +96,19 @@ export function PhoneNumberField({
           style={styles.numberInput}
           value={national}
           onChangeText={handleNationalChange}
-          placeholder="Número móvil"
+          placeholder={t('alerts.phone.title')}
           placeholderTextColor="#6b7280"
           keyboardType="phone-pad"
           textContentType="telephoneNumber"
         />
       </View>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      {showValidHint ? <Text style={styles.okText}>Número válido</Text> : null}
+      {showValidHint ? <Text style={styles.okText}>{t('common.validNumber')}</Text> : null}
 
       <Modal visible={pickerOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setPickerOpen(false)}>
-        <View style={[styles.modalRoot, { paddingTop: insets.top }]}>
+        <KeyboardAvoidingView behavior="padding" style={[styles.modalRoot, { paddingTop: insets.top }]}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>País / prefijo</Text>
+            <Text style={styles.modalTitle}>{t('profile.phoneCountryTitle')}</Text>
             <Pressable onPress={() => setPickerOpen(false)} hitSlop={8}>
               <Ionicons name="close" size={24} color="#fff" />
             </Pressable>
@@ -113,7 +117,7 @@ export function PhoneNumberField({
             style={styles.searchInput}
             value={search}
             onChangeText={setSearch}
-            placeholder="Buscar país o prefijo…"
+            placeholder={t('profile.phoneCountryTitle')}
             placeholderTextColor="#6b7280"
             autoCapitalize="none"
             autoCorrect={false}
@@ -140,7 +144,7 @@ export function PhoneNumberField({
               </Pressable>
             )}
           />
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );

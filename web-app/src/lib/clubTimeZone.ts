@@ -1,18 +1,48 @@
-/** Zona horaria del club (España: Europe/Madrid, CET/CEST). */
-export const CLUB_IANA_TIMEZONE = 'Europe/Madrid';
+/** Fallback si el navegador no expone su zona horaria. */
+const FALLBACK_TIMEZONE = 'Europe/Madrid';
 
-/** @deprecated Usar clubIanaTimeZone — siempre devuelve Europe/Madrid para operaciones del club. */
+/** @deprecated Usar clubIanaTimeZone(). Se mantiene solo como fallback. */
+export const CLUB_IANA_TIMEZONE = FALLBACK_TIMEZONE;
+
+function detectBrowserTimeZone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz && tz.trim() ? tz.trim() : FALLBACK_TIMEZONE;
+  } catch {
+    return FALLBACK_TIMEZONE;
+  }
+}
+
+// Zona horaria activa para las operaciones del club. Por defecto toma la del
+// navegador (automático); cuando se carga un club con `timezone` definido, se
+// fija explícitamente con setClubTimeZone. No forzamos una zona fija.
+let activeClubTimeZone = detectBrowserTimeZone();
+
+/** Fija la zona horaria del club (la del registro). Ignora valores inválidos. */
+export function setClubTimeZone(tz: string | null | undefined): void {
+  if (typeof tz !== 'string') return;
+  const t = tz.trim();
+  if (!t) return;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: t }).format(new Date());
+    activeClubTimeZone = t;
+  } catch {
+    // zona inválida: mantenemos la actual (navegador/club previo)
+  }
+}
+
+/** @deprecated Usar clubIanaTimeZone. */
 export function browserIanaTimeZone(): string {
   return clubIanaTimeZone();
 }
 
 export function clubIanaTimeZone(): string {
-  return CLUB_IANA_TIMEZONE;
+  return activeClubTimeZone;
 }
 
 export function formatInClubTimeZone(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: CLUB_IANA_TIMEZONE,
+    timeZone: activeClubTimeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -26,7 +56,7 @@ export function formatInClubTimeZone(date: Date): string {
   return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}:${get('second')}`;
 }
 
-export function zonedTimeToUtc(localDateTime: string, timeZone: string = CLUB_IANA_TIMEZONE): Date {
+export function zonedTimeToUtc(localDateTime: string, timeZone: string = activeClubTimeZone): Date {
   const parseAsUtc = (s: string) => new Date(`${s}Z`);
   const targetMs = parseAsUtc(localDateTime).getTime();
   let guess = new Date(targetMs);
@@ -56,7 +86,7 @@ export function formatTimeHHmmInClubTz(value: string | Date): string {
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return '00:00';
   return new Intl.DateTimeFormat('es-ES', {
-    timeZone: CLUB_IANA_TIMEZONE,
+    timeZone: activeClubTimeZone,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -65,7 +95,7 @@ export function formatTimeHHmmInClubTz(value: string | Date): string {
 
 export function dayKeyInClubTz(date: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: CLUB_IANA_TIMEZONE,
+    timeZone: activeClubTimeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -74,7 +104,7 @@ export function dayKeyInClubTz(date: Date = new Date()): string {
 
 export function nowMinutesInClubTz(): number {
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: CLUB_IANA_TIMEZONE,
+    timeZone: activeClubTimeZone,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -86,12 +116,30 @@ export function nowMinutesInClubTz(): number {
 
 export function clubClockLabel(): string {
   return new Intl.DateTimeFormat('es-ES', {
-    timeZone: CLUB_IANA_TIMEZONE,
+    timeZone: activeClubTimeZone,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
   }).format(new Date());
+}
+
+/**
+ * Etiqueta corta de la zona horaria del club, derivada automáticamente
+ * (ej. "GMT-3", "GMT+2"). Sin valores fijos por país.
+ */
+export function clubTimeZoneShortLabel(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: activeClubTimeZone,
+      timeZoneName: 'shortOffset',
+    }).formatToParts(new Date());
+    const name = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (name && name.trim()) return name.trim();
+  } catch {
+    // ignore
+  }
+  return activeClubTimeZone;
 }
 
 export type DayOperatingHours = {
@@ -111,11 +159,22 @@ function parseClockToMinutes(raw: unknown): number | null {
 
 function weekdayCodeForDateStr(dateStr: string): string {
   const d = new Date(`${dateStr}T12:00:00Z`);
-  const short = new Intl.DateTimeFormat('en-US', { timeZone: CLUB_IANA_TIMEZONE, weekday: 'short' }).format(d);
+  const short = new Intl.DateTimeFormat('en-US', { timeZone: activeClubTimeZone, weekday: 'short' }).format(d);
   const map: Record<string, string> = {
     Mon: 'mon', Tue: 'tue', Wed: 'wed', Thu: 'thu', Fri: 'fri', Sat: 'sat', Sun: 'sun',
   };
   return map[short] ?? 'mon';
+}
+
+function scheduleEntryForWeekday(ws: Record<string, unknown>, weekday: string): unknown {
+  if (weekday in ws) return ws[weekday];
+  const idxMap: Record<string, string> = { sun: '0', mon: '1', tue: '2', wed: '3', thu: '4', fri: '5', sat: '6' };
+  const idxKey = idxMap[weekday];
+  if (idxKey && idxKey in ws) return ws[idxKey];
+  // ISO 1=lun … 7=dom (ClubSettings)
+  const isoKey = weekday === 'sun' ? '7' : idxKey && idxKey !== '0' ? idxKey : null;
+  if (isoKey && isoKey in ws) return ws[isoKey];
+  return undefined;
 }
 
 export function gridBoundsForClubDay(weeklySchedule: unknown, dateStr: string): DayOperatingHours {
@@ -123,7 +182,7 @@ export function gridBoundsForClubDay(weeklySchedule: unknown, dateStr: string): 
   const ws = weeklySchedule && typeof weeklySchedule === 'object'
     ? (weeklySchedule as Record<string, unknown>)
     : {};
-  const entry = ws[weekday] ?? ws[{ sun: '0', mon: '1', tue: '2', wed: '3', thu: '4', fri: '5', sat: '6' }[weekday] as string];
+  const entry = scheduleEntryForWeekday(ws, weekday);
 
   let openMin = 7 * 60;
   let closeMin = 23 * 60;
@@ -156,4 +215,44 @@ export function gridBoundsForClubDay(weeklySchedule: unknown, dateStr: string): 
     startHour: Math.floor(openMin / 60),
     endHour: Math.ceil(closeMin / 60),
   };
+}
+
+function formatMinutesAsClock(totalMin: number): string {
+  return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
+}
+
+/** Valida inicio + duración contra el horario semanal del club (Europe/Madrid). */
+export function validateBookingSlotWithinClubHours(params: {
+  dateStr: string;
+  startHour: string;
+  startMinute: string;
+  durationMinutes: number;
+  weeklySchedule: unknown;
+  skipForBlocked?: boolean;
+}): { ok: true } | { ok: false; error: string } {
+  if (params.skipForBlocked) return { ok: true };
+  const bounds = gridBoundsForClubDay(params.weeklySchedule, params.dateStr);
+  if (bounds.closed) {
+    return { ok: false, error: 'El club está cerrado este día' };
+  }
+  const sh = Number(params.startHour);
+  const sm = Number(params.startMinute);
+  if (!Number.isFinite(sh) || !Number.isFinite(sm)) {
+    return { ok: false, error: 'Hora de inicio inválida' };
+  }
+  const startMin = sh * 60 + sm;
+  const endMin = startMin + params.durationMinutes;
+  if (startMin < bounds.openMin) {
+    return {
+      ok: false,
+      error: `La reserva no puede empezar antes de la apertura del club (${formatMinutesAsClock(bounds.openMin)})`,
+    };
+  }
+  if (endMin > bounds.closeMin) {
+    return {
+      ok: false,
+      error: `La reserva no puede terminar después del cierre del club (${formatMinutesAsClock(bounds.closeMin)})`,
+    };
+  }
+  return { ok: true };
 }

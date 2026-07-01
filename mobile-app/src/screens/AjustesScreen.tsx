@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MenuScreenHeader } from '../components/menuScreen/MenuScreenHeader';
@@ -10,6 +10,7 @@ import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { InfoContentScreen } from './InfoContentScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
+import { requestAccountDeletion } from '../api/auth';
 import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import { registerOverlayNestedBack } from '../navigation/overlayBackRef';
 import { theme } from '../theme';
@@ -53,11 +54,12 @@ function AjustesNotificacionesView({
   onToggle: (next: PlayerPreferences) => void;
   saving: boolean;
 }) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.container}>
-      <MenuScreenHeader title="Notificaciones" onBack={onBack} />
+      <MenuScreenHeader title={t('settings.notifications')} onBack={onBack} />
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
         showsVerticalScrollIndicator={false}
@@ -65,16 +67,16 @@ function AjustesNotificacionesView({
         <View style={styles.configRows}>
           {(
             [
-              { key: 'notifChatMessages' as const, title: 'Mensajes', icon: 'chatbubbles-outline' as const },
-              { key: 'notifNewMatches' as const, title: 'Nuevos partidos', icon: 'trophy-outline' as const },
-              { key: 'notifTournamentReminders' as const, title: 'Competiciones', icon: 'shield-outline' as const },
-              { key: 'notifClassUpdates' as const, title: 'Clases', icon: 'school-outline' as const },
+              { key: 'notifChatMessages' as const, titleKey: 'settings.notifMessages', icon: 'chatbubbles-outline' as const },
+              { key: 'notifNewMatches' as const, titleKey: 'settings.notifNewMatches', icon: 'trophy-outline' as const },
+              { key: 'notifTournamentReminders' as const, titleKey: 'settings.notifCompetitions', icon: 'shield-outline' as const },
+              { key: 'notifClassUpdates' as const, titleKey: 'settings.notifClasses', icon: 'school-outline' as const },
             ] as const
           ).map((item) => (
             <View key={item.key} style={styles.notifRow}>
               <View style={styles.notifRowLeft}>
                 <Ionicons name={item.icon} size={18} color={theme.auth.textMuted} />
-                <Text style={styles.notifRowTitle}>{item.title}</Text>
+                <Text style={styles.notifRowTitle}>{t(item.titleKey)}</Text>
               </View>
               <Switch
                 value={prefs[item.key]}
@@ -85,7 +87,7 @@ function AjustesNotificacionesView({
             </View>
           ))}
         </View>
-        {saving ? <Text style={styles.savingHint}>Guardando…</Text> : null}
+        {saving ? <Text style={styles.savingHint}>{t('common.saving')}</Text> : null}
       </ScrollView>
     </View>
   );
@@ -98,30 +100,30 @@ function AjustesPrivacidadView({
   onBack: () => void;
   onOpenPolicy: () => void;
 }) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.container}>
-      <MenuScreenHeader title="Privacidad" onBack={onBack} />
+      <MenuScreenHeader title={t('settings.privacy')} onBack={onBack} />
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.languageCard}>
           <Text style={styles.privacyText}>
-            Controla qué información compartes y cómo se usa tu actividad en WeMatch.
+            {t('settings.privacyIntro1')}
           </Text>
           <Text style={[styles.privacyText, styles.privacyTextSpaced]}>
-            Puedes gestionar clubes favoritos, preferencias de juego y visibilidad desde Preferencias
-            en tu perfil.
+            {t('settings.privacyIntro2')}
           </Text>
           <Pressable
             style={({ pressed }) => [styles.policyLink, pressed && { opacity: 0.9 }]}
             onPress={onOpenPolicy}
             accessibilityRole="button"
-            accessibilityLabel="Ver política de privacidad completa"
+            accessibilityLabel={t('settings.privacyViewPolicyA11y')}
           >
-            <Text style={styles.policyLinkText}>Ver política de privacidad completa</Text>
+            <Text style={styles.policyLinkText}>{t('settings.privacyViewPolicy')}</Text>
             <Ionicons name="chevron-forward" size={16} color={theme.auth.accent} />
           </Pressable>
         </View>
@@ -132,14 +134,15 @@ function AjustesPrivacidadView({
 
 export function AjustesScreen({ onBack }: AjustesScreenProps) {
   const insets = useSafeAreaInsets();
-  const { session } = useAuth();
+  const { session, logout } = useAuth();
   const { profile, refreshProfile } = useHomeData();
-  const { locale: language, setLocale } = useTranslation();
+  const { locale: language, setLocale, t } = useTranslation();
   const token = session?.access_token;
 
   const [view, setView] = useState<AjustesView>('main');
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const basePrefs = useMemo<PlayerPreferences | null>(() => profile?.preferences ?? null, [profile]);
   const [prefs, setPrefs] = useState<PlayerPreferences | null>(basePrefs);
@@ -155,6 +158,38 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
   const selectLanguage = (value: AppLocale) => {
     setLocale(value);
     setShowLanguagePicker(false);
+  };
+
+  const handleDeleteAccountPress = () => {
+    Alert.alert(t('settings.deleteAccountConfirmTitle'), t('settings.deleteAccountConfirmBody'), [
+      { text: t('settings.deleteAccountCancelButton'), style: 'cancel' },
+      {
+        text: t('settings.deleteAccountConfirmButton'),
+        style: 'destructive',
+        onPress: () => setShowDeleteConfirm(true),
+      },
+    ]);
+  };
+
+  const confirmDeleteAccount = async () => {
+    if (!token || deletingAccount) return;
+    setDeletingAccount(true);
+    try {
+      const res = await requestAccountDeletion(token);
+      setShowDeleteConfirm(false);
+      if (!res.ok) {
+        Alert.alert(t('settings.deleteAccount'), res.error ?? t('settings.deleteAccountError'));
+        return;
+      }
+      const days = res.grace_days ?? 14;
+      Alert.alert(
+        t('settings.deleteAccountSuccess'),
+        t('settings.deleteAccountSuccessBody', { days: String(days) }),
+        [{ text: t('common.understood'), onPress: () => void logout() }],
+      );
+    } finally {
+      setDeletingAccount(false);
+    }
   };
 
   const applyPrefs = async (next: PlayerPreferences) => {
@@ -195,7 +230,7 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
   if (view === 'seguridad') {
     return (
       <ChangePasswordScreen
-        title="Seguridad"
+        title={t('settings.security')}
         userEmail={session?.user?.email}
         onBack={() => setView('main')}
       />
@@ -228,47 +263,47 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
 
   return (
     <View style={styles.container}>
-      <MenuScreenHeader title="Ajustes" onBack={onBack} />
+      <MenuScreenHeader title={t('settings.title')} onBack={onBack} />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
         showsVerticalScrollIndicator={false}
       >
-        <MenuScreenSection title="Idioma">
+        <MenuScreenSection title={t('settings.languageSection')}>
           <View style={styles.languageCard}>
-            <Text style={styles.languageLabel}>Idioma de la aplicación</Text>
+            <Text style={styles.languageLabel}>{t('settings.languageAppLabel')}</Text>
             <Pressable
               style={({ pressed }) => [styles.languageSelect, pressed && styles.languageSelectPressed]}
               onPress={() => setShowLanguagePicker(true)}
               accessibilityRole="button"
-              accessibilityLabel="Seleccionar idioma"
+              accessibilityLabel={t('settings.languageSelectA11y')}
             >
               <Text style={styles.languageSelectText}>{languageLabel}</Text>
               <Ionicons name="chevron-down" size={18} color={theme.auth.textMuted} />
             </Pressable>
-            <Text style={styles.languageHint}>Selecciona el idioma de la aplicación</Text>
+            <Text style={styles.languageHint}>{t('settings.languageHint')}</Text>
           </View>
         </MenuScreenSection>
 
-        <MenuScreenSection title="Configuración">
+        <MenuScreenSection title={t('settings.configSection')}>
           <View style={styles.configRows}>
             <MenuScreenRow
-              title="Privacidad"
+              title={t('settings.privacy')}
               icon="eye-outline"
               iconColors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.04)']}
               iconColor="#9ca3af"
               onPress={() => setView('privacidad')}
             />
             <MenuScreenRow
-              title="Notificaciones"
+              title={t('settings.notifications')}
               icon="notifications-outline"
               iconColors={['rgba(245,158,11,0.2)', 'rgba(202,138,4,0.1)']}
               iconColor="#fbbf24"
               onPress={() => setView('notificaciones')}
             />
             <MenuScreenRow
-              title="Seguridad"
+              title={t('settings.security')}
               icon="lock-closed-outline"
               iconColors={['rgba(239,68,68,0.2)', 'rgba(220,38,38,0.1)']}
               iconColor="#f87171"
@@ -277,24 +312,24 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
           </View>
         </MenuScreenSection>
 
-        <MenuScreenSection title="Zona de peligro" topSpacing>
+        <MenuScreenSection title={t('settings.dangerZone')} topSpacing>
           <Pressable
             style={({ pressed }) => [styles.dangerButton, pressed && { opacity: 0.92 }]}
-            onPress={() => setShowDeleteConfirm(true)}
+            onPress={handleDeleteAccountPress}
             accessibilityRole="button"
-            accessibilityLabel="Eliminar tu cuenta"
+            accessibilityLabel={t('settings.deleteAccountA11y')}
           >
             <View style={styles.dangerIconBox}>
-              <Ionicons name="log-out-outline" size={20} color="#f87171" />
+              <Ionicons name="trash-outline" size={20} color="#f87171" />
             </View>
-            <Text style={styles.dangerText}>Eliminar tu cuenta</Text>
+            <Text style={styles.dangerText}>{t('settings.deleteAccount')}</Text>
           </Pressable>
         </MenuScreenSection>
       </ScrollView>
 
       <MenuScreenOverlay
         visible={showLanguagePicker}
-        title="Idioma"
+        title={t('settings.languageSection')}
         onClose={() => setShowLanguagePicker(false)}
       >
         {LANGUAGE_OPTIONS.map((opt) => (
@@ -317,19 +352,34 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
 
       <MenuScreenOverlay
         visible={showDeleteConfirm}
-        title="Eliminar tu cuenta"
-        onClose={() => setShowDeleteConfirm(false)}
+        title={t('settings.deleteAccount')}
+        onClose={() => !deletingAccount && setShowDeleteConfirm(false)}
       >
-        <Text style={styles.modalText}>
-          Esta acción es permanente. Si quieres eliminar tu cuenta, contacta con soporte desde la app
-          o el club donde juegas habitualmente.
-        </Text>
-        <Pressable
-          style={({ pressed }) => [styles.modalBtnGhost, pressed && { opacity: 0.9 }]}
-          onPress={() => setShowDeleteConfirm(false)}
-        >
-          <Text style={styles.modalBtnGhostText}>Entendido</Text>
-        </Pressable>
+        <Text style={styles.modalText}>{t('settings.deleteAccountBody')}</Text>
+        <View style={styles.modalActions}>
+          <Pressable
+            style={({ pressed }) => [styles.modalBtnGhost, pressed && { opacity: 0.9 }]}
+            onPress={() => setShowDeleteConfirm(false)}
+            disabled={deletingAccount}
+          >
+            <Text style={styles.modalBtnGhostText}>{t('settings.deleteAccountCancelButton')}</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.modalBtnDanger,
+              pressed && { opacity: 0.9 },
+              deletingAccount && styles.modalBtnDisabled,
+            ]}
+            onPress={() => void confirmDeleteAccount()}
+            disabled={deletingAccount}
+          >
+            {deletingAccount ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.modalBtnDangerText}>{t('settings.deleteAccountConfirmButton')}</Text>
+            )}
+          </Pressable>
+        </View>
       </MenuScreenOverlay>
     </View>
   );
@@ -404,6 +454,7 @@ const styles = StyleSheet.create({
   languageOptionActive: { borderColor: 'rgba(241,143,52,0.35)' },
   languageOptionText: { color: '#fff', fontSize: 15 },
   modalText: { color: theme.auth.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 16 },
+  modalActions: { gap: 10 },
   modalBtnGhost: {
     paddingVertical: 12,
     borderRadius: 14,
@@ -413,6 +464,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.10)',
   },
   modalBtnGhostText: { color: '#fff', fontWeight: '700' },
+  modalBtnDanger: {
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(239,68,68,0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.45)',
+  },
+  modalBtnDangerText: { color: '#fca5a5', fontWeight: '700' },
+  modalBtnDisabled: { opacity: 0.6 },
   notifRow: {
     flexDirection: 'row',
     alignItems: 'center',

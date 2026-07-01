@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState, useCallback } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
@@ -9,6 +10,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
 import { HomeDataProvider } from './src/contexts/HomeDataContext';
+import { CartProvider } from './src/contexts/CartContext';
 import { SplashScreen } from './src/components/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { MainApp } from './src/screens/MainApp';
@@ -144,19 +146,23 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} urlScheme={urlScheme}>
-        <SafeAreaProvider>
-          <I18nProvider>
-            <AuthProvider>
-              {/* Montado siempre (no dentro del branch authed) para que un
-                  parpadeo de sesión no destruya el cache y dispare reload infinito. */}
-              <HomeDataProvider>
-                <AppContent />
-              </HomeDataProvider>
-            </AuthProvider>
-          </I18nProvider>
-        </SafeAreaProvider>
-      </StripeProvider>
+      <KeyboardProvider preload={false}>
+        <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} urlScheme={urlScheme}>
+          <SafeAreaProvider>
+            <I18nProvider>
+              <AuthProvider>
+                {/* Montado siempre (no dentro del branch authed) para que un
+                    parpadeo de sesión no destruya el cache y dispare reload infinito. */}
+                <HomeDataProvider>
+                  <CartProvider>
+                    <AppContent />
+                  </CartProvider>
+                </HomeDataProvider>
+              </AuthProvider>
+            </I18nProvider>
+          </SafeAreaProvider>
+        </StripeProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

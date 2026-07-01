@@ -5,6 +5,7 @@ import { CommunityPost, toggleLike, toggleBookmark } from '../../api/community';
 import { PostImageCarousel } from './PostImageCarousel';
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTranslation } from '../../i18n';
 import { formatPlayerLabel } from '../../lib/username';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
 
@@ -25,6 +26,7 @@ interface PostCardProps {
 
 export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments, onPressAuthor }) => {
   const { session } = useAuth();
+  const { t } = useTranslation();
   const token = session?.access_token;
   
   const [isLiked, setIsLiked] = useState(post.has_liked);
@@ -122,7 +124,8 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments, onPre
       {/* Details */}
       <View style={styles.details}>
         <Text style={styles.likesText}>
-          {likesCount.toLocaleString()} {likesCount === 1 ? 'Me gusta' : 'Me gustas'}
+          {likesCount.toLocaleString()}{' '}
+          {likesCount === 1 ? t('community.postLikesOne') : t('community.postLikesMany')}
         </Text>
         
         {post.caption && (
@@ -137,13 +140,13 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments, onPre
         {post.comments_count > 0 && (
           <TouchableOpacity onPress={() => onPressComments(post)}>
             <Text style={styles.viewComments}>
-              Ver los {post.comments_count} comentarios
+              {t('community.viewComments', { count: post.comments_count })}
             </Text>
           </TouchableOpacity>
         )}
 
         <Text style={styles.timeAgo}>
-          {formatTimeAgo(post.created_at)}
+          {formatTimeAgo(post.created_at, t)}
         </Text>
       </View>
     </View>

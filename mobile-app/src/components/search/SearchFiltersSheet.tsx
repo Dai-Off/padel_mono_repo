@@ -26,6 +26,7 @@ import {
   type SearchFiltersState,
 } from '../../domain/searchFilters';
 import { timeRangePresetMatches } from '../../utils/formatSearch';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 export type { SearchFiltersState };
@@ -41,11 +42,15 @@ type SearchFiltersSheetProps = {
   resultCountKind?: 'clubs' | 'results';
 };
 
-function formatResultCtaLabel(n: number, kind: 'clubs' | 'results') {
+function formatResultCtaLabel(
+  n: number,
+  kind: 'clubs' | 'results',
+  t: (key: string, params?: Record<string, string | number>) => string,
+) {
   if (kind === 'clubs') {
-    return n === 1 ? 'Ver 1 club' : `Ver ${n} clubes`;
+    return n === 1 ? t('common.seeResultsOneClub') : t('common.seeResultsManyClubs', { count: n });
   }
-  return `Ver ${n} resultados`;
+  return t('common.seeResultsMany', { count: n });
 }
 
 function SectionTitle({ children }: { children: string }) {
@@ -62,6 +67,7 @@ export function SearchFiltersSheet({
   resultCount,
   resultCountKind = 'results',
 }: SearchFiltersSheetProps) {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState<SearchFiltersState>(() =>
     initialFilters ?? getInitialSearchFilters(),
   );
@@ -89,9 +95,9 @@ export function SearchFiltersSheet({
     <FilterApplyFooter
       resultCount={resultCount}
       singularLabel={
-        resultCountKind === 'clubs' ? 'Ver 1 club' : 'Ver 1 resultado'
+        resultCountKind === 'clubs' ? t('common.seeResultsOneClub') : t('common.seeOneResult')
       }
-      pluralLabel={formatResultCtaLabel(resultCount, resultCountKind)}
+      pluralLabel={formatResultCtaLabel(resultCount, resultCountKind, t)}
       onPress={handleApply}
     />
   );
@@ -99,7 +105,11 @@ export function SearchFiltersSheet({
   return (
     <FilterBottomSheet
       visible={visible}
-      title={advancedCount > 0 ? `Filtros (${advancedCount})` : 'Filtros'}
+      title={
+        advancedCount > 0
+          ? t('search.filtersTitleCount', { count: advancedCount })
+          : t('search.filtersTitle')
+      }
       onClose={onClose}
       onClear={handleClear}
       footer={footer}
@@ -111,17 +121,23 @@ export function SearchFiltersSheet({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <SectionTitle>Deporte</SectionTitle>
+        <SectionTitle>{t('search.sectionSport')}</SectionTitle>
         <View style={styles.chipRow}>
           <FilterPill
-            label="Todos"
+            label={t('common.sportAll')}
             selected={filters.sport == null}
             onPress={() => setFilters((s) => ({ ...s, sport: null }))}
           />
           {SPORT_OPTIONS.map((opt) => (
             <FilterPill
               key={opt.id}
-              label={opt.label}
+              label={
+                opt.id === 'padel'
+                  ? t('common.sportPadel')
+                  : opt.id === 'tenis'
+                    ? t('common.sportTenis')
+                    : t('common.sportPickleball')
+              }
               selected={filters.sport === opt.id}
               onPress={() =>
                 setFilters((s) => ({
@@ -134,7 +150,7 @@ export function SearchFiltersSheet({
         </View>
 
         <View style={styles.sectionDivider}>
-          <SectionTitle>Fecha</SectionTitle>
+          <SectionTitle>{t('search.sectionDate')}</SectionTitle>
           <DateStripPicker
             selectedDate={filters.date}
             onSelect={(date) => setFilters((s) => ({ ...s, date }))}
@@ -142,12 +158,20 @@ export function SearchFiltersSheet({
         </View>
 
         <View style={styles.sectionDivider}>
-          <SectionTitle>Franja horaria</SectionTitle>
+          <SectionTitle>{t('search.sectionTimeRange')}</SectionTitle>
           <View style={styles.chipRow}>
             {TIME_RANGE_PRESETS.map((preset) => (
               <FilterPill
                 key={preset.id}
-                label={preset.label}
+                label={
+                  preset.id === 'allday'
+                    ? t('search.timePresetAllDay')
+                    : preset.id === 'morning'
+                      ? t('search.timePresetMorning')
+                      : preset.id === 'afternoon'
+                        ? t('search.timePresetAfternoon')
+                        : t('search.timePresetEvening')
+                }
                 selected={timeRangePresetMatches(preset.id, filters.timeRange)}
                 onPress={() =>
                   setFilters((s) => ({
@@ -161,26 +185,26 @@ export function SearchFiltersSheet({
         </View>
 
         <View style={[styles.sectionDivider, styles.toggleRow]}>
-          <Text style={styles.toggleLabel}>Solo horarios reservables</Text>
+          <Text style={styles.toggleLabel}>{t('search.sectionBookableOnly')}</Text>
           <Switch
             value={!filters.showUnavailable}
             onValueChange={(v) => setFilters((s) => ({ ...s, showUnavailable: !v }))}
             trackColor={{ false: 'rgba(255,255,255,0.15)', true: filterTheme.accent }}
             thumbColor="#fff"
-            accessibilityLabel="Solo horarios reservables para la duración seleccionada"
+            accessibilityLabel={t('search.sectionBookableA11y')}
           />
         </View>
 
         <View style={styles.sectionDivider}>
-          <SectionTitle>Ordenar por</SectionTitle>
+          <SectionTitle>{t('search.sectionSortBy')}</SectionTitle>
           <View style={styles.chipRow}>
             <FilterPill
-              label="Distancia"
+              label={t('common.sortByDistance')}
               selected={filters.sortBy === 'distancia'}
               onPress={() => setFilters((s) => ({ ...s, sortBy: 'distancia' }))}
             />
             <FilterPill
-              label="Precio"
+              label={t('common.sortByPrice')}
               selected={filters.sortBy === 'precio'}
               onPress={() => setFilters((s) => ({ ...s, sortBy: 'precio' }))}
             />
@@ -189,10 +213,10 @@ export function SearchFiltersSheet({
 
         <View style={styles.sectionDivider}>
           <View style={styles.distanceHeader}>
-            <SectionTitle>Distancia máxima</SectionTitle>
+            <SectionTitle>{t('search.sectionMaxDistance')}</SectionTitle>
             <Text style={styles.distanceValue}>
               {filters.maxDistanceKm >= SEARCH_DISTANCE_MAX_KM
-                ? 'Sin límite'
+                ? t('common.noLimit')
                 : `${filters.maxDistanceKm} km`}
             </Text>
           </View>
@@ -206,17 +230,17 @@ export function SearchFiltersSheet({
             minimumTrackTintColor={filterTheme.accent}
             maximumTrackTintColor="rgba(255,255,255,0.12)"
             thumbTintColor={filterTheme.accent}
-            accessibilityLabel="Distancia máxima en kilómetros"
+            accessibilityLabel={t('search.sectionMaxDistanceA11y')}
           />
         </View>
 
         <View style={styles.sectionDivider}>
-          <SectionTitle>Duración</SectionTitle>
+          <SectionTitle>{t('search.sectionDuration')}</SectionTitle>
           <View style={styles.chipRow}>
             {DURATION_OPTIONS.map((m) => (
               <FilterPill
                 key={m}
-                label={`${m} min`}
+                label={t('common.durationMin', { minutes: m })}
                 selected={filters.duration === m}
                 onPress={() => setFilters((s) => ({ ...s, duration: m }))}
               />
@@ -225,12 +249,18 @@ export function SearchFiltersSheet({
         </View>
 
         <View style={styles.sectionDivider}>
-          <SectionTitle>Cerramiento</SectionTitle>
+          <SectionTitle>{t('search.sectionEnclosure')}</SectionTitle>
           <View style={styles.chipRow}>
             {CERRAMIENTO_OPTIONS.map((opt) => (
               <FilterPill
                 key={opt.id}
-                label={opt.label}
+                label={
+                  opt.id === 'indoor'
+                    ? t('common.indoor')
+                    : opt.id === 'exterior'
+                      ? t('common.outdoor')
+                      : t('common.covered')
+                }
                 selected={filters.cerramiento === opt.id}
                 onPress={() =>
                   setFilters((s) => ({
@@ -244,12 +274,18 @@ export function SearchFiltersSheet({
         </View>
 
         <View style={styles.sectionDivider}>
-          <SectionTitle>Paredes</SectionTitle>
+          <SectionTitle>{t('search.sectionWalls')}</SectionTitle>
           <View style={styles.chipRow}>
             {PAREDES_OPTIONS.map((opt) => (
               <FilterPill
                 key={opt.id}
-                label={opt.label}
+                label={
+                  opt.id === 'muro'
+                    ? t('common.wallMuro')
+                    : opt.id === 'cristal'
+                      ? t('common.wallCristal')
+                      : t('common.wallPanoramico')
+                }
                 selected={filters.paredes === opt.id}
                 onPress={() =>
                   setFilters((s) => ({

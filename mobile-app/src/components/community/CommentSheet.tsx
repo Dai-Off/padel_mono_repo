@@ -6,15 +6,16 @@ import {
   Modal,
   FlatList, 
   TextInput, 
-  TouchableOpacity, 
-  KeyboardAvoidingView,
+  TouchableOpacity,
   Platform,
   ActivityIndicator
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { CommunityPost, CommunityComment, fetchComments, addComment } from '../../api/community';
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTranslation } from '../../i18n';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
 
 /** Iniciales (máx 2) del comentarista. */
@@ -34,6 +35,7 @@ interface CommentSheetProps {
 
 export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, post, onPressAuthor }) => {
   const { session } = useAuth();
+  const { t } = useTranslation();
   const token = session?.access_token;
   
   const [comments, setComments] = useState<CommunityComment[]>([]);
@@ -78,12 +80,12 @@ export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, 
     >
       <View style={styles.overlay}>
         <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           style={styles.content}
         >
           <View style={styles.header}>
             <View style={styles.handle} />
-            <Text style={styles.title}>Comentarios</Text>
+            <Text style={styles.title}>{t('community.commentsTitle')}</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <Ionicons name="close" size={24} color="#FFF" />
             </TouchableOpacity>
@@ -117,7 +119,7 @@ export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, 
                       onPress={() => item.player.id && onPressAuthor?.(item.player.id)}
                     >
                       {item.player.first_name} {item.player.last_name}
-                      <Text style={styles.commentTime}>  {formatTimeAgo(item.created_at)}</Text>
+                      <Text style={styles.commentTime}>  {formatTimeAgo(item.created_at, t)}</Text>
                     </Text>
                     <Text style={styles.commentContent}>{item.content}</Text>
                   </View>
@@ -125,7 +127,7 @@ export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, 
               )}
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
-                  <Text style={styles.emptyText}>No hay comentarios aún. ¡Sé el primero!</Text>
+                  <Text style={styles.emptyText}>{t('community.commentsEmpty')}</Text>
                 </View>
               }
             />
@@ -134,7 +136,7 @@ export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, 
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.input}
-              placeholder="Escribe un comentario..."
+              placeholder={t('community.commentPlaceholder')}
               placeholderTextColor="rgba(255,255,255,0.4)"
               value={newComment}
               onChangeText={setNewComment}
@@ -148,7 +150,7 @@ export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, 
                 styles.sendText,
                 (!newComment.trim() || submitting) && styles.sendDisabled
               ]}>
-                Publicar
+                {t('community.commentPublish')}
               </Text>
             </TouchableOpacity>
           </View>

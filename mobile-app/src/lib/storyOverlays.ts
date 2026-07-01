@@ -10,18 +10,44 @@ export interface StoryFilter {
   opacity: number;
 }
 
-// Filtros por superposición de color (sin Skia, peso 0).
-export const STORY_FILTERS: StoryFilter[] = [
-  { id: 'none', label: 'Normal', color: 'transparent', opacity: 0 },
-  { id: 'warm', label: 'Cálido', color: '#FF8A00', opacity: 0.18 },
-  { id: 'cool', label: 'Frío', color: '#1E80FF', opacity: 0.18 },
-  { id: 'vintage', label: 'Vintage', color: '#C8A165', opacity: 0.22 },
-  { id: 'rose', label: 'Rosa', color: '#FF5E8A', opacity: 0.16 },
-  { id: 'dark', label: 'Oscuro', color: '#000000', opacity: 0.30 },
+const STORY_FILTER_DEFS: Omit<StoryFilter, 'label'>[] = [
+  { id: 'none', color: 'transparent', opacity: 0 },
+  { id: 'warm', color: '#FF8A00', opacity: 0.18 },
+  { id: 'cool', color: '#1E80FF', opacity: 0.18 },
+  { id: 'vintage', color: '#C8A165', opacity: 0.22 },
+  { id: 'rose', color: '#FF5E8A', opacity: 0.16 },
+  { id: 'dark', color: '#000000', opacity: 0.30 },
 ];
 
-export const filterById = (id?: string | null): StoryFilter =>
-  STORY_FILTERS.find(f => f.id === id) ?? STORY_FILTERS[0];
+const FILTER_LABEL_KEYS: Record<StoryFilterId, string> = {
+  none: 'community.storyOverlayNormal',
+  warm: 'community.storyOverlayWarm',
+  cool: 'community.storyOverlayCool',
+  vintage: 'community.storyOverlayVintage',
+  rose: 'community.storyOverlayRose',
+  dark: 'community.storyOverlayDark',
+};
+
+export function getStoryFilters(
+  t: (key: string) => string,
+): StoryFilter[] {
+  return STORY_FILTER_DEFS.map((def) => ({
+    ...def,
+    label: t(FILTER_LABEL_KEYS[def.id]),
+  }));
+}
+
+/** @deprecated Use getStoryFilters(t) for locale-aware labels */
+export const STORY_FILTERS: StoryFilter[] = STORY_FILTER_DEFS.map((def) => ({
+  ...def,
+  label: def.id,
+}));
+
+export const filterById = (
+  id?: string | null,
+  filters: StoryFilter[] = STORY_FILTERS,
+): StoryFilter =>
+  filters.find((f) => f.id === id) ?? filters[0];
 
 export interface StoryLayer {
   id: string;

@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +12,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { changePassword, forgotPassword } from '../api/auth';
 import { MenuScreenHeader } from '../components/menuScreen/MenuScreenHeader';
+import { SafeScrollView } from '../components/ui/SafeScrollView';
+import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 
 const CARD = 'rgba(255,255,255,0.06)';
@@ -27,8 +28,10 @@ type ChangePasswordScreenProps = {
 export function ChangePasswordScreen({
   onBack,
   userEmail,
-  title = 'Cambiar contraseña',
+  title,
 }: ChangePasswordScreenProps) {
+  const { t } = useTranslation();
+  const resolvedTitle = title ?? t('auth.changePasswordTitle');
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [password, setPassword] = useState('');
@@ -43,15 +46,15 @@ export function ChangePasswordScreen({
     const token = session?.access_token;
     const refresh = session?.refresh_token;
     if (!token || !refresh) {
-      setError('Sesión expirada. Vuelve a iniciar sesión.');
+      setError(t('common.sessionExpired'));
       return;
     }
     if (password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres.');
+      setError(t('common.passwordMin6Dot'));
       return;
     }
     if (password !== confirm) {
-      setError('Las contraseñas no coinciden.');
+      setError(t('common.passwordsMismatchDot'));
       return;
     }
 
@@ -64,10 +67,10 @@ export function ChangePasswordScreen({
         setPassword('');
         setConfirm('');
       } else {
-        setError(res.error ?? 'No se pudo actualizar la contraseña');
+        setError(res.error ?? t('auth.resetUpdateError'));
       }
     } catch {
-      setError('Error de conexión');
+      setError(t('common.connectionError'));
     } finally {
       setLoading(false);
     }
@@ -76,7 +79,7 @@ export function ChangePasswordScreen({
   const handleSendRecoveryEmail = async () => {
     const email = userEmail?.trim() || session?.user?.email?.trim();
     if (!email) {
-      setError('No hay correo asociado a tu cuenta.');
+      setError(t('auth.changePasswordNoEmail'));
       return;
     }
     setSendingEmail(true);
@@ -86,12 +89,12 @@ export function ChangePasswordScreen({
       if (res.ok) {
         setEmailSent(true);
       } else if (res.httpStatus === 429) {
-        setError(res.error ?? 'Demasiados intentos. Espera unos minutos.');
+        setError(res.error ?? t('common.tooManyAttempts'));
       } else {
-        setError(res.error ?? 'No se pudo enviar el correo');
+        setError(res.error ?? t('auth.changePasswordEmailError'));
       }
     } catch {
-      setError('Error de conexión');
+      setError(t('common.connectionError'));
     } finally {
       setSendingEmail(false);
     }
@@ -99,8 +102,8 @@ export function ChangePasswordScreen({
 
   return (
     <View style={styles.root}>
-      <MenuScreenHeader title={title} onBack={onBack} />
-      <ScrollView
+      <MenuScreenHeader title={resolvedTitle} onBack={onBack} />
+      <SafeScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 24 + insets.bottom, paddingHorizontal: 16 }}
         keyboardShouldPersistTaps="handled"
@@ -108,13 +111,13 @@ export function ChangePasswordScreen({
       >
         <View style={styles.section}>
           <Text style={styles.intro}>
-            Elige una contraseña nueva de al menos 6 caracteres. Seguirás con la sesión iniciada.
+            {t('auth.changePasswordIntro')}
           </Text>
 
           {success ? (
             <View style={styles.bannerOk}>
               <Ionicons name="checkmark-circle" size={20} color="#34d399" />
-              <Text style={styles.bannerOkText}>Contraseña actualizada correctamente.</Text>
+              <Text style={styles.bannerOkText}>{t('auth.changePasswordSuccess')}</Text>
             </View>
           ) : null}
 
@@ -126,23 +129,23 @@ export function ChangePasswordScreen({
 
           {!success ? (
             <>
-              <Text style={styles.label}>Nueva contraseña</Text>
+              <Text style={styles.label}>{t('auth.resetNewPasswordLabel')}</Text>
               <TextInput
                 style={styles.input}
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Mínimo 6 caracteres"
+                placeholder={t('auth.resetNewPasswordPlaceholder')}
                 placeholderTextColor="#6B7280"
                 secureTextEntry
                 autoCapitalize="none"
                 editable={!loading}
               />
-              <Text style={styles.label}>Confirmar contraseña</Text>
+              <Text style={styles.label}>{t('auth.confirmPasswordLabel')}</Text>
               <TextInput
                 style={styles.input}
                 value={confirm}
                 onChangeText={setConfirm}
-                placeholder="Repite la contraseña"
+                placeholder={t('auth.resetConfirmPlaceholder')}
                 placeholderTextColor="#6B7280"
                 secureTextEntry
                 autoCapitalize="none"
@@ -157,7 +160,7 @@ export function ChangePasswordScreen({
                 {loading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.saveBtnText}>Guardar nueva contraseña</Text>
+                  <Text style={styles.saveBtnText}>{t('auth.changePasswordSave')}</Text>
                 )}
               </Pressable>
             </>
@@ -166,20 +169,20 @@ export function ChangePasswordScreen({
               style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}
               onPress={onBack}
             >
-              <Text style={styles.saveBtnText}>Volver al perfil</Text>
+              <Text style={styles.saveBtnText}>{t('auth.changePasswordBackProfile')}</Text>
             </Pressable>
           )}
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Alternativa</Text>
+          <Text style={styles.sectionTitle}>{t('auth.changePasswordAlternative')}</Text>
           <Text style={styles.altHint}>
-            Si prefieres, te enviamos un enlace de recuperación a tu correo
+            {t('auth.changePasswordAltHint')}
             {userEmail || session?.user?.email ? ` (${userEmail ?? session?.user?.email})` : ''}.
           </Text>
           {emailSent ? (
             <Text style={styles.emailSent}>
-              Si el correo existe, recibirás un enlace en unos minutos. Ábrelo en este dispositivo.
+              {t('auth.changePasswordEmailSent')}
             </Text>
           ) : null}
           <Pressable
@@ -192,12 +195,12 @@ export function ChangePasswordScreen({
             ) : (
               <>
                 <Ionicons name="mail-outline" size={18} color={theme.auth.accent} />
-                <Text style={styles.altBtnText}>Enviar enlace por correo</Text>
+                <Text style={styles.altBtnText}>{t('auth.changePasswordSendLink')}</Text>
               </>
             )}
           </Pressable>
         </View>
-      </ScrollView>
+      </SafeScrollView>
     </View>
   );
 }

@@ -20,6 +20,7 @@ import { PartidosWhenSheet } from '../components/partidos/PartidosWhenSheet';
 import { PartidosWhereSheet } from '../components/partidos/PartidosWhereSheet';
 import type { MatchListPhase } from '../domain/matchLifecycle';
 import { usePartidosList } from '../hooks/usePartidosList';
+import { useTranslation } from '../i18n';
 import { lineHeightFor, theme } from '../theme';
 import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
@@ -98,6 +99,7 @@ export function PartidosScreen({
   onNavigateToCompleteOnboarding,
   partidosRefreshNonce = 0,
 }: PartidosScreenProps) {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const [locationModalVisible, setLocationModalVisible] = useState(false);
   const [activeSheet, setActiveSheet] = useState<SheetKind>(null);
@@ -143,9 +145,9 @@ export function PartidosScreen({
         nestedScrollEnabled
       >
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Para tu nivel</Text>
+          <Text style={styles.sectionTitle}>{t('partidos.forYourLevel')}</Text>
           <Text style={styles.sectionSubtitle}>
-            Estos partidos reflejan exactamente tu búsqueda y tu nivel
+            {t('partidos.forYourLevelSub')}
           </Text>
         </View>
 
@@ -166,15 +168,15 @@ export function PartidosScreen({
             ))
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No hay partidos abiertos</Text>
-              <Text style={styles.emptyHint}>Prueba ampliando clubes o fechas</Text>
+              <Text style={styles.emptyText}>{t('partidos.noOpenMatches')}</Text>
+              <Text style={styles.emptyHint}>{t('partidos.noOpenMatchesHint')}</Text>
             </View>
           )}
         </View>
 
         <View style={[styles.section, { marginTop: theme.spacing.xl }]}>
-          <Text style={styles.sectionTitle}>Mis partidos</Text>
-          <Text style={styles.sectionSubtitle}>Tus reservas y partidos que organizas</Text>
+          <Text style={styles.sectionTitle}>{t('partidos.myMatches')}</Text>
+          <Text style={styles.sectionSubtitle}>{t('partidos.myMatchesSub')}</Text>
         </View>
         <View style={styles.list}>
           {misPartidosLoading && myPartidos.length === 0 ? (
@@ -193,7 +195,7 @@ export function PartidosScreen({
             ))
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No tienes partidos próximos</Text>
+              <Text style={styles.emptyText}>{t('partidos.noUpcomingMatches')}</Text>
             </View>
           )}
         </View>
@@ -218,7 +220,7 @@ export function PartidosScreen({
                   default: {},
                 })}
               >
-                + Comenzar un partido
+                {t('partidos.startMatchFab')}
               </Text>
             </LinearGradient>
           </Pressable>

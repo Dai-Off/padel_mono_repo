@@ -48,7 +48,6 @@ function buildSections(isAdmin: boolean): NavSection[] {
         { id: 'lista-reservas', path: '/grilla', label: 'Lista de reservas', queryParam: 'lista-reservas' },
         { id: 'checkIn', path: '/checkIn', label: 'Check-in' },
         { id: 'pistas', path: '/pistas', label: 'Pistas' },
-        { id: 'horarios', path: '/horarios', label: 'Horarios' },
         { id: 'fechas-especiales', path: '/fechas-especiales', label: 'Fechas especiales' },
       ],
     },

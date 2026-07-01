@@ -1,9 +1,11 @@
 import dotenv from 'dotenv';
 import express, { NextFunction, Request, Response } from 'express';
 import { createServer } from 'http';
+import cron from 'node-cron';
 import { WebSocketServer } from 'ws';
 import app from './app';
 import { initMessagesRealtime } from './lib/messagesRealtime';
+import { runAccountDeletionJob } from './lib/accountDeletionJob';
 
 dotenv.config();
 
@@ -21,6 +23,15 @@ initMessagesRealtime(messagesWss);
 
 server.listen(port, () => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
+
+  if (process.env.ACCOUNT_DELETION_CRON !== '0') {
+    cron.schedule('0 3 * * *', () => {
+      runAccountDeletionJob()
+        .then((r) => console.log('[cron account-deletion]', JSON.stringify(r)))
+        .catch((e) => console.error('[cron account-deletion]', e));
+    });
+    console.log('Cron de eliminación de cuentas programado (diario 03:00 UTC)');
+  }
 });
 
 export default app;

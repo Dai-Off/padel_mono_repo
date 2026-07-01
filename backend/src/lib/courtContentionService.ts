@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { refundStripeBookingPaymentTransactions, resolveClubIdForBooking } from '../services/paymentRefundService';
+import { evictDemoPlayersFromBooking } from './demoPlayerEvict';
 
 export type CourtContentionStatus = 'competing' | 'won' | 'lost';
 
@@ -80,6 +82,18 @@ export async function countPaidParticipants(
   return count ?? 0;
 }
 
+export async function countBookingParticipants(
+  supabase: SupabaseClient,
+  bookingId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('booking_participants')
+    .select('id', { count: 'exact', head: true })
+    .eq('booking_id', bookingId);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
 async function getThirdPaidTimestamp(
   supabase: SupabaseClient,
   bookingId: string,
@@ -111,7 +125,43 @@ async function getThirdPaidTimestamp(
   return third.created_at ?? new Date().toISOString();
 }
 
-export async function refundAllPaidParticipantsToWallet(
+async function getThirdMilestoneTimestamp(
+  supabase: SupabaseClient,
+  bookingId: string,
+): Promise<string | null> {
+  const paidCount = await countPaidParticipants(supabase, bookingId);
+  if (paidCount >= 3) {
+    const fromPaid = await getThirdPaidTimestamp(supabase, bookingId);
+    if (fromPaid) return fromPaid;
+  }
+
+  const { data: parts, error: pErr } = await supabase
+    .from('booking_participants')
+    .select('created_at')
+    .eq('booking_id', bookingId)
+    .order('created_at', { ascending: true });
+  if (pErr) throw new Error(pErr.message);
+  if (!parts || parts.length < 3) return null;
+  const third = parts[2] as { created_at?: string };
+  return third.created_at ?? new Date().toISOString();
+}
+
+export async function refundContentionLoserPayments(
+  supabase: SupabaseClient,
+  bookingId: string,
+  concept: string,
+): Promise<void> {
+  const clubId = await resolveClubIdForBooking(supabase, bookingId);
+  if (clubId) {
+    const stripeRef = await refundStripeBookingPaymentTransactions(supabase, bookingId, clubId);
+    if (stripeRef.errors.length > 0) {
+      console.error(`[refundContentionLoserPayments] Stripe errors for ${bookingId}:`, stripeRef.errors);
+    }
+  }
+  await refundAllPaidParticipantsToWallet(supabase, bookingId, concept);
+}
+
+async function refundAllPaidParticipantsToWallet(
   supabase: SupabaseClient,
   bookingId: string,
   concept: string,
@@ -244,18 +294,21 @@ async function buildContenderSnapshot(
   supabase: SupabaseClient,
   booking: BookingContentionRow,
 ): Promise<ContenderSnapshot | null> {
-  const paidCount = await countPaidParticipants(supabase, booking.id);
-  if (paidCount < 3) return null;
+  const [paidCount, participantCount] = await Promise.all([
+    countPaidParticipants(supabase, booking.id),
+    countBookingParticipants(supabase, booking.id),
+  ]);
+  if (paidCount < 3 && participantCount < 3) return null;
 
   let thirdPaidAt = booking.contention_third_paid_at ?? null;
   if (!thirdPaidAt) {
-    thirdPaidAt = await getThirdPaidTimestamp(supabase, booking.id);
+    thirdPaidAt = await getThirdMilestoneTimestamp(supabase, booking.id);
     if (thirdPaidAt) {
       await supabase
         .from('bookings')
         .update({ contention_third_paid_at: thirdPaidAt, updated_at: new Date().toISOString() })
         .eq('id', booking.id)
-        .eq('court_contention_status', 'competing');
+        .in('court_contention_status', ['competing', null]);
     }
   }
   if (!thirdPaidAt) return null;
@@ -296,8 +349,11 @@ export async function resolveCourtContention(
   if (row.court_contention_status === 'won' || row.court_contention_status === 'lost') return;
   if (row.status === 'cancelled') return;
 
-  const paidOnTrigger = await countPaidParticipants(supabase, triggerBookingId);
-  if (paidOnTrigger < 3) return;
+  const [paidOnTrigger, participantsOnTrigger] = await Promise.all([
+    countPaidParticipants(supabase, triggerBookingId),
+    countBookingParticipants(supabase, triggerBookingId),
+  ]);
+  if (paidOnTrigger < 3 && participantsOnTrigger < 3) return;
 
   const overlapping = await findOverlappingBookings(
     supabase,
@@ -319,6 +375,8 @@ export async function resolveCourtContention(
   const winner = pickWinner(contenders);
   const now = new Date().toISOString();
 
+  await evictDemoPlayersFromBooking(supabase, winner.id);
+
   await supabase
     .from('bookings')
     .update({
@@ -335,12 +393,66 @@ export async function resolveCourtContention(
     if (b.court_contention_status === 'lost' || b.status === 'cancelled') continue;
 
     await cancelContentionLoser(supabase, b.id);
-    await refundAllPaidParticipantsToWallet(
+    await refundContentionLoserPayments(
       supabase,
       b.id,
       'Reembolso: otro grupo completó el partido antes en esta pista',
     );
   }
+}
+
+function bookingShouldBeDisplacedByOccupyingReservation(booking: BookingContentionRow): boolean {
+  if (booking.court_contention_status === 'competing') return true;
+  const rt = booking.reservation_type ?? '';
+  if (NON_CONTENTION_RESERVATION_TYPES.has(rt)) return false;
+  if (booking.status === 'confirmed') return false;
+  if (rt === 'open_match' || rt === 'standard') {
+    return booking.status === 'pending_payment';
+  }
+  return false;
+}
+
+/** Reserva confirmada/pagada que ocupa la pista: cancela turnos en competencia solapados y reembolsa. */
+export async function cancelDisplacedBookingsForOccupyingReservation(
+  supabase: SupabaseClient,
+  occupyingBookingId: string,
+  courtId: string,
+  startAt: string,
+  endAt: string,
+): Promise<string[]> {
+  const overlapping = await findOverlappingBookings(supabase, courtId, startAt, endAt);
+  const cancelled: string[] = [];
+  const concept = 'Reembolso: la pista fue reservada por otro grupo en este horario';
+
+  for (const b of overlapping) {
+    if (b.id === occupyingBookingId) continue;
+    if (b.status === 'cancelled') continue;
+    if (b.court_contention_status === 'lost' || b.court_contention_status === 'won') continue;
+    if (!bookingShouldBeDisplacedByOccupyingReservation(b)) continue;
+
+    await cancelContentionLoser(supabase, b.id);
+    await refundContentionLoserPayments(supabase, b.id, concept);
+    cancelled.push(b.id);
+  }
+
+  return cancelled;
+}
+
+/** Whether an overlapping existing row blocks creating a new reservation. */
+export function overlappingBookingBlocksNewReservation(
+  existing: BookingContentionRow & { notes?: string | null },
+  startMs: number,
+  endMs: number,
+  newReservationType: string,
+  newOccupiesCourtImmediately: boolean,
+): boolean {
+  if (!overlaps(startMs, endMs, existing.start_at, existing.end_at)) return false;
+  const entersContention =
+    (newReservationType === 'open_match' || newReservationType === 'standard') && !newOccupiesCourtImmediately;
+  if (entersContention) {
+    return existingBookingBlocksNewContentionMatch(existing);
+  }
+  return bookingBlocksCourtForAvailability(existing);
 }
 
 /** Set competing status on new match bookings (split-payment flow). */

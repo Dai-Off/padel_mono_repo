@@ -8,6 +8,7 @@ import {
     gridContentHeightPx,
     parseTimeStrInBounds,
     useGridBounds,
+    useClubSlotDurationMin,
 } from '../context/GridBoundsContext';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { useZoom } from '../context/ZoomContext';
@@ -77,6 +78,7 @@ export const CourtColumn: React.FC<Props> = ({
     const { tData } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
     const bounds = useGridBounds();
+    const slotDurationMin = useClubSlotDurationMin();
     const isSmallZoom = !isCompactView && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const { setNodeRef, isOver } = useDroppable({
         id: court.id,
@@ -109,7 +111,10 @@ export const CourtColumn: React.FC<Props> = ({
             });
             if (covered) continue;
 
-            const withinHours = blockStart >= bounds.openMin && blockEnd <= bounds.closeMin;
+            // Un turno completo (slotDurationMin) debe entrar antes del cierre:
+            // con cierre 21:00 y turnos de 90', el último inicio válido es 19:30.
+            const withinHours =
+                blockStart >= bounds.openMin && blockStart + slotDurationMin <= bounds.closeMin;
             const isPast =
                 gridDayKind === 'past' ||
                 (gridDayKind === 'today' && blockStart < nowMinutes);
@@ -129,6 +134,7 @@ export const CourtColumn: React.FC<Props> = ({
         bounds.openMin,
         bounds.closeMin,
         bounds.closed,
+        slotDurationMin,
         isMaintenanceBlocked,
         gridDayKind,
         nowMinutes,
@@ -144,7 +150,7 @@ export const CourtColumn: React.FC<Props> = ({
                 ? "flex-none shrink-0"
                 : isCompactView
                     ? "flex-1 min-w-0 basis-0"
-                    : "min-w-[81px] max-w-[161px]",
+                    : "flex-1 min-w-[81px] basis-0",
             isFocusedMode && !isCurrentlyFocused && "bg-gray-50 opacity-60 grayscale-[20%]"
         )}
             style={

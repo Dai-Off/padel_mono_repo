@@ -6,14 +6,20 @@ import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { requireAuthUser } from '../middleware/requireAuthUser';
 import { allPortalClubIds, canAccessClub, canAccessClubAsPortalMember, isClubOwnerOrAdmin } from '../lib/clubAccess';
+import {
+  BOOKING_WINDOW_DAY_OPTIONS,
+  CANCELLATION_HOUR_OPTIONS,
+  getClubBookingPolicies,
+  saveClubBookingPolicies,
+} from '../lib/clubBookingPolicies';
 
 const router = Router();
 router.use(attachAuthContext);
 
 const SELECT_LIST =
-  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
+  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, slot_duration_min, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 const SELECT_ONE =
-  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
+  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, timezone, slot_duration_min, weekly_schedule, schedule_exceptions, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 
 router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const owner_id = req.query.owner_id as string | undefined;
@@ -308,16 +314,16 @@ router.get('/:id/chat-summary', requireClubOwnerOrAdminOrPortalStaff, async (req
 });
 
 /**
- * GET /clubs/:id/public
+ * GET /clubs/miniapp/:id/public
  * Public endpoint for the MiniApp — returns non-sensitive club info without auth.
  */
-router.get('/:id/public', async (req: Request, res: Response) => {
+router.get('/miniapp/:id/public', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
       .from('clubs')
-      .select('id, name, address, city, postal_code, lat, lng, weekly_schedule, logo_url, photo_urls')
+      .select('id, name, address, city, postal_code, lat, lng, timezone, slot_duration_min, weekly_schedule, logo_url, photo_urls')
       .eq('id', id)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -368,6 +374,8 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
     lat,
     lng,
     base_currency,
+    timezone,
+    slot_duration_min,
     weekly_schedule,
     schedule_exceptions,
     logo_url,
@@ -404,6 +412,10 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
           lat: lat != null ? Number(lat) : null,
           lng: lng != null ? Number(lng) : null,
           base_currency: base_currency ?? 'EUR',
+          ...(typeof timezone === 'string' && timezone.trim() ? { timezone: timezone.trim() } : {}),
+          ...(Number.isFinite(Number(slot_duration_min)) && Number(slot_duration_min) > 0
+            ? { slot_duration_min: Number(slot_duration_min) }
+            : {}),
           weekly_schedule: weekly_schedule ?? {},
           schedule_exceptions: schedule_exceptions ?? [],
           logo_url: logo_url ?? null,
@@ -419,6 +431,119 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.status(201).json({ ok: true, club: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /clubs/{id}/booking-policies:
+ *   get:
+ *     tags: [Clubs]
+ *     summary: Políticas de reserva del club
+ *     description: |
+ *       Devuelve la ventana de reserva (días) y las horas de aviso para reembolso en reservas privadas
+ *       (`standard`) y partidos públicos (`open_match`).
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Políticas actuales
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   policies:
+ *                     booking_window_days: 7
+ *                     cancellation_notice_hours: 24
+ *       403: { description: Sin acceso }
+ *       404: { description: Club no encontrado }
+ */
+router.get('/:id/booking-policies', requireAuthUser, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!isClubOwnerOrAdmin(req, id) && !canAccessClub(req, id, 'configuracion')) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const policies = await getClubBookingPolicies(supabase, id);
+    return res.json({
+      ok: true,
+      policies,
+      options: {
+        booking_window_days: [...BOOKING_WINDOW_DAY_OPTIONS],
+        cancellation_hours: CANCELLATION_HOUR_OPTIONS.map((o) => o.hours),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /clubs/{id}/booking-policies:
+ *   put:
+ *     tags: [Clubs]
+ *     summary: Actualizar políticas de reserva del club
+ *     description: |
+ *       Guarda la ventana de reserva y los plazos de cancelación con derecho a reembolso para reservas
+ *       privadas y partidos públicos.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [booking_window_days, cancellation_notice_hours]
+ *             properties:
+ *               booking_window_days: { type: integer, minimum: 1, maximum: 365, example: 7 }
+ *               cancellation_notice_hours: { type: integer, minimum: 0, example: 24 }
+ *           examples:
+ *             default:
+ *               value:
+ *                 booking_window_days: 7
+ *                 cancellation_notice_hours: 24
+ *     responses:
+ *       200:
+ *         description: Políticas guardadas
+ *       400: { description: Datos inválidos }
+ *       403: { description: Sin acceso }
+ */
+router.put('/:id/booking-policies', requireAuthUser, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!isClubOwnerOrAdmin(req, id) && !canAccessClub(req, id, 'configuracion')) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
+  const body = req.body ?? {};
+  const bookingWindowDays = Number(body.booking_window_days);
+  const noticeHours = Number(body.cancellation_notice_hours);
+  if (!Number.isFinite(bookingWindowDays) || bookingWindowDays < 1 || bookingWindowDays > 365) {
+    return res.status(400).json({ ok: false, error: 'booking_window_days debe estar entre 1 y 365' });
+  }
+  if (!Number.isFinite(noticeHours) || noticeHours < 0) {
+    return res.status(400).json({ ok: false, error: 'cancellation_notice_hours inválido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const policies = await saveClubBookingPolicies(supabase, id, {
+      booking_window_days: Math.trunc(bookingWindowDays),
+      cancellation_notice_hours: Math.trunc(noticeHours),
+    });
+    return res.json({ ok: true, policies });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -442,6 +567,8 @@ router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {
     'lat',
     'lng',
     'base_currency',
+    'timezone',
+    'slot_duration_min',
     'weekly_schedule',
     'schedule_exceptions',
     'logo_url',

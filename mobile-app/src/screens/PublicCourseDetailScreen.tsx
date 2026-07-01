@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PublicCourse } from "../api/schoolCourses";
 import { androidReadableText } from "../components/home/inicio/textStyles";
 import { PublicCourseBookingSuccessModal } from "../components/schoolCourses/PublicCourseBookingSuccessModal";
+import { useTranslation } from "../i18n";
 
 const { width } = Dimensions.get("window");
 
@@ -34,6 +35,7 @@ export function PublicCourseDetailScreen({
   onEnrollSuccess,
   isReserved = false,
 }: PublicCourseDetailScreenProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabId>("info");
   const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
@@ -46,8 +48,11 @@ export function PublicCourseDetailScreen({
   const levelText = course.level || "0 - 5.4";
   const slotsText = `${course.enrolled_count}/${course.capacity}`;
 
-  // Formatear fecha para el ejemplo
-  const dateText = "JUEVES, 29 DE ENERO · 11:30"; // Esto debería venir de course.starts_on y course.days
+  const firstDay = course.days[0];
+  const dateText =
+    course.starts_on && firstDay
+      ? `${course.starts_on} · ${firstDay.start_time}`
+      : t('learning.coursesScheduleTbc');
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -55,19 +60,19 @@ export function PublicCourseDetailScreen({
         return (
           <View style={styles.tabContent}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Detalles de la clase</Text>
+              <Text style={styles.cardTitle}>{t('learning.publicCourseDetails')}</Text>
 
               <View style={styles.rowStats}>
                 <View style={styles.statBox}>
-                  <Text style={styles.statLabel}>PRECIO</Text>
+                  <Text style={styles.statLabel}>{t('learning.publicCoursePrice')}</Text>
                   <Text style={styles.statValue}>{priceFormatted}</Text>
                 </View>
                 <View style={styles.statBox}>
-                  <Text style={styles.statLabel}>NIVEL</Text>
+                  <Text style={styles.statLabel}>{t('learning.publicCourseLevel')}</Text>
                   <Text style={styles.statValue}>{levelText}</Text>
                 </View>
                 <View style={styles.statBox}>
-                  <Text style={styles.statLabel}>PLAZAS</Text>
+                  <Text style={styles.statLabel}>{t('learning.publicCourseSlots')}</Text>
                   <Text style={styles.statValue}>{slotsText}</Text>
                 </View>
               </View>
@@ -82,7 +87,7 @@ export function PublicCourseDetailScreen({
                     />
                   </View>
                   <View>
-                    <Text style={styles.detailLabel}>FECHA</Text>
+                    <Text style={styles.detailLabel}>{t('learning.publicCourseDate')}</Text>
                     <Text style={styles.detailValue}>{dateText}</Text>
                   </View>
                 </View>
@@ -92,8 +97,8 @@ export function PublicCourseDetailScreen({
                     <Ionicons name="time-outline" size={18} color="#9CA3AF" />
                   </View>
                   <View>
-                    <Text style={styles.detailLabel}>DURACIÓN</Text>
-                    <Text style={styles.detailValue}>60 min</Text>
+                    <Text style={styles.detailLabel}>{t('learning.publicCourseDuration')}</Text>
+                    <Text style={styles.detailValue}>{t('common.durationMin', { minutes: 60 })}</Text>
                   </View>
                 </View>
 
@@ -102,8 +107,8 @@ export function PublicCourseDetailScreen({
                     <Ionicons name="people-outline" size={18} color="#9CA3AF" />
                   </View>
                   <View>
-                    <Text style={styles.detailLabel}>GÉNERO</Text>
-                    <Text style={styles.detailValue}>Mixto</Text>
+                    <Text style={styles.detailLabel}>{t('learning.publicCourseGender')}</Text>
+                    <Text style={styles.detailValue}>{t('learning.publicCourseMixed')}</Text>
                   </View>
                 </View>
               </View>
@@ -118,19 +123,19 @@ export function PublicCourseDetailScreen({
                   >
                     <Ionicons name="navigate-outline" size={20} color="white" />
                   </View>
-                  <Text style={styles.actionLabel}>CÓMO LLEGAR</Text>
+                  <Text style={styles.actionLabel}>{t('learning.publicCourseDirections')}</Text>
                 </Pressable>
                 <Pressable style={styles.actionButton}>
                   <View style={styles.actionIconBoxSecondary}>
                     <Ionicons name="globe-outline" size={20} color="#6B7280" />
                   </View>
-                  <Text style={styles.actionLabel}>WEB</Text>
+                  <Text style={styles.actionLabel}>{t('learning.publicCourseWeb')}</Text>
                 </Pressable>
                 <Pressable style={styles.actionButton}>
                   <View style={styles.actionIconBoxSecondary}>
                     <Ionicons name="call-outline" size={20} color="#6B7280" />
                   </View>
-                  <Text style={styles.actionLabel}>LLAMAR</Text>
+                  <Text style={styles.actionLabel}>{t('learning.publicCourseCall')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -151,21 +156,21 @@ export function PublicCourseDetailScreen({
 
             {/* Methods Card */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Métodos de pago</Text>
+              <Text style={styles.cardTitle}>{t('learning.publicCoursePaymentMethods')}</Text>
               <View style={styles.paymentMethods}>
                 <View style={styles.payItem}>
                   <Text style={{ fontSize: 18 }}>💳</Text>
                   <Text style={styles.payText}>
-                    Tarjeta De Crédito O Débito
+                    {t('learning.publicCourseCreditCard')}
                   </Text>
                 </View>
                 <View style={styles.payItem}>
                   <Text style={{ fontSize: 18 }}>💰</Text>
-                  <Text style={styles.payText}>Bono Monedero</Text>
+                  <Text style={styles.payText}>{t('learning.publicCourseWallet')}</Text>
                 </View>
                 <View style={styles.payItem}>
                   <Text style={{ fontSize: 18 }}>📱</Text>
-                  <Text style={styles.payText}>Google Pay</Text>
+                  <Text style={styles.payText}>{t('learning.publicCourseGooglePay')}</Text>
                 </View>
               </View>
             </View>
@@ -175,11 +180,11 @@ export function PublicCourseDetailScreen({
         return (
           <View style={styles.tabContent}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Entrenador</Text>
+              <Text style={styles.cardTitle}>{t('learning.publicCourseCoach')}</Text>
               <View style={styles.coachRow}>
                 <View style={styles.coachAvatarBox}>
                   <Text style={styles.coachInits}>
-                    {(course.staff?.name || "MB")
+                    {(course.staff?.name || t('common.coachFallback'))
                       .split(" ")
                       .map((n) => n[0])
                       .join("")}
@@ -187,11 +192,11 @@ export function PublicCourseDetailScreen({
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.coachName}>
-                    {course.staff?.name || "Marcos Blasco"}
+                    {course.staff?.name || t('common.coachFallback')}
                   </Text>
                   <Text style={styles.coachClub}>{course.club_name}</Text>
                   <Pressable>
-                    <Text style={styles.viewProfile}>Ver perfil</Text>
+                    <Text style={styles.viewProfile}>{t('learning.publicCourseViewProfile')}</Text>
                   </Pressable>
                 </View>
                 <View style={styles.ratingBadge}>
@@ -206,7 +211,7 @@ export function PublicCourseDetailScreen({
           <View style={styles.tabContent}>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>
-                Jugadores ({course.enrolled_count}/{course.capacity})
+                {t('learning.publicCoursePlayers', { enrolled: course.enrolled_count, capacity: course.capacity })}
               </Text>
               <View style={styles.emptyPlayersBox}>
                 <View style={styles.playersIconCircle}>
@@ -217,11 +222,11 @@ export function PublicCourseDetailScreen({
                   />
                 </View>
                 <Text style={styles.emptyPlayersText}>
-                  Aún no hay jugadores
+                  {t('learning.publicCourseNoPlayers')}
                 </Text>
               </View>
               <Text style={styles.minPlayersHint}>
-                Requiere un mínimo de 2 jugadores
+                {t('learning.publicCourseMinPlayers')}
               </Text>
             </View>
           </View>
@@ -265,10 +270,10 @@ export function PublicCourseDetailScreen({
           <View style={styles.bannerInfo}>
             <View style={styles.tagsRow}>
               <View style={styles.tagOrange}>
-                <Text style={styles.tagText}>Nivelación</Text>
+                <Text style={styles.tagText}>{t('learning.publicCourseLeveling')}</Text>
               </View>
               <View style={styles.tagGlass}>
-                <Text style={styles.tagText}>Pádel</Text>
+                <Text style={styles.tagText}>{t('common.sportPadel')}</Text>
               </View>
             </View>
             <Text style={styles.mainTitle}>{course.name.toUpperCase()}</Text>
@@ -279,7 +284,7 @@ export function PublicCourseDetailScreen({
                 color="rgba(255,255,255,0.8)"
               />
               <Text style={styles.locationSmallText}>
-                35km · {course.club_name}
+                {t('learning.publicCourseDistance', { km: 35, club: course.club_name })}
               </Text>
             </View>
           </View>
@@ -305,7 +310,7 @@ export function PublicCourseDetailScreen({
                   activeTab === "info" && styles.tabBtnTextActive,
                 ]}
               >
-                Información
+                {t('learning.publicCourseTabInfo')}
               </Text>
             </Pressable>
             <Pressable
@@ -321,7 +326,7 @@ export function PublicCourseDetailScreen({
                   activeTab === "coach" && styles.tabBtnTextActive,
                 ]}
               >
-                Entrenador
+                {t('learning.publicCourseTabCoach')}
               </Text>
             </Pressable>
             <Pressable
@@ -337,7 +342,7 @@ export function PublicCourseDetailScreen({
                   activeTab === "players" && styles.tabBtnTextActive,
                 ]}
               >
-                Jugadores
+                {t('learning.publicCourseTabPlayers')}
               </Text>
             </Pressable>
           </ScrollView>
@@ -363,7 +368,7 @@ export function PublicCourseDetailScreen({
               onPress={() => setIsSuccessModalVisible(true)}
             >
               <Text style={styles.reserveBtnText}>
-                Reserva plaza - {priceFormatted}
+                {t('learning.publicCourseReserve', { price: priceFormatted })}
               </Text>
             </Pressable>
           </LinearGradient>

@@ -22,6 +22,7 @@ import { ACCENT } from '../components/home/inicio/constants';
 import { androidReadableText } from '../components/home/inicio/textStyles';
 import { useAuth } from '../contexts/AuthContext';
 import { theme } from '../theme';
+import { useTranslation } from '../i18n';
 import { useStripe } from '../stripe';
 import { confirmPaymentFromClient, createIntentForSeasonPassElite } from '../api/payments';
 import {
@@ -399,6 +400,7 @@ function LevelTrackColumn({
 }
 
 function MissionRow({ m }: { m: SeasonPassMissionDto }) {
+  const { t } = useTranslation();
   const pct = Math.min(m.target > 0 ? m.current / m.target : 0, 1);
   const w = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -462,7 +464,7 @@ function MissionRow({ m }: { m: SeasonPassMissionDto }) {
             </>
           ) : (
             <View style={styles.missionMeta}>
-              <Text style={styles.missionDoneText}>¡Completada!</Text>
+              <Text style={styles.missionDoneText}>{t('alerts.seasonPass.missionCompleted')}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                 <Ionicons name="flash" size={12} color="#34d399" />
                 <Text style={[styles.missionMetaSp, { color: '#34d399' }]}>
@@ -476,7 +478,7 @@ function MissionRow({ m }: { m: SeasonPassMissionDto }) {
       {!m.done && m.expires_label ? (
         <View style={styles.missionExpire}>
           <Ionicons name="time-outline" size={12} color="#4b5563" />
-          <Text style={styles.missionExpireText}>Cierra · {m.expires_label}</Text>
+          <Text style={styles.missionExpireText}>{t('alerts.seasonPass.missionCloses', { label: m.expires_label })}</Text>
         </View>
       ) : null}
     </View>
@@ -487,6 +489,7 @@ export function SeasonPassScreen({ onBack }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { session, isLoading: authLoading } = useAuth();
+  const { t } = useTranslation();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [tab, setTab] = useState<PassTab>('rewards');
   const [mTab, setMTab] = useState<MissionPeriod>('daily');
@@ -501,7 +504,7 @@ export function SeasonPassScreen({ onBack }: Props) {
     const token = session?.access_token;
     if (!token) {
       setMe(null);
-      setLoadErr('Inicia sesión para ver tu progreso en el pase.');
+      setLoadErr(t('alerts.seasonPass.loginRequiredLoad'));
       setLoading(false);
       return;
     }
@@ -509,13 +512,13 @@ export function SeasonPassScreen({ onBack }: Props) {
     const tz = 'Europe/Madrid';
     const data = await fetchSeasonPassMe(token, tz);
     if (!data) {
-      setLoadErr('No se pudo cargar el pase. ¿Backend y migraciones 049 + 050 activas?');
+      setLoadErr(t('alerts.seasonPass.loadFail'));
       setMe(null);
     } else {
       setMe(data);
     }
     setLoading(false);
-  }, [session?.access_token]);
+  }, [session?.access_token, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -630,14 +633,14 @@ export function SeasonPassScreen({ onBack }: Props) {
   const purchaseEliteWithStripe = useCallback(async () => {
     const token = session?.access_token;
     if (!token) {
-      Alert.alert('Inicia sesión', 'Necesitas una cuenta para comprar el Pase Elite.');
+      Alert.alert(t('alerts.login.titleAlt'), t('alerts.seasonPass.login'));
       return;
     }
     try {
       setElitePaying(true);
       const intentRes = await createIntentForSeasonPassElite(token);
       if (!intentRes.ok || !intentRes.clientSecret || !intentRes.paymentIntentId) {
-        Alert.alert('Error', intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.');
+        Alert.alert(t('alerts.error.title'), intentRes.error ?? t('common.paymentStartError'));
         return;
       }
 
@@ -648,34 +651,34 @@ export function SeasonPassScreen({ onBack }: Props) {
         returnURL,
       });
       if (initErr) {
-        Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+        Alert.alert(t('alerts.error.title'), t('common.paymentConfiguredError'));
         return;
       }
 
       const { error: presentErr } = await presentPaymentSheet();
       if (presentErr) {
         if (presentErr.code !== 'Canceled') {
-          Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
+          Alert.alert(t('alerts.error.title'), t('common.paymentProcessError'));
         }
         return;
       }
 
       const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId, token);
       if (!confirmRes.ok) {
-        Alert.alert('Error', confirmRes.error ?? 'No se pudo confirmar el Pase Elite. Inténtalo de nuevo.');
+        Alert.alert(t('alerts.error.title'), confirmRes.error ?? t('alerts.seasonPass.confirmFail'));
         return;
       }
 
       await load();
       setShowElite(false);
       const paid = formatEurFromCents(intentRes.amountCents ?? 999);
-      Alert.alert('Listo', `Pase Elite activado (${paid}).`);
+      Alert.alert(t('alerts.ready.title'), t('alerts.seasonPass.activated', { plan: paid }));
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Error al procesar el pago.');
+      Alert.alert(t('alerts.error.title'), e instanceof Error ? e.message : t('common.paymentProcessError'));
     } finally {
       setElitePaying(false);
     }
-  }, [session?.access_token, initPaymentSheet, presentPaymentSheet, load]);
+  }, [session?.access_token, initPaymentSheet, presentPaymentSheet, load, t]);
 
   const scrollBottom = theme.scrollBottomPadding + insets.bottom + 28;
 
@@ -720,7 +723,7 @@ export function SeasonPassScreen({ onBack }: Props) {
             </Pressable>
             <View style={[styles.heroInner, styles.passLoadingInner]}>
               <ActivityIndicator color={ACCENT} size="large" />
-              <Text style={styles.passLoadingHint}>Cargando pase…</Text>
+              <Text style={styles.passLoadingHint}>{t('alerts.seasonPass.loading')}</Text>
             </View>
           </View>
         ) : passReady ? (
@@ -765,7 +768,7 @@ export function SeasonPassScreen({ onBack }: Props) {
                   <Text style={styles.heroSub}>
                     {me.season.subtitle ?? ''}
                     {me.season.subtitle ? ' · ' : ''}
-                    <Text style={styles.heroSubAccent}>{left} días restantes</Text>
+                    <Text style={styles.heroSubAccent}>{t('alerts.seasonPass.daysRemaining', { count: left })}</Text>
                   </Text>
                 </View>
 
@@ -773,26 +776,29 @@ export function SeasonPassScreen({ onBack }: Props) {
                   <View style={styles.levelCard}>
                     <View style={styles.levelCardTop}>
                       <View>
-                        <Text style={styles.levelCardHint}>Tu nivel actual</Text>
+                        <Text style={styles.levelCardHint}>{t('alerts.seasonPass.currentLevel')}</Text>
                         <View style={{ flexDirection: 'row', gap: 6, alignItems: 'baseline' }}>
                           <Text style={styles.levelHuge}>{level}</Text>
                           <Text style={styles.levelSlash}>/ {levelMax}</Text>
                         </View>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.levelCardHint}>SP totales</Text>
+                        <Text style={styles.levelCardHint}>{t('alerts.seasonPass.totalSp')}</Text>
                         <Text style={styles.spHuge}>{sp.toLocaleString('es-ES')}</Text>
                       </View>
                     </View>
 
                     <View style={styles.barLabels}>
-                      <Text style={styles.barTiny}>Nivel {level}</Text>
-                      <Text style={styles.barTiny}>Faltan {spToNext.toLocaleString('es-ES')} SP</Text>
-                      <Text style={styles.barTiny}>Nivel {Math.min(levelMax, level + 1)}</Text>
+                      <Text style={styles.barTiny}>{t('alerts.seasonPass.levelShort', { level })}</Text>
+                      <Text style={styles.barTiny}>{t('alerts.seasonPass.spRemaining', { sp: spToNext.toLocaleString('es-ES') })}</Text>
+                      <Text style={styles.barTiny}>{t('alerts.seasonPass.levelShort', { level: Math.min(levelMax, level + 1) })}</Text>
                     </View>
                     <ShimmerBar pct={pct} />
                     <Text style={styles.barFoot}>
-                      {into.toLocaleString('es-ES')} / {spPer.toLocaleString('es-ES')} SP en este nivel
+                      {t('alerts.seasonPass.spInLevel', {
+                        into: into.toLocaleString('es-ES'),
+                        total: spPer.toLocaleString('es-ES'),
+                      })}
                     </Text>
 
                     {!eliteActive ? (
@@ -806,7 +812,7 @@ export function SeasonPassScreen({ onBack }: Props) {
                         >
                           <Ionicons name="ribbon" size={16} color="#facc15" />
                           <View style={{ flex: 1 }}>
-                            <Text style={styles.eliteTitle}>Pase Elite</Text>
+                            <Text style={styles.eliteTitle}>{t('alerts.seasonPass.elitePass')}</Text>
                             <Text style={styles.eliteSub}>
                               {me.season.elite_card_subtitle?.trim() || '—'}
                             </Text>
@@ -820,7 +826,7 @@ export function SeasonPassScreen({ onBack }: Props) {
                         style={styles.eliteActiveBar}
                       >
                         <Ionicons name="ribbon" size={16} color="#000" />
-                        <Text style={styles.eliteActiveText}>Pase Elite Activo</Text>
+                        <Text style={styles.eliteActiveText}>{t('alerts.seasonPass.eliteActive')}</Text>
                       </LinearGradient>
                     )}
                   </View>
@@ -836,7 +842,7 @@ export function SeasonPassScreen({ onBack }: Props) {
               style={[styles.tabMain, tab === 'rewards' && styles.tabMainOn]}
             >
               <Text style={[styles.tabMainTxt, tab === 'rewards' && styles.tabMainTxtOn]}>
-                🏆 Recompensas
+                {t('alerts.seasonPass.tabRewards')}
               </Text>
             </Pressable>
             <Pressable
@@ -844,7 +850,7 @@ export function SeasonPassScreen({ onBack }: Props) {
               style={[styles.tabMain, tab === 'missions' && styles.tabMainOn]}
             >
               <Text style={[styles.tabMainTxt, tab === 'missions' && styles.tabMainTxtOn]}>
-                ⚡ Misiones
+                {t('alerts.seasonPass.tabMissions')}
               </Text>
             </Pressable>
           </View>
@@ -856,11 +862,11 @@ export function SeasonPassScreen({ onBack }: Props) {
               <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
                   <Ionicons name="ribbon" size={12} color="#facc15" />
-                  <Text style={styles.legendTxt}>Pase Elite</Text>
+                  <Text style={styles.legendTxt}>{t('alerts.seasonPass.legendElite')}</Text>
                 </View>
                 <View style={styles.legendItem}>
                   <View style={styles.legendDot} />
-                  <Text style={styles.legendTxt}>Pase Libre</Text>
+                  <Text style={styles.legendTxt}>{t('alerts.seasonPass.legendFree')}</Text>
                 </View>
               </View>
 
@@ -884,7 +890,7 @@ export function SeasonPassScreen({ onBack }: Props) {
               <View style={styles.spBox}>
                 <View style={styles.spBoxHead}>
                   <Ionicons name="flash" size={16} color={ACCENT} />
-                  <Text style={styles.spBoxTitle}>Cómo ganar SP</Text>
+                  <Text style={styles.spBoxTitle}>{t('alerts.seasonPass.howEarnSp')}</Text>
                 </View>
                 {spHowRows.map((row, idx) => (
                   <View
@@ -917,16 +923,16 @@ export function SeasonPassScreen({ onBack }: Props) {
               </View>
               ) : (
                 <Text style={[styles.missionDesc, { textAlign: 'center', marginBottom: 12 }]}>
-                  No hay misiones configuradas para esta temporada.
+                  {t('alerts.seasonPass.noMissionsConfigured')}
                 </Text>
               )}
               <View style={styles.missionStats}>
                 <View style={styles.missionStatBox}>
-                  <Text style={styles.missionStatHint}>SP disponibles</Text>
+                  <Text style={styles.missionStatHint}>{t('alerts.seasonPass.spAvailable')}</Text>
                   <Text style={styles.missionStatVal}>+{pendingSP.toLocaleString('es-ES')}</Text>
                 </View>
                 <View style={styles.missionStatBox}>
-                  <Text style={styles.missionStatHint}>Completadas</Text>
+                  <Text style={styles.missionStatHint}>{t('alerts.seasonPass.completed')}</Text>
                   <Text style={styles.missionStatVal}>
                     {doneCount}
                     <Text style={styles.missionStatSlash}>/{missions.length}</Text>
@@ -938,7 +944,7 @@ export function SeasonPassScreen({ onBack }: Props) {
               ))}
               {missions.length === 0 && periodTabs.length > 0 ? (
                 <Text style={[styles.missionDesc, { textAlign: 'center', paddingVertical: 16 }]}>
-                  No hay misiones en esta pestaña.
+                  {t('alerts.seasonPass.noMissionsInTab')}
                 </Text>
               ) : null}
             </View>
@@ -970,7 +976,7 @@ export function SeasonPassScreen({ onBack }: Props) {
               {loadErr ? (
                 <Text style={[styles.loadErrBanner, styles.passErrorText]}>{loadErr}</Text>
               ) : (
-                <Text style={styles.passLoadingHint}>No se pudo mostrar el pase.</Text>
+                <Text style={styles.passLoadingHint}>{t('alerts.seasonPass.displayFail')}</Text>
               )}
             </View>
           </View>
@@ -994,9 +1000,9 @@ export function SeasonPassScreen({ onBack }: Props) {
             <View style={styles.modalCrown}>
               <Text style={{ fontSize: 36 }}>👑</Text>
             </View>
-            <Text style={styles.modalTitle}>Pase Elite</Text>
+            <Text style={styles.modalTitle}>{t('alerts.seasonPass.elitePass')}</Text>
             <Text style={styles.modalSub}>
-              {[me?.season.slug, me?.season.title].filter(Boolean).join(' · ') || 'Pase Elite'}
+              {[me?.season.slug, me?.season.title].filter(Boolean).join(' · ') || t('alerts.seasonPass.elitePass')}
             </Text>
             <View style={{ gap: 12, marginBottom: 20 }}>
               {eliteBullets.length > 0 ? (
@@ -1007,7 +1013,7 @@ export function SeasonPassScreen({ onBack }: Props) {
                   </View>
                 ))
               ) : (
-                <Text style={styles.modalBulletTxt}>Beneficios según la configuración de tu temporada.</Text>
+                <Text style={styles.modalBulletTxt}>{t('alerts.seasonPass.modalBenefitsDefault')}</Text>
               )}
             </View>
             <Pressable
@@ -1022,12 +1028,12 @@ export function SeasonPassScreen({ onBack }: Props) {
                 {elitePaying ? (
                   <ActivityIndicator color="#000" />
                 ) : (
-                  <Text style={styles.modalCtaTxt}>Obtener Pase Elite (pago con tarjeta)</Text>
+                  <Text style={styles.modalCtaTxt}>{t('alerts.seasonPass.getEliteCta')}</Text>
                 )}
               </LinearGradient>
             </Pressable>
             <Pressable onPress={() => setShowElite(false)} style={{ marginTop: 12, paddingVertical: 8 }}>
-              <Text style={styles.modalDismiss}>Continuar con Pase Libre</Text>
+              <Text style={styles.modalDismiss}>{t('alerts.seasonPass.continueFree')}</Text>
             </Pressable>
           </Pressable>
           </View>

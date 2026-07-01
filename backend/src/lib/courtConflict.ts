@@ -1,13 +1,12 @@
 import { getSupabaseServiceRoleClient } from './supabase';
 import { findTournamentConflict } from './tournamentConflicts';
 import { dayKeyInTz, zonedTimeToUtc } from '../routes/learningTimezone';
+import { overlappingBookingBlocksNewReservation } from './courtContentionService';
 
 export const MATCH_DRAFT_LOCK_MARKER = '__MATCH_DRAFT_LOCK__';
 
 /** IANA zone for escuela/Reservas when `clubs` no trae columna; alineado con `matchmaking` y `bookings`. */
-import { CLUB_IANA_TIMEZONE } from './clubTimezone';
-
-const DEFAULT_CLUB_TIMEZONE = CLUB_IANA_TIMEZONE;
+import { clubTimezoneOrDefault } from './clubTimezone';
 
 function shortWeekdayCodeInTimeZone(d: Date, timeZone: string): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
   const s = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(d);
@@ -40,7 +39,13 @@ export function isExpiredMatchLock(notes: string | null | undefined): boolean {
   return ts < Date.now();
 }
 
-export async function hasCourtConflict(courtId: string, startAt: string, endAt: string, excludeBookingId?: string): Promise<string | null> {
+export async function hasCourtConflict(
+  courtId: string,
+  startAt: string,
+  endAt: string,
+  excludeBookingId?: string,
+  opts?: { reservationType?: string; occupiesCourtImmediately?: boolean },
+): Promise<string | null> {
   const supabase = getSupabaseServiceRoleClient();
   const startMs = new Date(startAt).getTime();
   const endMs = new Date(endAt).getTime();
@@ -48,18 +53,31 @@ export async function hasCourtConflict(courtId: string, startAt: string, endAt: 
 
   let q = supabase
     .from('bookings')
-    .select('id, start_at, end_at, status, notes, reservation_type')
+    .select('id, start_at, end_at, status, notes, reservation_type, court_contention_status')
     .eq('court_id', courtId)
     .neq('status', 'cancelled')
     .is('deleted_at', null);
   if (excludeBookingId) q = q.neq('id', excludeBookingId);
   const { data: existingBookings, error: bErr } = await q;
   if (bErr) return bErr.message;
-  const bookingOverlap = (existingBookings ?? []).some((b: { start_at: string; end_at: string; notes?: string | null; reservation_type?: string | null; status?: string | null }) => {
+  const newType = opts?.reservationType ?? 'standard';
+  const occupiesImmediately = opts?.occupiesCourtImmediately ?? true;
+  const bookingOverlap = (existingBookings ?? []).some((b: {
+    start_at: string;
+    end_at: string;
+    notes?: string | null;
+    reservation_type?: string | null;
+    status?: string | null;
+    court_contention_status?: string | null;
+  }) => {
     if (isExpiredMatchLock(b.notes)) return false;
-    const s = new Date(b.start_at).getTime();
-    const e = new Date(b.end_at).getTime();
-    return startMs < e && endMs > s;
+    return overlappingBookingBlocksNewReservation(
+      b as Parameters<typeof overlappingBookingBlocksNewReservation>[0],
+      startMs,
+      endMs,
+      newType,
+      occupiesImmediately,
+    );
   });
   if (bookingOverlap) return 'La pista ya tiene una reserva en ese horario';
 
@@ -75,7 +93,12 @@ export async function hasCourtConflict(courtId: string, startAt: string, endAt: 
   // Escuela: `start_time`/`end_time` son hora reloj del club; el slot es UTC. Antes se mezclaban
   // minutos UTC (slice del ISO) con minutos "locales" y el día de la semana en UTC, generando
   // falsos positivos (p. ej. pista libre en el panel y bloqueada en matchmaking).
-  const clubTz = DEFAULT_CLUB_TIMEZONE;
+  const { data: clubRow } = await supabase
+    .from('clubs')
+    .select('timezone')
+    .eq('id', clubId)
+    .maybeSingle();
+  const clubTz = clubTimezoneOrDefault((clubRow as { timezone?: string | null } | null)?.timezone);
   const dayKey = dayKeyInTz(new Date(startAt), clubTz);
   const slotWeekday = shortWeekdayCodeInTimeZone(new Date(startAt), clubTz);
 
@@ -124,7 +147,8 @@ export async function getAvailableCourtIds(
   startAt: string,
   endAt: string,
   excludeBookingId?: string,
-  includeHidden = true
+  includeHidden = true,
+  conflictOpts?: { reservationType?: string; occupiesCourtImmediately?: boolean },
 ): Promise<{ ok: true; courtIds: string[] } | { ok: false; error: string }> {
   const supabase = getSupabaseServiceRoleClient();
   let q = supabase
@@ -137,6 +161,10 @@ export async function getAvailableCourtIds(
   const { data: courts, error } = await q;
   if (error) return { ok: false, error: error.message };
   const ids = (courts ?? []).map((c: { id: string }) => c.id);
-  const results = await Promise.all(ids.map((id) => hasCourtConflict(id, startAt, endAt, excludeBookingId).then((r) => ({ id, conflict: r }))));
+  const results = await Promise.all(
+    ids.map((id) =>
+      hasCourtConflict(id, startAt, endAt, excludeBookingId, conflictOpts).then((r) => ({ id, conflict: r })),
+    ),
+  );
   return { ok: true, courtIds: results.filter((r) => r.conflict === null).map((r) => r.id) };
 }

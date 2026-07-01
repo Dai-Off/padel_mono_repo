@@ -2,6 +2,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from '../../i18n';
 
 type Props = {
   visible: boolean;
@@ -35,6 +36,7 @@ export function OnboardingHardBlockModal({
   onClose,
   onStart,
 }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   return (
@@ -85,12 +87,12 @@ export function OnboardingHardBlockModal({
               style={styles.ctaGradient}
             >
               <Ionicons name="compass" size={18} color="#fff" />
-              <Text style={styles.ctaText}>Descubrir mi nivel</Text>
+              <Text style={styles.ctaText}>{t('onboarding.discoverLevel')}</Text>
             </LinearGradient>
           </Pressable>
 
           <Pressable onPress={onClose} hitSlop={8} style={styles.cancelBtn}>
-            <Text style={styles.cancelText}>Ahora no</Text>
+            <Text style={styles.cancelText}>{t('onboarding.notNow')}</Text>
           </Pressable>
         </View>
       </View>

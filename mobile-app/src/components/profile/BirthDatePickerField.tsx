@@ -11,6 +11,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
+import { formatLocale, useTranslation } from '../../i18n';
 
 const ACCENT = '#F18F34';
 
@@ -29,10 +30,10 @@ export function formatBirthDateIso(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function formatBirthDateDisplay(iso: string): string {
+function formatBirthDateDisplay(iso: string, locale: string): string {
   if (!iso) return '';
   try {
-    return parseIsoDate(iso).toLocaleDateString('es-ES', {
+    return parseIsoDate(iso).toLocaleDateString(locale, {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
@@ -51,10 +52,15 @@ type BirthDatePickerFieldProps = {
 };
 
 export function BirthDatePickerField({ value, onChange }: BirthDatePickerFieldProps) {
+  const { t, locale } = useTranslation();
+  const dateLocale = formatLocale(locale);
   const [showPicker, setShowPicker] = useState(false);
   const [draftDate, setDraftDate] = useState(() => parseIsoDate(value));
 
-  const displayLabel = useMemo(() => formatBirthDateDisplay(value), [value]);
+  const displayLabel = useMemo(
+    () => formatBirthDateDisplay(value, dateLocale),
+    [value, dateLocale],
+  );
 
   const openPicker = () => {
     setDraftDate(parseIsoDate(value));
@@ -91,10 +97,10 @@ export function BirthDatePickerField({ value, onChange }: BirthDatePickerFieldPr
         style={styles.trigger}
         onPress={openPicker}
         accessibilityRole="button"
-        accessibilityLabel="Seleccionar fecha de nacimiento"
+        accessibilityLabel={t('profile.fieldBirthDate')}
       >
         <Text style={[styles.triggerText, !value && styles.placeholder]}>
-          {displayLabel || 'Seleccionar fecha'}
+          {displayLabel || t('profile.fieldBirthDate')}
         </Text>
         <Ionicons name="calendar-outline" size={18} color="#6b7280" />
       </Pressable>
@@ -116,18 +122,18 @@ export function BirthDatePickerField({ value, onChange }: BirthDatePickerFieldPr
             <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
               <View style={styles.modalHeader}>
                 <Pressable onPress={clearDate} hitSlop={8}>
-                  <Text style={styles.modalClear}>Quitar</Text>
+                  <Text style={styles.modalClear}>{t('profile.birthDateClear')}</Text>
                 </Pressable>
-                <Text style={styles.modalTitle}>Fecha de nacimiento</Text>
+                <Text style={styles.modalTitle}>{t('profile.birthDateModalTitle')}</Text>
                 <Pressable onPress={confirmIos} hitSlop={8}>
-                  <Text style={styles.modalDone}>Listo</Text>
+                  <Text style={styles.modalDone}>{t('profile.birthDateDone')}</Text>
                 </Pressable>
               </View>
               <DateTimePicker
                 value={draftDate}
                 mode="date"
                 display="spinner"
-                locale="es-ES"
+                locale={dateLocale}
                 maximumDate={MAX_BIRTH_DATE}
                 minimumDate={MIN_BIRTH_DATE}
                 onChange={onPickerChange}
