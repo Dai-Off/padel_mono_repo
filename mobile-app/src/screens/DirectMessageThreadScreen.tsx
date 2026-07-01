@@ -22,6 +22,7 @@ import {
 } from '../api/messages';
 import { subscribeMessagesSocket } from '../realtime/messagesSocket';
 import type { MessagePeerNav } from './MessagesScreen';
+import { PlayerProfileOverlay } from '../components/profile/PlayerProfileOverlay';
 import { theme } from '../theme';
 import { formatLocale, useTranslation } from '../i18n';
 
@@ -59,6 +60,9 @@ export function DirectMessageThreadScreen({
   const [messages, setMessages] = useState<DirectThreadMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  // Perfil ajeno mostrado como overlay al tocar el nombre del header (o al navegar
+  // a otro jugador dentro del propio perfil).
+  const [overlayPlayerId, setOverlayPlayerId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -156,9 +160,17 @@ export function DirectMessageThreadScreen({
         >
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </Pressable>
-        <Text style={styles.title} numberOfLines={1}>
-          {peer.displayName}
-        </Text>
+        <Pressable
+          style={styles.titleWrap}
+          onPress={() => peer.id && setOverlayPlayerId(peer.id)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Ver perfil de ${peer.displayName}`}
+        >
+          <Text style={styles.title} numberOfLines={1}>
+            {peer.displayName}
+          </Text>
+        </Pressable>
         <View style={styles.toolbarRight} />
       </View>
 
@@ -216,6 +228,12 @@ export function DirectMessageThreadScreen({
           )}
         </Pressable>
       </View>
+
+      <PlayerProfileOverlay
+        playerId={overlayPlayerId}
+        onClose={() => setOverlayPlayerId(null)}
+        onOpenPlayer={(pid) => setOverlayPlayerId(pid)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -236,13 +254,12 @@ const styles = StyleSheet.create({
     zIndex: 2,
     elevation: 2,
   },
+  titleWrap: { flex: 1, marginHorizontal: 8 },
   title: {
-    flex: 1,
     textAlign: 'center',
     fontSize: theme.fontSize.lg,
     fontWeight: '700',
     color: '#fff',
-    marginHorizontal: 8,
   },
   toolbarRight: { width: 40 },
   iconBtn: {

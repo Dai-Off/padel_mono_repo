@@ -2,6 +2,7 @@ import { Router } from "express";
 import authRouter from "./auth";
 import healthRouter from "./health";
 import playersRouter from "./players";
+import unlockablesRouter from "./unlockables";
 import clubOwnersRouter from "./clubOwners";
 import clubsRouter from "./clubs";
 import courtsRouter from "./courts";
@@ -68,6 +69,7 @@ router.get("/", (_req, res) => {
 router.use("/auth", authRouter);
 router.use("/health", healthRouter);
 router.use("/players", playersRouter);
+router.use("/players", unlockablesRouter);
 router.use("/club-owners", clubOwnersRouter);
 router.use("/clubs", clubsRouter);
 router.use("/courts", courtsRouter);

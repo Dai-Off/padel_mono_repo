@@ -85,7 +85,7 @@ export function mapMatchToPartido(
       const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
       const parts = fullName.split(/\s+/).filter(Boolean);
       const initial = parts.length >= 2 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : fullName[0]?.toUpperCase() ?? '?';
-      slots[i] = { id: p.id, name: fullName, initial, level: playerLevelLine(p), isFree: false };
+      slots[i] = { id: p.id, name: fullName, initial, level: playerLevelLine(p), frame: p.frame ?? null, isFree: false };
     });
     return {
       id: m.id,
@@ -198,7 +198,7 @@ export function mapMatchToPartido(
         : fullName[0]?.toUpperCase() ?? '?';
     const level = playerLevelLine(p);
     const avatar = normalizePlayerAvatarUrl(p.avatar_url) ?? undefined;
-    slots[idx] = { id: p.id, name: fullName, initial, level, avatar, isFree: false };
+    slots[idx] = { id: p.id, name: fullName, initial, level, avatar, frame: p.frame ?? null, isFree: false };
   });
   const players = slots;
 

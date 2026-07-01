@@ -24,6 +24,7 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   preferredPlayStyle: 'balanced',
   preferredMatchDurationMin: 90,
   preferredPartnerLevel: 'any',
+  dominantHand: null,
   favoriteClubs: [],
   notifNewMatches: true,
   notifTournamentReminders: true,

@@ -1,10 +1,11 @@
 import { useState, type ComponentProps } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useHomeData } from '../../contexts/HomeDataContext';
+import { AvatarWithFrame } from '../profile/AvatarWithFrame';
 import { useSidebarContext } from '../../contexts/SidebarContext';
 import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
@@ -45,22 +46,13 @@ function SidebarUserHeader() {
           accessibilityLabel={t('nav.userProfileA11y')}
         >
           <View style={styles.avatarWrap}>
-            {avatarUrl ? (
-              <Image
-                source={{ uri: avatarUrl }}
-                style={styles.avatarImage}
-                resizeMode="cover"
-              />
-            ) : (
-              <LinearGradient
-                colors={[theme.sidebar.avatarGradientFrom, theme.sidebar.avatarGradientTo]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.avatar}
-              >
-                <Text style={styles.avatarText}>{initials}</Text>
-              </LinearGradient>
-            )}
+            <AvatarWithFrame
+              avatarUrl={avatarUrl}
+              initials={initials}
+              size={56}
+              frame={profile?.frame ?? null}
+              animate={false}
+            />
             <View style={styles.statusDot} />
           </View>
           <View style={styles.userInfo}>
@@ -309,24 +301,6 @@ const styles = StyleSheet.create({
   },
   userSectionPressed: { opacity: 0.9 },
   avatarWrap: { position: 'relative' },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: theme.auth.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  avatarImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-  },
-  avatarText: { color: theme.auth.text, fontSize: 18, fontWeight: '700' },
   statusDot: {
     position: 'absolute',
     bottom: -2,

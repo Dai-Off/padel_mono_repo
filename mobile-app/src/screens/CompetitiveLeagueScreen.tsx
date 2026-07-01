@@ -56,6 +56,15 @@ import {
 import { useHomeData } from '../contexts/HomeDataContext';
 import { useTranslation } from '../i18n';
 import { getMatchBooking } from '../domain/matchLifecycle';
+import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
+
+/** Iniciales (máx 2) a partir del nombre para el avatar del ranking. */
+function rankInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const a = parts[0]?.[0] ?? '';
+  const b = parts.length > 1 ? parts[parts.length - 1][0] : '';
+  return (a + b).toUpperCase() || '?';
+}
 
 type Step = 'home' | 'prefs' | 'queue' | 'found';
 type MainTab = 'liga' | 'ranking';
@@ -81,6 +90,8 @@ const RANKING_PAGE_SIZE = 15;
 type Props = {
   onBack: () => void;
   onPartidoPress?: (partido: PartidoItem) => void;
+  /** Abre el perfil público de un jugador del ranking. */
+  onOpenPlayer?: (playerId: string) => void;
   entryIntent?: 'default' | 'queue' | 'prefs';
   queueElapsedSec: number;
   setQueueElapsedSec: Dispatch<SetStateAction<number>>;
@@ -99,6 +110,7 @@ type Props = {
 export function CompetitiveLeagueScreen({
   onBack,
   onPartidoPress,
+  onOpenPlayer,
   entryIntent = 'default',
   queueElapsedSec,
   setQueueElapsedSec,
@@ -949,11 +961,10 @@ export function CompetitiveLeagueScreen({
     return {
       rank: fromList?.rank ?? null,
       name: meName,
-      level: profile.eloRating
-        ? t('competitive.screen.proposal.levelValue', { value: Number(profile.eloRating).toFixed(2) })
-        : t('competitive.screen.proposal.levelUnknown'),
-      wl: t('competitive.screen.ranking.wl', { wins: profile.mmWins ?? 0, losses: profile.mmLosses ?? 0 }),
+      elo: profile.eloRating != null && Number.isFinite(profile.eloRating) ? profile.eloRating : undefined,
       lp: profile.lps ?? 0,
+      avatarUrl: profile.avatarUrl,
+      frame: profile.frame ?? null,
     };
   }, [profile, rankingRows, t]);
 
@@ -1183,29 +1194,30 @@ export function CompetitiveLeagueScreen({
                     `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() ||
                     row.username?.trim() ||
                     t('competitive.screen.fallback.player');
-                  const level =
-                    row.elo_rating != null
-                      ? t('competitive.screen.proposal.levelValue', { value: Number(row.elo_rating).toFixed(2) })
-                      : t('competitive.screen.proposal.levelUnknown');
-                  const wl = t('competitive.screen.ranking.wl', { wins: row.mm_wins, losses: row.mm_losses });
                   return (
-                    <View
+                    <Pressable
                       key={row.player_id}
-                      style={[styles.rankRow, isMe && styles.rankRowMe]}
+                      style={({ pressed }) => [styles.rankRow, isMe && styles.rankRowMe, pressed && styles.rankRowPressed]}
+                      onPress={() => onOpenPlayer?.(row.player_id)}
                     >
                       <View style={[styles.rankBadge, row.rank <= 3 && styles.rankBadgeTop]}>
                         <Text style={[styles.rankBadgeText, row.rank <= 3 && styles.rankBadgeTextTop]}>
                           {row.rank}
                         </Text>
                       </View>
+                      <AvatarWithFrame
+                        avatarUrl={row.avatar_url}
+                        initials={rankInitials(name)}
+                        size={40}
+                        frame={row.frame ?? null}
+                        level={row.elo_rating ?? undefined}
+                        animate={false}
+                      />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.rankName}>{isMe ? t('competitive.screen.ranking.meSelf', { name }) : name}</Text>
-                        <Text style={styles.rankMeta}>
-                          {level} · {wl}
-                        </Text>
                       </View>
                       <Text style={styles.rankLp}>{row.lps} LP</Text>
-                    </View>
+                    </Pressable>
                   );
                 })
               )}
@@ -1216,18 +1228,26 @@ export function CompetitiveLeagueScreen({
                 </View>
               ) : null}
               {!rankingLoading && rankingPlayerCount > 0 && myRankingRow && myRankingRow.rank == null ? (
-                <View style={[styles.rankRow, styles.rankRowMe]}>
+                <Pressable
+                  style={({ pressed }) => [styles.rankRow, styles.rankRowMe, pressed && styles.rankRowPressed]}
+                  onPress={() => profile?.id && onOpenPlayer?.(profile.id)}
+                >
                   <View style={styles.rankBadge}>
                     <Text style={styles.rankBadgeText}>—</Text>
                   </View>
+                  <AvatarWithFrame
+                    avatarUrl={myRankingRow.avatarUrl}
+                    initials={rankInitials(myRankingRow.name)}
+                    size={40}
+                    frame={myRankingRow.frame}
+                    level={myRankingRow.elo}
+                    animate={false}
+                  />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rankName}>{myRankingRow.name}</Text>
-                    <Text style={styles.rankMeta}>
-                      {myRankingRow.level} · {myRankingRow.wl}
-                    </Text>
                   </View>
                   <Text style={styles.rankLp}>{myRankingRow.lp} LP</Text>
-                </View>
+                </Pressable>
               ) : null}
             </View>
           )}
@@ -1949,6 +1969,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,158,11,0.45)',
     backgroundColor: 'rgba(245,158,11,0.1)',
   },
+  rankRowPressed: { opacity: 0.7 },
   rankBadge: {
     width: 24,
     height: 24,
@@ -1961,7 +1982,6 @@ const styles = StyleSheet.create({
   rankBadgeText: { color: '#e5e7eb', fontSize: 11, fontWeight: '800' },
   rankBadgeTextTop: { color: '#fbbf24' },
   rankName: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  rankMeta: { color: '#9ca3af', fontSize: 12, marginTop: 1 },
   rankLp: { color: '#fff', fontSize: 15, fontWeight: '900' },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
   stepSubtitle: { color: '#6b7280', fontSize: 11, marginTop: 2 },

@@ -8,6 +8,7 @@ import {
   calculateAssessment,
   saveAssessment,
   getPlayerAssessment,
+  recomputeAndGetAssessment,
   CoachAnswer,
 } from '../services/coachAssessmentService';
 
@@ -44,7 +45,9 @@ router.get('/me', async (req: Request, res: Response) => {
   const locale = resolveLocale(req);
 
   try {
-    const assessment = await getPlayerAssessment(playerId!);
+    // Recalcula el radar desde señales reales (ELO + learning) y lo persiste,
+    // de modo que se mantiene fresco y se crea si no existía; luego se localiza.
+    const assessment = await recomputeAndGetAssessment(playerId!);
     if (!assessment) return res.json({ ok: true, assessment: null, locale });
     return res.json({
       ok: true,

@@ -2,13 +2,16 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
+import { getEquippedFrames } from '../services/equippedFramesService';
 import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
+import { computeFreshAssessment } from '../services/coachAssessmentService';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
 import { localizeCoachAssessmentText } from '../lib/coachAssessmentLanguage';
 import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 import { syncPlayerVector } from '../lib/mailer';
+import { pickClubImageSource, resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import {
   assertUsernameAvailable,
   normalizeUsername,
@@ -81,26 +84,26 @@ function deriveCoachAssessmentFromLevel(level0to7: number): {
   improvements: string[];
   recommendation: string;
 } {
-  const base = clamp((level0to7 / 7) * 100, 0, 100);
+  const base = clamp((level0to7 / 7) * 70, 0, 70); // escala /70 (= nivel × 10)
   const skills: CoachSkills = {
-    technical: Math.round(clamp(base + 4, 10, 100)),
-    physical: Math.round(clamp(base - 2, 10, 100)),
-    mental: Math.round(clamp(base + 1, 10, 100)),
-    tactical: Math.round(clamp(base - 3, 10, 100)),
+    technical: Math.round(clamp(base + 3, 7, 70)),
+    physical: Math.round(clamp(base - 1, 7, 70)),
+    mental: Math.round(clamp(base + 1, 7, 70)),
+    tactical: Math.round(clamp(base - 2, 7, 70)),
   };
   const avg = (skills.technical + skills.physical + skills.mental + skills.tactical) / 4;
   let level_number = 1;
   let level_name = 'Principiante';
-  if (avg > 80) {
+  if (avg > 56) {
     level_number = 5;
     level_name = 'Elite';
-  } else if (avg > 60) {
+  } else if (avg > 42) {
     level_number = 4;
     level_name = 'Profesional';
-  } else if (avg > 40) {
+  } else if (avg > 28) {
     level_number = 3;
     level_name = 'Avanzado';
-  } else if (avg > 20) {
+  } else if (avg > 14) {
     level_number = 2;
     level_name = 'Intermedio';
   }
@@ -170,7 +173,7 @@ const SELECT_PUBLIC_INTERNAL = `
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents,
   preferred_side, preferred_schedule_slots, preferred_days, preferred_play_style,
-  preferred_match_duration_min, preferred_partner_level, favorite_clubs,
+  preferred_match_duration_min, preferred_partner_level, favorite_clubs, dominant_hand,
   notif_new_matches, notif_tournament_reminders, notif_class_updates, notif_chat_messages,
   affinity_visible,
   play_location, birth_date, profile_description,
@@ -220,6 +223,7 @@ const PREF_DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 const PREF_STYLE = new Set(['competitive', 'social', 'learning', 'balanced']);
 const PREF_PARTNER_LEVEL = new Set(['similar', 'higher', 'lower', 'any']);
 const PREF_DURATION = new Set([60, 90, 120]);
+const PREF_HAND = new Set(['left', 'right']);
 
 function parseStringArray(value: unknown, field: string, maxItems: number): { ok: true; value: string[] } | { ok: false; error: string } {
   if (!Array.isArray(value)) return { ok: false, error: `${field} debe ser un arreglo` };
@@ -294,6 +298,19 @@ function normalizePreferencesPatch(body: Record<string, unknown>): PreferencesPa
     const parsed = parseStringArray(body.favorite_clubs, 'favorite_clubs', 20);
     if (!parsed.ok) return parsed;
     patch.favorite_clubs = parsed.value.slice(0, 20);
+  }
+
+  // Mano preferida: 'left' | 'right' | null (para limpiar). null = sin definir.
+  if (Object.prototype.hasOwnProperty.call(body, 'dominant_hand')) {
+    hasAny = true;
+    const raw = body.dominant_hand;
+    if (raw === null) {
+      patch.dominant_hand = null;
+    } else if (typeof raw === 'string' && PREF_HAND.has(raw.trim().toLowerCase())) {
+      patch.dominant_hand = raw.trim().toLowerCase();
+    } else {
+      return { ok: false, error: 'dominant_hand inválido' };
+    }
   }
 
   const boolFields = [
@@ -489,18 +506,21 @@ router.get('/me', async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: 'No existe jugador asociado a esta cuenta' });
     }
     const pid = String((player as Row).id);
-    const [wl, matchCountRes] = await Promise.all([
+    const [wl, matchCountRes, framesMap] = await Promise.all([
       fetchPlayerMatchmakingWl(supabase, pid),
       supabase
         .from('match_players')
         .select('match_id', { count: 'exact', head: true })
         .eq('player_id', pid),
+      getEquippedFrames(supabase, [pid]),
     ]);
     const matchesPlayedLive = matchCountRes.count ?? null;
-    const playerWithStats = withPublicPlayerAndMm(player as Row, wl) as Row;
+    const playerWithStats = withPublicPlayerAndMm(player as Row, wl) as Row & { frame?: unknown };
     if (matchesPlayedLive !== null) {
       playerWithStats.matches_played_total = matchesPlayedLive;
     }
+    // Marco equipado resuelto (para pintar el pack del propio usuario, p. ej. sidebar).
+    playerWithStats.frame = framesMap.get(pid) ?? null;
     return res.json({ ok: true, player: playerWithStats });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -1172,6 +1192,25 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
   const last20 = results.slice(0, 20);
   const wins = last20.filter((r) => r === 'win').length;
   const winRateLast20 = last20.length ? wins / last20.length : 0;
+
+  // Métricas de "últimos N" (la tarjeta de Estadísticas muestra los últimos 8)
+  const RECENT_N = 8;
+  const recent = results.slice(0, RECENT_N);
+  const recentWins = recent.filter((r) => r === 'win').length;
+  const winRateLastN = recent.length ? recentWins / recent.length : 0;
+
+  // Totales históricos (todos los partidos con resultado decidido)
+  const { count: totalWins } = await supabase
+    .from('match_players')
+    .select('id', { count: 'exact', head: true })
+    .eq('player_id', id)
+    .eq('result', 'win');
+  const { count: totalLosses } = await supabase
+    .from('match_players')
+    .select('id', { count: 'exact', head: true })
+    .eq('player_id', id)
+    .eq('result', 'loss');
+
   const sigma = Number((pl as { sigma?: number }).sigma ?? 8.333);
   const fiabilidad = Math.max(0, Math.round((1 - sigma / 8.333) * 100));
 
@@ -1180,12 +1219,169 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
     win_streak: winStreak,
     loss_streak: lossStreak,
     win_rate_last_20: Math.round(winRateLast20 * 100) / 100,
+    total_wins: totalWins ?? 0,
+    total_losses: totalLosses ?? 0,
+    recent_n: recent.length,
+    recent_wins: recentWins,
+    win_rate_last_8: Math.round(winRateLastN * 100) / 100,
     matches_played_competitive: Number((pl as { matches_played_competitive?: number }).matches_played_competitive ?? 0),
     matches_played_friendly: Number((pl as { matches_played_friendly?: number }).matches_played_friendly ?? 0),
     matches_played_matchmaking: Number((pl as { matches_played_matchmaking?: number }).matches_played_matchmaking ?? 0),
     elo_rating: (pl as { elo_rating?: number }).elo_rating,
     fiabilidad,
   });
+});
+
+/**
+ * @openapi
+ * /players/me/level-history:
+ *   get:
+ *     tags: [Players]
+ *     summary: Historial de evolución del ELO del jugador autenticado (partidos de matchmaking)
+ */
+// Construye el historial de nivel (ELO) de un jugador. Reutilizado por la ruta
+// propia (/me) y la pública (/:id).
+async function buildLevelHistory(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+  limitParam: string,
+): Promise<
+  | { ok: true; current_elo: number; matches: unknown[] }
+  | { ok: false; status: number; error: string }
+> {
+  // Límite: 5 | 10 | all (por defecto 5)
+  let limit: number | null;
+  if (limitParam === 'all') limit = null;
+  else {
+    const n = parseInt(limitParam, 10);
+    limit = Number.isFinite(n) && n > 0 ? n : 5;
+  }
+
+  // ELO actual: base para reconstruir el ELO tras cada partido hacia atrás
+  const { data: pl, error: ep } = await supabase
+    .from('players')
+    .select('elo_rating')
+    .eq('id', playerId)
+    .maybeSingle();
+  if (ep) return { ok: false, status: 500, error: ep.message };
+  if (!pl) return { ok: false, status: 404, error: 'Player not found' };
+  const currentElo = Number((pl as { elo_rating?: number }).elo_rating ?? 0);
+
+  // Partidos del jugador (equipo, resultado y delta de ELO)
+  const { data: myRows, error: e1 } = await supabase
+    .from('match_players')
+    .select('match_id, team, result, rating_change')
+    .eq('player_id', playerId);
+  if (e1) return { ok: false, status: 500, error: e1.message };
+
+  const myByMatch = new Map<string, { team: 'A' | 'B'; result: string; rating_change: number }>();
+  for (const r of myRows ?? []) {
+    const o = r as { match_id: string; team: 'A' | 'B'; result: string; rating_change: number };
+    myByMatch.set(o.match_id, { team: o.team, result: o.result, rating_change: Number(o.rating_change ?? 0) });
+  }
+  const matchIds = [...myByMatch.keys()];
+  if (!matchIds.length) return { ok: true, current_elo: currentElo, matches: [] };
+
+  // Solo partidos de matchmaking confirmados (los que mueven ELO), con sets, fecha y equipos
+  const { data: matches, error: e2 } = await supabase
+    .from('matches')
+    .select(
+      `id, sets, type, score_status,
+       bookings ( start_at ),
+       match_players ( team, slot_index, player_id, players ( id, first_name, last_name, avatar_url ) )`,
+    )
+    .in('id', matchIds)
+    .eq('type', 'matchmaking')
+    .eq('score_status', 'confirmed');
+  if (e2) return { ok: false, status: 500, error: e2.message };
+
+  type DbPlayerLite = { id?: string; first_name?: string | null; last_name?: string | null; avatar_url?: string | null };
+  type DbMp = { team: 'A' | 'B'; slot_index?: number; player_id: string; players: DbPlayerLite | DbPlayerLite[] | null };
+  type MatchRow = {
+    id: string;
+    sets: unknown;
+    bookings: { start_at?: string | null } | { start_at?: string | null }[] | null;
+    match_players: DbMp[] | null;
+  };
+  const rows = (matches ?? []) as unknown as MatchRow[];
+
+  const getStart = (r: MatchRow): string | null => {
+    const b = Array.isArray(r.bookings) ? r.bookings[0] : r.bookings;
+    return b?.start_at ?? null;
+  };
+
+  // Orden cronológico ascendente (oldest → newest) para el gráfico
+  rows.sort((a, b) => String(getStart(a) ?? '').localeCompare(String(getStart(b) ?? '')));
+
+  // Reconstrucción de elo_after: el más reciente = ELO actual; hacia atrás se resta cada delta
+  const eloAfter = new Array<number>(rows.length);
+  let running = currentElo;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    eloAfter[i] = Math.round(running * 10) / 10;
+    running -= myByMatch.get(rows[i].id)?.rating_change ?? 0;
+  }
+
+  const initialsOf = (fn?: string | null, ln?: string | null): string => {
+    const a = (fn ?? '').trim();
+    const b = (ln ?? '').trim();
+    return ((a[0] ?? '') + (b[0] ?? '')).toUpperCase() || '?';
+  };
+  const parseSets = (raw: unknown): { a: number; b: number }[] =>
+    Array.isArray(raw)
+      ? raw
+          .map((x) => ({ a: Number((x as { a?: unknown })?.a), b: Number((x as { b?: unknown })?.b) }))
+          .filter((s) => Number.isFinite(s.a) && Number.isFinite(s.b))
+      : [];
+  const mapPlayer = (m: DbMp) => {
+    const p = Array.isArray(m.players) ? m.players[0] : m.players;
+    return { id: p?.id ?? null, initials: initialsOf(p?.first_name, p?.last_name), avatarUrl: p?.avatar_url ?? null };
+  };
+
+  let result = rows.map((r, i) => {
+    const mine = myByMatch.get(r.id)!;
+    const sets = parseSets(r.sets);
+    const mps = r.match_players ?? [];
+    return {
+      match_id: r.id,
+      played_at: getStart(r),
+      result: mine.result,
+      rating_change: Math.round((mine.rating_change ?? 0) * 100) / 100,
+      elo_after: eloAfter[i],
+      my_team: mine.team,
+      score_a: sets.map((s) => s.a),
+      score_b: sets.map((s) => s.b),
+      team_a: mps.filter((m) => m.team === 'A').map(mapPlayer),
+      team_b: mps.filter((m) => m.team === 'B').map(mapPlayer),
+    };
+  });
+
+  // Aplicar límite: los N más recientes, manteniendo orden ascendente
+  if (limit != null && result.length > limit) result = result.slice(result.length - limit);
+
+  return { ok: true, current_elo: currentElo, matches: result };
+}
+
+router.get('/me/level-history', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const out = await buildLevelHistory(supabase, playerId, String(req.query.limit ?? '5'));
+  if (!out.ok) return res.status(out.status).json({ ok: false, error: out.error });
+  return res.json({ ok: true, current_elo: out.current_elo, matches: out.matches });
+});
+
+/**
+ * @openapi
+ * /players/{id}/level-history:
+ *   get:
+ *     tags: [Players]
+ *     summary: Historial de nivel (ELO) de un jugador (público, mismo shape que /me)
+ */
+router.get('/:id/level-history', async (req: Request, res: Response) => {
+  const supabase = getSupabaseServiceRoleClient();
+  const out = await buildLevelHistory(supabase, req.params.id, String(req.query.limit ?? '5'));
+  if (!out.ok) return res.status(out.status).json({ ok: false, error: out.error });
+  return res.json({ ok: true, current_elo: out.current_elo, matches: out.matches });
 });
 
 /**
@@ -1430,7 +1626,7 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: player, error: pErr } = await supabase
       .from('players')
-      .select('id, first_name, last_name, username, avatar_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga')
+      .select('id, first_name, last_name, username, avatar_url, cover_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga, preferred_side, preferred_play_style, dominant_hand')
       .eq('id', id)
       .maybeSingle();
 
@@ -1440,12 +1636,14 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     const wl = await fetchPlayerMatchmakingWl(supabase, id);
     const publicData = toPublicPlayer(player as Row);
 
-    // Radar / Coach Assessment
-    const { data: coach } = await supabase
-      .from('coach_assessments')
-      .select('level_number, level_name, skills, strengths, improvements, recommendation')
-      .eq('player_id', id)
-      .maybeSingle();
+    // Radar / Coach Assessment: se computa FRESCO (ELO + learning) en vez de leer
+    // la fila cruda, que puede estar obsoleta si el ELO cambió tras partidos.
+    let coach: Awaited<ReturnType<typeof computeFreshAssessment>> | null = null;
+    try {
+      coach = await computeFreshAssessment(id);
+    } catch (e) {
+      console.error('[public-profile] computeFreshAssessment:', e instanceof Error ? e.message : e);
+    }
 
     // Últimos partidos (resumen)
     const { data: recentMatches } = await supabase
@@ -1462,6 +1660,8 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
       player: {
         ...publicData,
         ...wl,
+        username: (player as { username?: string | null }).username ?? null,
+        cover_url: (player as { cover_url?: string | null }).cover_url ?? null,
         coach_assessment: coachLocalized,
         recent_matches: recentMatches || [],
       },
@@ -1469,6 +1669,113 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /players/{id}/frequent-clubs:
+ *   get:
+ *     tags: [Players]
+ *     summary: Clubs donde el jugador suele jugar (por frecuencia de partidos). Público.
+ */
+router.get('/:id/frequent-clubs', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '8'), 10) || 8, 1), 20);
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: mp } = await supabase.from('match_players').select('match_id').eq('player_id', id);
+    const matchIds = [...new Set((mp ?? []).map((r) => (r as { match_id: string }).match_id))];
+    if (!matchIds.length) return res.json({ ok: true, clubs: [] });
+
+    const { data: matches } = await supabase
+      .from('matches')
+      .select('id, bookings ( courts ( clubs ( id, name, logo_url, photo_urls ) ) )')
+      .in('id', matchIds);
+
+    type ClubRow = { id: string; name?: string | null; logo_url?: string | null; photo_urls?: unknown };
+    const countByClub = new Map<string, number>();
+    const clubMeta = new Map<string, ClubRow>();
+    for (const m of matches ?? []) {
+      const b = (m as { bookings?: unknown }).bookings;
+      const booking = Array.isArray(b) ? b[0] : b;
+      const courts = (booking as { courts?: unknown } | null)?.courts;
+      const court = Array.isArray(courts) ? courts[0] : courts;
+      const clubs = (court as { clubs?: unknown } | null)?.clubs;
+      const club = (Array.isArray(clubs) ? clubs[0] : clubs) as ClubRow | null;
+      if (!club?.id) continue;
+      countByClub.set(club.id, (countByClub.get(club.id) ?? 0) + 1);
+      if (!clubMeta.has(club.id)) clubMeta.set(club.id, club);
+    }
+
+    const ranked = [...countByClub.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+    const clubs = await Promise.all(
+      ranked.map(async ([clubId, count]) => {
+        const meta = clubMeta.get(clubId)!;
+        let image: string | null = null;
+        const raw = pickClubImageSource(meta);
+        if (raw) {
+          try {
+            image = await resolveClubLogoUrlForClient(supabase, raw);
+          } catch {
+            image = null;
+          }
+        }
+        return { id: clubId, name: meta.name ?? 'Club', image, count };
+      }),
+    );
+    return res.json({ ok: true, clubs });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+/**
+ * @openapi
+ * /players/{id}/frequent-partners:
+ *   get:
+ *     tags: [Players]
+ *     summary: Personas con las que el jugador suele jugar (co-jugadores por frecuencia). Público.
+ */
+router.get('/:id/frequent-partners', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '8'), 10) || 8, 1), 20);
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: mine } = await supabase.from('match_players').select('match_id').eq('player_id', id);
+    const matchIds = [...new Set((mine ?? []).map((r) => (r as { match_id: string }).match_id))];
+    if (!matchIds.length) return res.json({ ok: true, partners: [] });
+
+    const { data: others } = await supabase
+      .from('match_players')
+      .select('player_id')
+      .in('match_id', matchIds)
+      .neq('player_id', id);
+
+    const countByPlayer = new Map<string, number>();
+    for (const r of others ?? []) {
+      const pid = (r as { player_id: string }).player_id;
+      if (pid) countByPlayer.set(pid, (countByPlayer.get(pid) ?? 0) + 1);
+    }
+    const ranked = [...countByPlayer.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+    if (!ranked.length) return res.json({ ok: true, partners: [] });
+
+    const { data: players } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, username, avatar_url')
+      .in('id', ranked.map(([pid]) => pid));
+    type PRow = { id: string; first_name?: string | null; last_name?: string | null; username?: string | null; avatar_url?: string | null };
+    const meta = new Map((players ?? []).map((p) => [(p as PRow).id, p as PRow]));
+    const frames = await getEquippedFrames(supabase, ranked.map(([pid]) => pid));
+
+    const partners = ranked.map(([pid, count]) => {
+      const p = meta.get(pid);
+      const name = p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || (p.username ?? 'Jugador') : 'Jugador';
+      return { id: pid, name, avatarUrl: p?.avatar_url ?? null, count, frame: frames.get(pid) ?? null };
+    });
+    return res.json({ ok: true, partners });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
 

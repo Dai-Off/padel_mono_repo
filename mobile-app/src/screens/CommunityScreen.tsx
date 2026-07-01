@@ -34,9 +34,11 @@ import { useTranslation } from '../i18n';
 interface CommunityScreenProps {
   onBack: () => void;
   onMessagesPress?: () => void;
+  /** Abre el perfil público de un autor (avatar/nombre en feed, comentarios, historias, clips). */
+  onOpenPlayer?: (playerId: string) => void;
 }
 
-export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMessagesPress }) => {
+export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMessagesPress, onOpenPlayer }) => {
   const { t } = useTranslation();
   const { session } = useAuth();
   const token = session?.access_token;
@@ -106,6 +108,15 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
     setIsCommentsVisible(true);
   };
 
+  // Abre el perfil de un autor cerrando antes cualquier modal (comentarios/historia/clip).
+  const handleOpenPlayer = (playerId: string) => {
+    if (!playerId) return;
+    setIsCommentsVisible(false);
+    setIsStoryViewerVisible(false);
+    setIsClipViewerVisible(false);
+    onOpenPlayer?.(playerId);
+  };
+
   const handleStoryPress = (group: StoryGroup) => {
     setSelectedStoryGroup(group);
     setIsStoryViewerVisible(true);
@@ -156,9 +167,10 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
           data={posts}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <PostCard 
-              post={item} 
-              onPressComments={handleOpenComments} 
+            <PostCard
+              post={item}
+              onPressComments={handleOpenComments}
+              onPressAuthor={handleOpenPlayer}
             />
           )}
           ListHeaderComponent={renderHeader}
@@ -204,6 +216,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
         isVisible={isCommentsVisible}
         onClose={() => setIsCommentsVisible(false)}
         post={selectedPostForComments}
+        onPressAuthor={handleOpenPlayer}
       />
 
       <CreatePostModal
@@ -217,6 +230,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
         isVisible={isStoryViewerVisible}
         onClose={() => setIsStoryViewerVisible(false)}
         group={selectedStoryGroup}
+        onPressAuthor={handleOpenPlayer}
       />
 
       <ClipViewer
@@ -224,6 +238,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
         seedClip={selectedClip}
         token={token}
         onClose={() => setIsClipViewerVisible(false)}
+        onPressAuthor={handleOpenPlayer}
       />
 
       <StoryEditor
