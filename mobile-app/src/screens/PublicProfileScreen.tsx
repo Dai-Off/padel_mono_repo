@@ -20,6 +20,10 @@ import { LigaChip } from '../components/profile/LigaChip';
 import { LevelEvolutionCard } from '../components/profile/LevelEvolutionCard';
 import { StatsCard } from '../components/profile/StatsCard';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
+import { PlayerPreferencesCard } from '../components/profile/PlayerPreferencesCard';
+import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
+import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
+import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { RARITY_CONFIG } from '../design/rarity';
 
 type PublicProfileScreenProps = {
@@ -27,6 +31,7 @@ type PublicProfileScreenProps = {
   onBack: () => void;
   onChatPress?: (playerId: string, name: string) => void;
   onOpenMatch?: (matchId: string) => void;
+  onOpenPlayer?: (playerId: string) => void;
 };
 
 function getInitials(firstName?: string | null, lastName?: string | null): string {
@@ -35,7 +40,7 @@ function getInitials(firstName?: string | null, lastName?: string | null): strin
   return '??';
 }
 
-export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch }: PublicProfileScreenProps) {
+export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch, onOpenPlayer }: PublicProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const token = session?.access_token ?? null;
@@ -47,6 +52,9 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
   const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
   const [levelLoading, setLevelLoading] = useState(true);
   const [stats, setStats] = useState<PlayerStats | null>(null);
+  const [frequentClubs, setFrequentClubs] = useState<FrequentClub[]>([]);
+  const [frequentPartners, setFrequentPartners] = useState<FrequentPartner[]>([]);
+  const [socialLoading, setSocialLoading] = useState(true);
 
   // Datos base + personalización (gate del spinner)
   useEffect(() => {
@@ -76,6 +84,24 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
       cancelled = true;
     };
   }, [playerId, token]);
+
+  // Clubs y compañeros frecuentes (públicos)
+  useEffect(() => {
+    let cancelled = false;
+    setSocialLoading(true);
+    Promise.all([fetchFrequentClubs(playerId), fetchFrequentPartners(playerId)])
+      .then(([c, p]) => {
+        if (cancelled) return;
+        setFrequentClubs(c);
+        setFrequentPartners(p);
+      })
+      .finally(() => {
+        if (!cancelled) setSocialLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId]);
 
   // Evolución del nivel (recarga al cambiar el límite)
   useEffect(() => {
@@ -230,6 +256,28 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
 
         {/* Vitrina de logros (solo visibles) */}
         <TrophyShowcaseSection playerId={playerId} />
+
+        {/* Preferencias de jugador */}
+        <PlayerPreferencesCard
+          dominantHand={profile.dominantHand}
+          preferredSide={profile.preferredSide}
+          preferredPlayStyle={profile.preferredPlayStyle}
+        />
+
+        {/* Personas con las que juega */}
+        <FrequentPartnersCard
+          title={`Con quién juega ${profile.firstName ?? ''}`.trim()}
+          partners={frequentPartners}
+          loading={socialLoading}
+          onOpenPlayer={onOpenPlayer}
+        />
+
+        {/* Clubs donde juega (al final) */}
+        <FrequentClubsCard
+          title={`Clubs donde juega ${profile.firstName ?? ''}`.trim()}
+          clubs={frequentClubs}
+          loading={socialLoading}
+        />
       </ScrollView>
     </View>
   );

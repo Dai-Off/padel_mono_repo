@@ -36,6 +36,10 @@ import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
 import { LevelEvolutionCard } from '../components/profile/LevelEvolutionCard';
 import { StatsCard } from '../components/profile/StatsCard';
+import { PlayerPreferencesCard } from '../components/profile/PlayerPreferencesCard';
+import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
+import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
+import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { CoachSkeleton } from '../components/profile/CoachSkeleton';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
 import { fetchMyCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
@@ -73,6 +77,8 @@ type ProfileScreenProps = {
   onOnboardingCompleted?: () => void;
   /** Abre el detalle de un partido (desde el gráfico de evolución). */
   onOpenMatch?: (matchId: string) => void;
+  /** Abre el perfil ajeno de otro jugador (desde "personas con las que juegas"). */
+  onOpenPublicProfile?: (playerId: string) => void;
   /** Cada incremento hace scroll hasta la Vitrina de Logros (desde el modal de desbloqueo). */
   scrollToVitrinaNonce?: number;
 };
@@ -93,6 +99,7 @@ export function ProfileScreen({
   onOnboardingAutoOpened,
   onOnboardingCompleted,
   onOpenMatch,
+  onOpenPublicProfile,
   scrollToVitrinaNonce = 0,
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
@@ -118,6 +125,9 @@ export function ProfileScreen({
   const [levelLoading, setLevelLoading] = useState(true);
   const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
   const [stats, setStats] = useState<PlayerStats | null>(null);
+  const [frequentClubs, setFrequentClubs] = useState<FrequentClub[]>([]);
+  const [frequentPartners, setFrequentPartners] = useState<FrequentPartner[]>([]);
+  const [socialLoading, setSocialLoading] = useState(true);
   // Personalización (título/marco/insignias equipados) + catálogos para resolverlos
   const [customization, setCustomization] = useState<ProfileCustomization | null>(null);
   const [framesCatalog, setFramesCatalog] = useState<CatalogItem[]>([]);
@@ -222,6 +232,26 @@ export function ProfileScreen({
       cancelled = true;
     };
   }, [session?.access_token, profile?.id]);
+
+  // Clubs y compañeros frecuentes (depende del id del jugador)
+  useEffect(() => {
+    const playerId = profile?.id;
+    if (!playerId) return;
+    let cancelled = false;
+    setSocialLoading(true);
+    Promise.all([fetchFrequentClubs(playerId), fetchFrequentPartners(playerId)])
+      .then(([c, p]) => {
+        if (cancelled) return;
+        setFrequentClubs(c);
+        setFrequentPartners(p);
+      })
+      .finally(() => {
+        if (!cancelled) setSocialLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
 
   // Personalización equipada + catálogos para el hero. En paralelo con el perfil
   // (endpoints /me, solo necesitan token) para que todo aparezca a la vez.
@@ -638,6 +668,26 @@ export function ProfileScreen({
             <TrophyShowcaseSection />
           </View>
         ) : null}
+
+        {/* Preferencias de jugador */}
+        {profile ? (
+          <PlayerPreferencesCard
+            dominantHand={profile.preferences.dominantHand}
+            preferredSide={profile.preferences.preferredSide}
+            preferredPlayStyle={profile.preferences.preferredPlayStyle}
+          />
+        ) : null}
+
+        {/* Personas con las que juegas */}
+        <FrequentPartnersCard
+          title="Con quién juegas"
+          partners={frequentPartners}
+          loading={socialLoading}
+          onOpenPlayer={onOpenPublicProfile}
+        />
+
+        {/* Clubs donde sueles jugar (al final) */}
+        <FrequentClubsCard title="Clubs donde sueles jugar" clubs={frequentClubs} loading={socialLoading} />
 
       </ScrollView>
 

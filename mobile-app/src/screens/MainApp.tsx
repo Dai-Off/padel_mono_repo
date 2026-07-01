@@ -865,6 +865,12 @@ export function MainApp() {
             setMatchOpenedFromPublicProfile(true);
             void openMatchById(matchId);
           }}
+          onOpenPlayer={(pid) => {
+            setAffinityPublicProfileId(null);
+            setMatchOpenedFromPublicProfile(false);
+            setSelectedPublicPlayerId(pid);
+            setShowPublicProfile(true);
+          }}
         />
       );
     }
@@ -1070,6 +1076,10 @@ export function MainApp() {
             onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
             onOnboardingCompleted={handleOnboardingCompleted}
             onOpenMatch={openMatchById}
+            onOpenPublicProfile={(pid) => {
+              setSelectedPublicPlayerId(pid);
+              setShowPublicProfile(true);
+            }}
             scrollToVitrinaNonce={vitrinaScrollNonce}
           />
         );

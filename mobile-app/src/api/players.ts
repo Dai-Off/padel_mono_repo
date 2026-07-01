@@ -33,6 +33,7 @@ type MeResponse = {
     preferred_play_style?: string | null;
     preferred_match_duration_min?: number | null;
     preferred_partner_level?: string | null;
+    dominant_hand?: string | null;
     favorite_clubs?: string[] | null;
     notif_new_matches?: boolean | null;
     notif_tournament_reminders?: boolean | null;
@@ -60,6 +61,8 @@ export type PlayerPreferences = {
   preferredPlayStyle: "competitive" | "social" | "learning" | "balanced";
   preferredMatchDurationMin: 60 | 90 | 120;
   preferredPartnerLevel: "similar" | "higher" | "lower" | "any";
+  /** Mano preferida/hábil. null = sin definir. */
+  dominantHand: "left" | "right" | null;
   favoriteClubs: string[];
   notifNewMatches: boolean;
   notifTournamentReminders: boolean;
@@ -174,6 +177,9 @@ export async function fetchMyPlayerProfile(
       .toLowerCase();
     const prefSide: PlayerPreferences["preferredSide"] =
       prefSideRaw === "right" || prefSideRaw === "left" ? prefSideRaw : "both";
+    const handRaw = String(json.player.dominant_hand ?? "").trim().toLowerCase();
+    const dominantHand: PlayerPreferences["dominantHand"] =
+      handRaw === "left" || handRaw === "right" ? handRaw : null;
     const prefStyleRaw = String(json.player.preferred_play_style ?? "balanced")
       .trim()
       .toLowerCase();
@@ -244,6 +250,7 @@ export async function fetchMyPlayerProfile(
         preferredPlayStyle: prefStyle,
         preferredMatchDurationMin: prefDuration,
         preferredPartnerLevel: prefLevel,
+        dominantHand,
         favoriteClubs: parseArray(json.player.favorite_clubs).slice(0, 20),
         notifNewMatches: json.player.notif_new_matches !== false,
         notifTournamentReminders:
@@ -359,6 +366,7 @@ export async function updateMyPlayerPreferences(
         preferred_play_style: preferences.preferredPlayStyle,
         preferred_match_duration_min: preferences.preferredMatchDurationMin,
         preferred_partner_level: preferences.preferredPartnerLevel,
+        dominant_hand: preferences.dominantHand,
         favorite_clubs: preferences.favoriteClubs,
         notif_new_matches: preferences.notifNewMatches,
         notif_tournament_reminders: preferences.notifTournamentReminders,
@@ -476,6 +484,9 @@ export type PublicPlayerProfile = {
   mmDraws: number;
   liga: string | null;
   mmPeakLiga: string | null;
+  preferredSide: "right" | "left" | "both";
+  preferredPlayStyle: "competitive" | "social" | "learning" | "balanced";
+  dominantHand: "left" | "right" | null;
   coachAssessment: any | null; // Reuse types if needed, but any for simplicity here
   recentMatches: any[];
 };
@@ -513,6 +524,12 @@ export async function fetchPublicPlayerProfile(
       mmDraws: p.mm_draws ?? 0,
       liga: p.liga ?? null,
       mmPeakLiga: p.mm_peak_liga ?? null,
+      preferredSide: p.preferred_side === "right" || p.preferred_side === "left" ? p.preferred_side : "both",
+      preferredPlayStyle:
+        p.preferred_play_style === "competitive" || p.preferred_play_style === "social" || p.preferred_play_style === "learning"
+          ? p.preferred_play_style
+          : "balanced",
+      dominantHand: p.dominant_hand === "left" || p.dominant_hand === "right" ? p.dominant_hand : null,
       coachAssessment: p.coach_assessment ?? null,
       recentMatches: p.recent_matches ?? [],
     };
