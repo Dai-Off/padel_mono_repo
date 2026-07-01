@@ -5,6 +5,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../i18n';
 import { fetchPublicPlayerProfile, type PublicPlayerProfile } from '../api/players';
 import {
   fetchPlayerLevelHistory,
@@ -43,6 +44,7 @@ function getInitials(firstName?: string | null, lastName?: string | null): strin
 export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch, onOpenPlayer }: PublicProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const { t } = useTranslation();
   const token = session?.access_token ?? null;
 
   const [profile, setProfile] = useState<PublicPlayerProfile | null>(null);
@@ -130,16 +132,16 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
   if (!profile) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.errorText}>No se pudo cargar el perfil.</Text>
+        <Text style={styles.errorText}>{t('profile.publicProfileLoadFail')}</Text>
         <Pressable onPress={onBack} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>Volver</Text>
+          <Text style={styles.backBtnText}>{t('profile.back')}</Text>
         </Pressable>
       </View>
     );
   }
 
   const initials = getInitials(profile.firstName, profile.lastName);
-  const displayName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || 'Jugador';
+  const displayName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || t('profile.playerFallback');
   const usernameLine = profile.username ? `@${profile.username}` : null;
   const pinnedBadges = customization?.pinnedBadges ?? [];
 
@@ -149,11 +151,11 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
       <View style={styles.header}>
         <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.headerContent}>
-          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel="Volver">
+          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel={t('profile.back')}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1}>
-            Perfil de {profile.firstName}
+            {t('profile.publicProfileHeaderTitle', { name: profile.firstName ?? '' })}
           </Text>
         </View>
       </View>
@@ -214,28 +216,28 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{profile.matchesPlayedTotal ?? 0}</Text>
-                <Text style={styles.statLabel}>PARTIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>SEGUIDORES</Text>
+                <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>SEGUIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
               </View>
             </View>
 
             {/* Acciones: Seguir (placeholder) + Mensaje (chat) */}
             <View style={styles.actionButtonsRow}>
               <Pressable style={styles.followBtn} onPress={() => {}}>
-                <Text style={styles.followText}>Seguir</Text>
+                <Text style={styles.followText}>{t('profile.followBtn')}</Text>
               </Pressable>
               <Pressable style={styles.messageBtn} onPress={() => onChatPress?.(profile.id, displayName)}>
                 <Ionicons name="chatbubble-outline" size={14} color="#F18F34" />
-                <Text style={styles.messageText}>Mensaje</Text>
+                <Text style={styles.messageText}>{t('profile.messageBtn')}</Text>
               </Pressable>
             </View>
           </View>
@@ -266,7 +268,7 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
 
         {/* Personas con las que juega */}
         <FrequentPartnersCard
-          title={`Con quién juega ${profile.firstName ?? ''}`.trim()}
+          title={t('profile.publicPartnersTitle', { name: profile.firstName ?? '' }).trim()}
           partners={frequentPartners}
           loading={socialLoading}
           onOpenPlayer={onOpenPlayer}
@@ -274,7 +276,7 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
 
         {/* Clubs donde juega (al final) */}
         <FrequentClubsCard
-          title={`Clubs donde juega ${profile.firstName ?? ''}`.trim()}
+          title={t('profile.publicClubsTitle', { name: profile.firstName ?? '' }).trim()}
           clubs={frequentClubs}
           loading={socialLoading}
         />

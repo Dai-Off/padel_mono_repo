@@ -15,6 +15,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../i18n';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { formatPlayerLabel } from '../lib/username';
 import { useHomeData } from '../contexts/HomeDataContext';
@@ -116,6 +117,7 @@ export function ProfileScreen({
     }
   }, []);
   const { session } = useAuth();
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -172,23 +174,23 @@ export function ProfileScreen({
         await new Promise((r) => setTimeout(r, 1500));
         return loadProfile(token, attempt + 1);
       }
-      setProfileError('No se pudo cargar tu perfil. Comprueba la conexión e inténtalo de nuevo.');
+      setProfileError(t('profile.profileLoadError'));
     } catch {
       if (attempt < 2) {
         await new Promise((r) => setTimeout(r, 1500));
         return loadProfile(token, attempt + 1);
       }
-      setProfileError('Error al cargar el perfil.');
+      setProfileError(t('profile.profileLoadFail'));
     } finally {
       setProfileLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const token = session?.access_token;
     if (!token) {
       setProfileLoading(false);
-      setProfileError('Inicia sesión para ver tu perfil.');
+      setProfileError(t('profile.loginToSeeProfile'));
       return;
     }
     void loadProfile(token);
@@ -318,8 +320,8 @@ export function ProfileScreen({
     ? `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() ||
       formatPlayerLabel(profile)
     : profileLoading
-      ? 'Cargando...'
-      : '—';
+      ? t('profile.loadingLabel')
+      : t('profile.publicProfileFallback');
   const usernameLine = profile?.username ? `@${profile.username}` : null;
 
   const needsLevelOnboarding = profile != null && profile.onboardingCompleted === false;
@@ -340,7 +342,7 @@ export function ProfileScreen({
 
   const applyCoverImage = async (image: PickedImage) => {
     if (!session?.user?.id || !session.access_token || !session.refresh_token) {
-      Alert.alert('Sesión', 'Inicia sesión para cambiar la portada.');
+      Alert.alert(t('profile.sessionAlertTitle'), t('profile.coverLoginRequired'));
       return;
     }
     setCoverUrl(image.uri);
@@ -357,7 +359,7 @@ export function ProfileScreen({
       void refreshGlobalProfile({ force: true });
     } catch (err) {
       setCoverUrl(profile?.coverUrl ?? null);
-      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo subir la portada');
+      Alert.alert(t('profile.errorAlertTitle'), err instanceof Error ? err.message : t('profile.coverUploadFail'));
     } finally {
       setUploadingCover(false);
     }
@@ -367,7 +369,7 @@ export function ProfileScreen({
     if (source === 'library') {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería.');
+        Alert.alert(t('profile.permissionDeniedTitle'), t('profile.galleryPermissionBody'));
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -386,7 +388,7 @@ export function ProfileScreen({
     }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso denegado', 'Necesitamos acceso a la cámara.');
+      Alert.alert(t('profile.permissionDeniedTitle'), t('profile.cameraPermissionBody'));
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -405,10 +407,10 @@ export function ProfileScreen({
 
   const handleChangeCover = () => {
     if (uploadingCover) return;
-    Alert.alert('Foto de portada', 'Elige una opción', [
-      { text: 'Galería', onPress: () => void pickCoverImage('library') },
-      { text: 'Cámara', onPress: () => void pickCoverImage('camera') },
-      { text: 'Cancelar', style: 'cancel' },
+    Alert.alert(t('profile.coverPhotoAlert'), t('profile.coverPhotoAlertChoose'), [
+      { text: t('profile.galleryBtn'), onPress: () => void pickCoverImage('library') },
+      { text: t('profile.cameraBtn'), onPress: () => void pickCoverImage('camera') },
+      { text: t('profile.cancelBtn'), style: 'cancel' },
     ]);
   };
 
@@ -430,11 +432,11 @@ export function ProfileScreen({
             style={[styles.editBtn, { marginTop: 20, paddingHorizontal: 24 }]}
             onPress={() => void loadProfile(session.access_token!)}
           >
-            <Text style={styles.editBtnText}>Reintentar</Text>
+            <Text style={styles.editBtnText}>{t('profile.retryBtn')}</Text>
           </Pressable>
         ) : null}
         <Pressable style={{ marginTop: 16 }} onPress={onBack}>
-          <Text style={{ color: '#9CA3AF' }}>Volver</Text>
+          <Text style={{ color: '#9CA3AF' }}>{t('profile.back')}</Text>
         </Pressable>
       </View>
     );
@@ -446,10 +448,10 @@ export function ProfileScreen({
       <View style={styles.header}>
         <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.headerContent}>
-          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel="Volver">
+          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel={t('profile.back')}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
-          <Text style={styles.headerTitle}>Perfil</Text>
+          <Text style={styles.headerTitle}>{t('profile.title')}</Text>
           <View style={styles.headerActions}>
             <Pressable style={styles.headerIconBtn}>
               <Ionicons name="chatbubble-outline" size={20} color="#fff" />
@@ -498,7 +500,7 @@ export function ProfileScreen({
             style={styles.cameraBtn}
             onPress={handleChangeCover}
             disabled={uploadingCover}
-            accessibilityLabel="Cambiar foto de portada"
+            accessibilityLabel={t('profile.coverChangeA11y')}
           >
             <Ionicons name="camera-outline" size={14} color="rgba(255,255,255,0.8)" />
           </Pressable>
@@ -554,28 +556,28 @@ export function ProfileScreen({
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{profile?.matchesPlayedTotal ?? 0}</Text>
-                <Text style={styles.statLabel}>PARTIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>SEGUIDORES</Text>
+                <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>SEGUIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
               </View>
             </View>
 
             {/* Action Buttons */}
             <View style={styles.actionButtonsRow}>
               <Pressable style={styles.editBtn} onPress={() => onEditProfilePress?.()}>
-                <Text style={styles.editBtnText}>Editar perfil</Text>
+                <Text style={styles.editBtnText}>{t('profile.editProfileBtn')}</Text>
               </Pressable>
               <Pressable style={styles.personalizeBtn} onPress={() => setShowCustomize(true)}>
                 <Ionicons name="sparkles-outline" size={14} color="#F18F34" />
-                <Text style={styles.personalizeBtnText}>Personalizar</Text>
+                <Text style={styles.personalizeBtnText}>{t('profile.personalizeBtn')}</Text>
               </Pressable>
             </View>
           </View>
@@ -596,16 +598,16 @@ export function ProfileScreen({
                   </LinearGradient>
                 </View>
                 <Text style={styles.coachTitle}>
-                  {needsLevelOnboarding ? 'Nivelación inicial' : 'Coach Virtual IA'}
+                  {needsLevelOnboarding ? t('profile.onboardingInitialTitle') : t('profile.coachVirtualIa')}
                 </Text>
                 <Text style={styles.coachDesc}>
                   {needsLevelOnboarding
-                    ? 'Responde al cuestionario oficial para calcular tu nivel inicial (0–7) y desbloquear matchmaking y el resto de funciones.'
-                    : 'Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA'}
+                    ? t('profile.onboardingInitialDesc')
+                    : t('profile.coachMeasureDesc')}
                 </Text>
                 <Pressable style={styles.coachCtaBtn} onPress={() => setShowOnboardingModal(true)}>
                   <Ionicons name="locate-outline" size={16} color="#fff" />
-                  <Text style={styles.coachCtaText}>Comenzar nivelación</Text>
+                  <Text style={styles.coachCtaText}>{t('profile.onboardingStartBtn')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -619,7 +621,7 @@ export function ProfileScreen({
               <View style={styles.coachContent}>
                 <Ionicons name="cloud-offline-outline" size={28} color="#6B7280" />
                 <Text style={[styles.coachDesc, { marginTop: 12 }]}>
-                  No se pudo cargar el análisis del Coach IA.
+                  {t('profile.coachLoadFail')}
                 </Text>
                 <Pressable
                   style={styles.coachCtaBtn}
@@ -633,7 +635,7 @@ export function ProfileScreen({
                   }}
                 >
                   <Ionicons name="refresh-outline" size={16} color="#fff" />
-                  <Text style={styles.coachCtaText}>Reintentar</Text>
+                  <Text style={styles.coachCtaText}>{t('profile.retryBtn')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -680,14 +682,14 @@ export function ProfileScreen({
 
         {/* Personas con las que juegas */}
         <FrequentPartnersCard
-          title="Con quién juegas"
+          title={t('profile.partnersTitleOwn')}
           partners={frequentPartners}
           loading={socialLoading}
           onOpenPlayer={onOpenPublicProfile}
         />
 
         {/* Clubs donde sueles jugar (al final) */}
-        <FrequentClubsCard title="Clubs donde sueles jugar" clubs={frequentClubs} loading={socialLoading} />
+        <FrequentClubsCard title={t('profile.clubsTitleOwn')} clubs={frequentClubs} loading={socialLoading} />
 
       </ScrollView>
 
