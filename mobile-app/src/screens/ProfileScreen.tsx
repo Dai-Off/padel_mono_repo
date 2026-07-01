@@ -43,7 +43,7 @@ import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard
 import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { CoachSkeleton } from '../components/profile/CoachSkeleton';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
-import { fetchMyCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
+import { fetchMyCoachAssessment, fetchMyCoachStats, type CoachAssessment, type CoachStats } from '../api/coachAssessment';
 import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
 import {
   fetchLevelHistory,
@@ -150,6 +150,9 @@ export function ProfileScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenOnboarding]);
   const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
+  // Stats del Coach (A1): se piden aparte del radar y se fusionan al render, para
+  // que el radar pinte de inmediato y las cifras rellenen cuando lleguen.
+  const [coachStats, setCoachStats] = useState<CoachStats | null>(null);
   // Distingue "cargando" de "cargado pero vacío" para no quedarse en el spinner.
   const [assessmentLoaded, setAssessmentLoaded] = useState(false);
   const [peerInsight, setPeerInsight] = useState<PeerFeedbackInsight | null>(null);
@@ -186,6 +189,19 @@ export function ProfileScreen({
     }
   }, [t]);
 
+  // Carga el Coach: radar (rápido, ruta crítica) y stats por separado (A1). El
+  // radar marca assessmentLoaded; las stats rellenan aparte cuando llegan.
+  const loadCoach = React.useCallback((token: string) => {
+    setAssessmentLoaded(false);
+    fetchMyCoachAssessment(token)
+      .then(setAssessment)
+      .catch(() => {})
+      .finally(() => setAssessmentLoaded(true));
+    fetchMyCoachStats(token)
+      .then(setCoachStats)
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     const token = session?.access_token;
     if (!token) {
@@ -194,11 +210,8 @@ export function ProfileScreen({
       return;
     }
     void loadProfile(token);
-    fetchMyCoachAssessment(token)
-      .then(setAssessment)
-      .catch(() => {})
-      .finally(() => setAssessmentLoaded(true));
-  }, [session?.access_token, loadProfile]);
+    loadCoach(token);
+  }, [session?.access_token, loadProfile, loadCoach]);
 
   // Evolución del nivel (refetch al cambiar el filtro 5/10/Todos)
   useEffect(() => {
@@ -291,6 +304,13 @@ export function ProfileScreen({
       .filter((b): b is Achievement => b != null);
   }, [customization?.pinnedBadgeIds, heroBadges]);
 
+  // Radar + stats fusionados (A1): el Coach recibe el radar en cuanto llega y las
+  // cifras se completan cuando resuelven las stats, sin bloquear el pintado.
+  const coachAssessment = useMemo<CoachAssessment | null>(
+    () => (assessment ? { ...assessment, stats: coachStats ?? assessment.stats } : null),
+    [assessment, coachStats],
+  );
+
   // Scroll a la Vitrina cuando el modal de desbloqueo pide "Ir a mi vitrina".
   // Arma el objetivo y reintenta; el onLayout de la Vitrina y el efecto de carga
   // (de abajo) lo re-ajustan a medida que el contenido de arriba se asienta.
@@ -329,11 +349,7 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    setAssessmentLoaded(false);
-    fetchMyCoachAssessment(session.access_token)
-      .then(setAssessment)
-      .catch(() => {})
-      .finally(() => setAssessmentLoaded(true));
+    loadCoach(session.access_token);
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).
@@ -612,8 +628,8 @@ export function ProfileScreen({
               </View>
             </View>
           </View>
-        ) : assessment ? (
-          <AICoachSection assessment={assessment} peerInsight={peerInsight} />
+        ) : coachAssessment ? (
+          <AICoachSection assessment={coachAssessment} peerInsight={peerInsight} />
         ) : assessmentLoaded ? (
           <View style={styles.coachCardContainer}>
             <View style={styles.coachCard}>
@@ -627,11 +643,7 @@ export function ProfileScreen({
                   style={styles.coachCtaBtn}
                   onPress={() => {
                     if (!session?.access_token) return;
-                    setAssessmentLoaded(false);
-                    fetchMyCoachAssessment(session.access_token)
-                      .then(setAssessment)
-                      .catch(() => {})
-                      .finally(() => setAssessmentLoaded(true));
+                    loadCoach(session.access_token);
                   }}
                 >
                   <Ionicons name="refresh-outline" size={16} color="#fff" />

@@ -16,6 +16,7 @@ import {
 } from './learningStreaks';
 import { addSeasonPassSp } from '../services/seasonPassService';
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
+import { markCoachAssessmentStale } from '../services/coachAssessmentService';
 
 const router = Router();
 
@@ -588,6 +589,10 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
     // 1. Write the per-question log
     const { error: logErr } = await supabase.from('learning_question_log').insert(logRows);
     if (logErr) return res.status(500).json({ ok: false, error: logErr.message });
+
+    // El rendimiento por área en learning cambió -> el radar del Coach queda
+    // obsoleto (A2). Fire-and-forget: no bloquea la respuesta del submit.
+    void markCoachAssessmentStale([player.id]);
 
     // 2. Update individual streak (post-update value drives the multiplier)
     const streak = await updateIndividualStreak(player.id, tz);

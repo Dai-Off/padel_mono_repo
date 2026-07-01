@@ -4,6 +4,7 @@ import { syncPlayerVector } from '../lib/mailer';
 import { computeMatchmakingLeagueUpdates, type MmLeagueRow } from './matchmakingLeagueEconomy';
 import { getActiveMatchmakingSeasonId } from './matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from './matchmakingLeagueConfigService';
+import { markCoachAssessmentStale } from './coachAssessmentService';
 
 export const COMEBACK_BONUS = 1.1;
 export const WINDOW_SIZE = 20;
@@ -377,6 +378,10 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
   });
 
   if (rpcErr) throw new Error(rpcErr.message);
+
+  // El ELO cambió -> el radar del Coach de estos jugadores queda obsoleto (A2).
+  // Best-effort: markCoachAssessmentStale no lanza; se recomputará on-read.
+  void markCoachAssessmentStale(Object.keys(playerUpdates));
 
   for (const pid of Object.keys(playerUpdates)) {
     syncPlayerVector(pid).catch((e) => console.error('[levelingPipeline] sync-player-vector failed:', pid, e));
