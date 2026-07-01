@@ -36,7 +36,7 @@ export const FrequentPartnersCard: React.FC<Props> = ({ title, partners, loading
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
           {partners.map((p) => (
             <Pressable key={p.id} style={styles.cardItem} onPress={() => onOpenPlayer?.(p.id)}>
-              <AvatarWithFrame avatarUrl={p.avatarUrl} initials={initialsOf(p.name)} size={56} frame={null} />
+              <AvatarWithFrame avatarUrl={p.avatarUrl} initials={initialsOf(p.name)} size={56} frame={p.frame ?? null} animate={false} />
               <Text style={styles.name} numberOfLines={1}>
                 {p.name}
               </Text>

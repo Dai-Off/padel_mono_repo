@@ -1,4 +1,5 @@
 import { API_URL } from "../config";
+import type { FrameAttrs } from "../components/profile/AvatarWithFrame";
 
 type PlayersResponse = {
   ok?: boolean;
@@ -50,6 +51,8 @@ type MeResponse = {
     birth_date?: string | null;
     profile_description?: string | null;
     play_location?: string | null;
+    /** Marco equipado resuelto (getEquippedFrames). */
+    frame?: FrameAttrs | null;
   };
   error?: string;
 };
@@ -105,6 +108,8 @@ export type MyPlayerProfile = {
   birthDate: string | null;
   profileDescription: string | null;
   playLocation: string | null;
+  /** Marco equipado del propio usuario (para pintar el pack, p. ej. en el sidebar). */
+  frame: FrameAttrs | null;
 };
 
 export type PlayerGender = MyPlayerProfile['gender'];
@@ -274,6 +279,7 @@ export async function fetchMyPlayerProfile(
         json.player.play_location != null && String(json.player.play_location).trim() !== ''
           ? String(json.player.play_location)
           : null,
+      frame: json.player.frame ?? null,
     };
   } catch (err) {
     console.error("[fetchMyPlayerProfile]", err);

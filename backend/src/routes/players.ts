@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
+import { getEquippedFrames } from '../services/equippedFramesService';
 import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
 import { computeFreshAssessment } from '../services/coachAssessmentService';
@@ -506,18 +507,21 @@ router.get('/me', async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: 'No existe jugador asociado a esta cuenta' });
     }
     const pid = String((player as Row).id);
-    const [wl, matchCountRes] = await Promise.all([
+    const [wl, matchCountRes, framesMap] = await Promise.all([
       fetchPlayerMatchmakingWl(supabase, pid),
       supabase
         .from('match_players')
         .select('match_id', { count: 'exact', head: true })
         .eq('player_id', pid),
+      getEquippedFrames(supabase, [pid]),
     ]);
     const matchesPlayedLive = matchCountRes.count ?? null;
-    const playerWithStats = withPublicPlayerAndMm(player as Row, wl) as Row;
+    const playerWithStats = withPublicPlayerAndMm(player as Row, wl) as Row & { frame?: unknown };
     if (matchesPlayedLive !== null) {
       playerWithStats.matches_played_total = matchesPlayedLive;
     }
+    // Marco equipado resuelto (para pintar el pack del propio usuario, p. ej. sidebar).
+    playerWithStats.frame = framesMap.get(pid) ?? null;
     return res.json({ ok: true, player: playerWithStats });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -1748,11 +1752,12 @@ router.get('/:id/frequent-partners', async (req: Request, res: Response) => {
       .in('id', ranked.map(([pid]) => pid));
     type PRow = { id: string; first_name?: string | null; last_name?: string | null; username?: string | null; avatar_url?: string | null };
     const meta = new Map((players ?? []).map((p) => [(p as PRow).id, p as PRow]));
+    const frames = await getEquippedFrames(supabase, ranked.map(([pid]) => pid));
 
     const partners = ranked.map(([pid, count]) => {
       const p = meta.get(pid);
       const name = p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || (p.username ?? 'Jugador') : 'Jugador';
-      return { id: pid, name, avatarUrl: p?.avatar_url ?? null, count };
+      return { id: pid, name, avatarUrl: p?.avatar_url ?? null, count, frame: frames.get(pid) ?? null };
     });
     return res.json({ ok: true, partners });
   } catch (err) {

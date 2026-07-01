@@ -1,4 +1,5 @@
 import { API_URL } from '../config';
+import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 /** Club donde el jugador suele jugar (por frecuencia de partidos). */
 export interface FrequentClub {
@@ -14,6 +15,8 @@ export interface FrequentPartner {
   name: string;
   avatarUrl: string | null;
   count: number;
+  /** Marco equipado del compañero (para pintar el pack). */
+  frame?: FrameAttrs | null;
 }
 
 /** Clubs donde suele jugar un jugador. Público (sin token). */
@@ -46,6 +49,7 @@ export async function fetchFrequentPartners(playerId: string, limit = 8): Promis
       name: p.name ?? 'Jugador',
       avatarUrl: p.avatarUrl ?? null,
       count: Number(p.count ?? 0),
+      frame: p.frame ?? null,
     }));
   } catch {
     return [];
