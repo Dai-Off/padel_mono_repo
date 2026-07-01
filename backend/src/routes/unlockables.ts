@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { evaluateAndGrant, getCompletedCourses } from '../services/unlockablesEngine';
+import { getEquippedFrames } from '../services/equippedFramesService';
 
 const router = Router();
 
@@ -366,34 +367,21 @@ router.get('/:id/public-customization', async (req: Request, res: Response) => {
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
   const row = data as { title_id: string | null; frame_id: string | null; pinned_badge_ids: string[] } | null;
-  const frameId = row?.frame_id && row.frame_id !== 'none' ? row.frame_id : null;
   const pinnedIds = row?.pinned_badge_ids ?? [];
 
-  // Resolver atributos del marco + insignias fijadas desde el catálogo.
-  type CatRow = {
-    id: string;
-    kind: string;
-    title: string;
-    rarity: string;
-    icon: string | null;
-    animation_type: string | null;
-    style: string | null;
-    colors: unknown;
-  };
-  const idsToResolve = [frameId, ...pinnedIds].filter((x): x is string => typeof x === 'string' && x.length > 0);
+  // Marco resuelto vía helper compartido (mismo shape que las listas).
+  const frame = (await getEquippedFrames(supabase, [playerId])).get(playerId) ?? null;
+
+  // Insignias fijadas: resolver aparte desde el catálogo.
+  type CatRow = { id: string; kind: string; title: string; rarity: string; icon: string | null };
   const byId = new Map<string, CatRow>();
-  if (idsToResolve.length) {
+  if (pinnedIds.length) {
     const { data: cat } = await supabase
       .from('unlockables')
-      .select('id, kind, title, rarity, icon, animation_type, style, colors')
-      .in('id', idsToResolve);
+      .select('id, kind, title, rarity, icon')
+      .in('id', pinnedIds);
     for (const c of cat ?? []) byId.set((c as CatRow).id, c as CatRow);
   }
-
-  const f = frameId ? byId.get(frameId) : undefined;
-  const frame = f
-    ? { rarity: f.rarity, style: f.style, animationType: f.animation_type, colors: Array.isArray(f.colors) ? (f.colors as string[]) : null }
-    : null;
 
   const pinnedBadges = pinnedIds
     .map((id) => byId.get(id))

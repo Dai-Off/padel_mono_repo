@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
@@ -190,14 +190,36 @@ export const AvatarWithFrame: React.FC<Props> = ({ initials, avatarUrl, size = 8
     return { opacity: op, transform: [{ scale: sc }] };
   });
 
-  // Tile interior (foto o iniciales) — QUIETO
+  // Tile interior (foto o iniciales) — QUIETO. El gradiente con iniciales queda
+  // SIEMPRE debajo, así que la foto nunca "reemplaza" al fallback; si falla la
+  // carga se reintenta (hasta 2 veces) antes de rendirse y quedarse en iniciales.
   const uri = normalizePlayerAvatarUrl(avatarUrl);
+  const [photoFailed, setPhotoFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  useEffect(() => {
+    setPhotoFailed(false);
+    setLoadAttempt(0);
+  }, [uri]);
   const tile = (
     <View style={[styles.tile, { width: size, height: size, borderRadius: innerR }]}>
       <LinearGradient colors={['#F18F34', '#E95F32']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.tileFill, { borderRadius: innerR }]}>
         <Text style={[styles.initials, { fontSize: Math.round(size * 0.3) }]}>{(initials || '?').slice(0, 2).toUpperCase()}</Text>
       </LinearGradient>
-      {uri ? <Image source={{ uri }} style={[styles.photo, { width: size, height: size, borderRadius: innerR }]} resizeMode="cover" /> : null}
+      {uri && !photoFailed ? (
+        <Image
+          key={`${uri}-${loadAttempt}`}
+          source={{ uri }}
+          style={[styles.photo, { width: size, height: size, borderRadius: innerR }]}
+          resizeMode="cover"
+          onError={() => {
+            if (loadAttempt < 2) {
+              setTimeout(() => setLoadAttempt((n) => n + 1), 1200);
+            } else {
+              setPhotoFailed(true);
+            }
+          }}
+        />
+      ) : null}
     </View>
   );
 

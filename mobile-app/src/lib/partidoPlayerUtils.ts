@@ -387,7 +387,13 @@ export function preservePartidoPlayerLevels(
   return changed ? { ...incoming, players } : incoming;
 }
 
-/** True si la UI de jugadores (avatar, nombre, ELO) no cambiaría visiblemente. */
+/** Clave estable del marco equipado, para comparar sin re-render innecesario. */
+function frameKey(frame: PartidoItem['players'][number]['frame']): string {
+  if (!frame) return '';
+  return [frame.style ?? '', frame.animationType ?? '', frame.rarity ?? '', (frame.colors ?? []).join(',')].join('|');
+}
+
+/** True si la UI de jugadores (avatar, nombre, ELO, marco) no cambiaría visiblemente. */
 export function partidoPlayersDisplayEqual(a: PartidoItem, b: PartidoItem): boolean {
   if (a.players.length !== b.players.length) return false;
   return a.players.every((pa, i) => {
@@ -398,6 +404,7 @@ export function partidoPlayersDisplayEqual(a: PartidoItem, b: PartidoItem): bool
     if ((pa.name ?? '') !== (pb.name ?? '')) return false;
     if (normalizeLevelDisplay(pa.level) !== normalizeLevelDisplay(pb.level)) return false;
     if ((pa.initial ?? '') !== (pb.initial ?? '')) return false;
+    if (frameKey(pa.frame) !== frameKey(pb.frame)) return false;
     const avA = normalizePlayerAvatarUrl(pa.avatar);
     const avB = normalizePlayerAvatarUrl(pb.avatar);
     return avA === avB;
