@@ -9,7 +9,7 @@ import { computeFreshAssessment } from '../services/coachAssessmentService';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
 import { localizeCoachAssessmentText } from '../lib/coachAssessmentLanguage';
-import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
+import { getCachedPeerFeedbackInsight } from '../services/postMatchPeerFeedbackInsightService';
 import { syncPlayerVector } from '../lib/mailer';
 import { pickClubImageSource, resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import {
@@ -1467,7 +1467,9 @@ router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response
     req.query.lang as string | string[] | undefined,
     req.headers['accept-language'] as string | undefined
   );
-  const insight = await getLastPeerFeedbackInsightForPlayer(supabase, id, { locale });
+  // Sirve la cache (sin OpenAI en la ruta crítica); la genera al vuelo solo la
+  // primera vez que se ve a este jugador en este idioma.
+  const insight = await getCachedPeerFeedbackInsight(supabase, id, { locale });
   return res.json(insight);
 });
 

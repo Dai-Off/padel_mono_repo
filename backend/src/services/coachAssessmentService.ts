@@ -416,20 +416,31 @@ async function computeDynamicSkills(
  * usuarios sembrados a mano sin pasar por el onboarding).
  *
  * `existingAnswers` permite reutilizar las answers ya leídas por
- * `getRadarAssessment` y evitar un segundo SELECT en el camino de recompute.
+ * `getRadarAssessment` y evitar un segundo SELECT. Si es `undefined`, se leen de
+ * BD para **preservarlas** (nunca se pisan las respuestas del onboarding).
  */
-export async function recomputeRadarAssessment(playerId: string, existingAnswers: unknown = []) {
+export async function recomputeRadarAssessment(playerId: string, existingAnswers?: unknown) {
   const supabase = getSupabaseServiceRoleClient();
 
   const skills = await computeDynamicSkills(supabase, playerId);
   const meta = resultMetaFromSkills(skills);
+
+  let answers = existingAnswers;
+  if (answers === undefined) {
+    const { data: prev } = await supabase
+      .from('coach_assessments')
+      .select('answers')
+      .eq('player_id', playerId)
+      .maybeSingle();
+    answers = (prev as { answers?: unknown } | null)?.answers ?? [];
+  }
 
   const { data, error } = await supabase
     .from('coach_assessments')
     .upsert(
       {
         player_id: playerId,
-        answers: existingAnswers,
+        answers,
         level_number: meta.level_number,
         level_name: meta.level_name,
         skills,
@@ -481,24 +492,21 @@ export async function getCoachAssessmentStats(playerId: string) {
 }
 
 /**
- * A2: marca el radar de estos jugadores como "a recomputar". Lo llaman los
- * eventos que cambian las señales del radar (cierre de partido -> ELO; fin de
- * lección -> shape por área). Best-effort: es invalidación de cache, así que
- * nunca lanza (no debe romper el pipeline de nivelación ni el submit de lección).
+ * A2 (write-through): recalcula y persiste el radar de estos jugadores en el
+ * momento del evento que cambia sus señales (cierre de partido -> ELO; fin de
+ * lección -> shape por área). Así **toda** lectura del perfil es 1 query (nunca
+ * paga recompute on-read). Best-effort: nunca lanza (no debe romper el pipeline
+ * de nivelación ni el submit de lección). Se ejecuta fire-and-forget.
  */
-export async function markCoachAssessmentStale(playerIds: string[]): Promise<void> {
+export async function recomputeRadarForPlayers(playerIds: string[]): Promise<void> {
   const ids = [...new Set(playerIds.filter((id) => typeof id === 'string' && id.length > 0))];
-  if (ids.length === 0) return;
-  try {
-    const supabase = getSupabaseServiceRoleClient();
-    const { error } = await supabase
-      .from('coach_assessments')
-      .update({ needs_recompute: true })
-      .in('player_id', ids);
-    if (error) console.error('[markCoachAssessmentStale]', error.message);
-  } catch (e) {
-    console.error('[markCoachAssessmentStale]', e instanceof Error ? e.message : e);
-  }
+  await Promise.all(
+    ids.map((id) =>
+      recomputeRadarAssessment(id).catch((e) =>
+        console.error('[recomputeRadarForPlayers]', id, e instanceof Error ? e.message : e),
+      ),
+    ),
+  );
 }
 
 /**
