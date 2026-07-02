@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
-import { getCompletedCourses } from '../services/unlockablesEngine';
 import { getEquippedFrames } from '../services/equippedFramesService';
 import {
   getPlayerAchievements,
@@ -60,12 +59,14 @@ router.get('/:id/public-achievements', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
   const playerId = req.params.id;
   try {
+    // Lectura pura: trofeos/insignias/cursos públicos ya otorgados (cursos
+    // materializados como unlockables kind='course', no derivados on-read).
     const { data: owned, error: e1 } = await supabase
       .from('player_unlockables')
       .select('unlocked_at, is_public, progress, unlockables!inner(id, kind, title, description, rarity, icon, sport)')
       .eq('player_id', playerId)
       .eq('is_public', true)
-      .in('unlockables.kind', ['trophy', 'badge'])
+      .in('unlockables.kind', ['trophy', 'badge', 'course'])
       .order('unlocked_at', { ascending: false });
     if (e1) return res.status(500).json({ ok: false, error: e1.message });
 
@@ -89,22 +90,7 @@ router.get('/:id/public-achievements', async (req: Request, res: Response) => {
       })
       .filter(Boolean);
 
-    // Cursos completados (derivados de learning): públicos por defecto.
-    const courses = await getCompletedCourses(supabase, playerId);
-    const courseAchievements = courses.map((c) => ({
-      id: `course_${c.courseId}`,
-      type: 'course' as const,
-      title: c.title,
-      description: c.description ?? '',
-      icon: 'book-outline',
-      rarity: 'common' as const,
-      sport: null,
-      date: c.completedAt,
-      isPublic: true,
-      progress: undefined,
-    }));
-
-    return res.json({ ok: true, achievements: [...achievements, ...courseAchievements] });
+    return res.json({ ok: true, achievements });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
   }

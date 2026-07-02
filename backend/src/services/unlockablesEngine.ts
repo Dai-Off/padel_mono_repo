@@ -207,6 +207,38 @@ export async function evaluateAndGrant(supabase: Supa, playerId: string): Promis
 }
 
 /**
+ * Materializa (upsert) el unlockable de un curso a partir de `learning_courses`.
+ * Idempotente. Se llama al COMPLETAR el curso (crea el catálogo de cursos nuevos y
+ * mantiene el título sincronizado); los cursos existentes se siembran por migración.
+ * Best-effort: no lanza.
+ */
+export async function syncCourseUnlockable(supabase: Supa, courseId: string): Promise<void> {
+  const { data: course } = await supabase
+    .from('learning_courses')
+    .select('id, title, description, status')
+    .eq('id', courseId)
+    .maybeSingle();
+  if (!course) return;
+  const c = course as { id: string; title: string; description: string | null; status: string };
+  const { error } = await supabase.from('unlockables').upsert(
+    {
+      id: `course_${c.id}`,
+      kind: 'course',
+      title: c.title,
+      description: c.description,
+      rarity: 'common',
+      icon: 'book-outline',
+      unlock_type: 'course',
+      unlock_value: c.id,
+      sort_order: 1000,
+      is_active: c.status === 'active',
+    },
+    { onConflict: 'id' },
+  );
+  if (error) console.error('[syncCourseUnlockable]', error.message);
+}
+
+/**
  * Otorga por evento a varios jugadores a la vez (p.ej. los 4 de un partido).
  * Best-effort: nunca lanza (no debe romper el pipeline/evento). Fire-and-forget.
  */
