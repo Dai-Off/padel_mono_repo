@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Calendar, Menu, ArrowLeft, X, Globe, Wallet, Gift, Plus, Loader2, MoreVertical, Trash2, Settings, Lock, LockOpen } from 'lucide-react';
+import { Calendar, Menu, ArrowLeft, X, Globe, Wallet, Gift, Plus, Loader2, MoreVertical, Trash2, Settings, Lock, LockOpen, CheckSquare } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
 import { PageSpinner } from '../../components/Layout/PageSpinner';
 import clsx from 'clsx';
@@ -28,6 +28,14 @@ import { TimeAxis } from './components/TimeAxis';
 import { GridBackground } from './components/GridBackground';
 import { CourtColumn } from './components/CourtColumn';
 import { MaintenanceBlockModal } from './components/MaintenanceBlockModal';
+import { BulkSlotMaintenanceModal } from './components/BulkSlotMaintenanceModal';
+import { BulkUnblockMaintenanceModal } from './components/BulkUnblockMaintenanceModal';
+import { GridSelectActionBar } from './components/GridSelectActionBar';
+import { GridBulkVoidModal } from './components/GridBulkVoidModal';
+import { isReservationCheckboxSelectable } from './utils/gridSelectUtils';
+import { GridMarqueeLayer, type MarqueeAction } from './components/GridMarqueeLayer';
+import type { GridSlot } from './utils/gridMarqueeSelection';
+import { collectMaintenanceBookingsForSlots, isCourtInFullDayMaintenance, isFullDayMaintenanceReservation } from './utils/gridMarqueeSelection';
 import { ReservationCard } from './components/ReservationCard';
 import { ReservationModal } from './components/ReservationModal';
 import { SchoolCourseModal } from './components/SchoolCourseModal';
@@ -920,6 +928,16 @@ function GrillaViewInner() {
   const [focusedCourtId, setFocusedCourtId] = useState<string | null>(null);
   const [maintenanceBlockTarget, setMaintenanceBlockTarget] = useState<{ courtId: string; courtName: string } | null>(null);
   const [showMaintenanceMenu, setShowMaintenanceMenu] = useState(false);
+  const [selectedSlotKeys, setSelectedSlotKeys] = useState<Set<string>>(new Set());
+  const [selectedSlots, setSelectedSlots] = useState<GridSlot[]>([]);
+  const [bulkMaintenanceOpen, setBulkMaintenanceOpen] = useState(false);
+  const [bulkUnblockOpen, setBulkUnblockOpen] = useState(false);
+  const [gridSelectMode, setGridSelectMode] = useState(false);
+  const [checkedReservationIds, setCheckedReservationIds] = useState<Set<string>>(new Set());
+  const [gridBulkVoidOpen, setGridBulkVoidOpen] = useState(false);
+  const [bulkMode, setBulkMode] = useState<'maintenance' | 'tournament'>('maintenance');
+  const courtsGridRef = useRef<HTMLDivElement | null>(null);
+  const gridShellRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (focusedCourtId && !gridCourts.some((c) => c.id === focusedCourtId)) {
@@ -1039,6 +1057,10 @@ function GrillaViewInner() {
 
   const handleReservationClick = async (res: Reservation) => {
       setHoveredTooltip(null);
+      if (gridSelectMode) {
+          toggleReservationCheck(res);
+          return;
+      }
       if (res.booking_type === 'school_course' || res.id.startsWith('school-slot-')) {
           const raw = res.id.startsWith('school-slot-') ? res.id.replace('school-slot-', '') : '';
           const courseId = raw.split(':')[0];
@@ -1687,6 +1709,7 @@ function resolveManualBookingTotalCents(
   }, [draggingCourt, hoveredCourtId, courts]);
 
   const handleDragStart = (event: DragStartEvent) => {
+    if (gridSelectMode) return;
     const data = event.active.data.current;
     // Court header drag
     if (data?.type === 'court') {
@@ -2235,6 +2258,78 @@ function resolveManualBookingTotalCents(
   const mobileCanvasWidthPx = mobileCourtLayout?.canvasWidthPx;
   const mobileGridOverflows = mobileCourtLayout?.overflowsHorizontally ?? false;
 
+  const handleGridSelectionChange = useCallback((keys: Set<string>, slots: GridSlot[]) => {
+    setSelectedSlotKeys(keys);
+    setSelectedSlots(slots);
+  }, []);
+
+  const clearGridSelection = useCallback(() => {
+    setSelectedSlotKeys(new Set());
+    setSelectedSlots([]);
+  }, []);
+
+  const gridStartMin = gridBounds.openMin;
+  const gridEndMin = gridBounds.closeMin;
+  const marqueeDisabled = Boolean(activeId) || activeView !== 'grid' || isReservationsListView || bulkMaintenanceOpen || bulkUnblockOpen || gridSelectMode;
+
+  const exitGridSelectMode = useCallback(() => {
+    setGridSelectMode(false);
+    setCheckedReservationIds(new Set());
+    setGridBulkVoidOpen(false);
+  }, []);
+
+  const toggleGridSelectMode = useCallback(() => {
+    setGridSelectMode((prev) => {
+      if (prev) {
+        setCheckedReservationIds(new Set());
+      }
+      return !prev;
+    });
+  }, []);
+
+  const toggleReservationCheck = useCallback((res: Reservation) => {
+    if (!isReservationCheckboxSelectable(res)) return;
+    setCheckedReservationIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(res.id)) next.delete(res.id);
+      else next.add(res.id);
+      return next;
+    });
+  }, []);
+
+  const checkedReservations = useMemo(
+    () => reservations.filter((r) => checkedReservationIds.has(r.id)),
+    [reservations, checkedReservationIds],
+  );
+
+  const openSingleCourtDraft = useCallback((bookingType: 'standard' | 'school_individual') => {
+    if (selectedSlots.length === 0) return;
+    const courtId = selectedSlots[0].courtId;
+    const courtName = selectedSlots[0].courtName;
+    const mins = selectedSlots.filter(s => s.courtId === courtId).map(s => s.startMins).sort((a, b) => a - b);
+    if (mins.length === 0) return;
+    const startMins = mins[0];
+    const endMins = mins[mins.length - 1] + 30;
+    const startH = Math.floor(startMins / 60);
+    const startTime = `${(startH >= 24 ? startH - 24 : startH).toString().padStart(2, '0')}:${(startMins % 60).toString().padStart(2, '0')}`;
+    const newId = `new-${Date.now()}`;
+    setReservations(prev => [...prev, {
+      id: newId, courtId, courtName,
+      startTime, durationMinutes: endMins - startMins,
+      playerName: '', status: 'available', booking_type: bookingType,
+    }]);
+    setSelectedModalReservationId(newId);
+    clearGridSelection();
+  }, [selectedSlots, clearGridSelection]);
+
+  const handleMarqueeAction = useCallback((action: MarqueeAction) => {
+    if (action === 'unblock_maintenance') { setBulkUnblockOpen(true); return; }
+    if (action === 'maintenance') { setBulkMode('maintenance'); setBulkMaintenanceOpen(true); return; }
+    if (action === 'tournament') { setBulkMode('tournament'); setBulkMaintenanceOpen(true); return; }
+    if (action === 'match') { openSingleCourtDraft('standard'); return; }
+    if (action === 'class') { openSingleCourtDraft('school_individual'); return; }
+  }, [openSingleCourtDraft]);
+
   const isFirstCourt = focusedCourtId === gridCourts[0]?.id;
   const isLastCourt = focusedCourtId === gridCourts[gridCourts.length - 1]?.id;
 
@@ -2668,6 +2763,20 @@ function resolveManualBookingTotalCents(
                         );
                       })()}
 
+                      <span className="text-gray-300 select-none">|</span>
+                      <button
+                        onClick={toggleGridSelectMode}
+                        className={clsx(
+                          'flex items-center gap-1 px-2.5 py-0.5 rounded border text-[10px] font-bold transition-all whitespace-nowrap shrink-0',
+                          gridSelectMode
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'border-emerald-600 bg-white text-emerald-600 hover:bg-emerald-600 hover:text-white',
+                        )}
+                      >
+                        <CheckSquare className="w-3 h-3" />
+                        Seleccionar
+                      </button>
+
                     </div>
                   </div>
                 )}
@@ -2779,8 +2888,12 @@ function resolveManualBookingTotalCents(
                         </div>
                         <ul className="py-1 max-h-72 overflow-y-auto">
                           {gridCourts.filter(c => !/virtual/i.test(c.name)).map(court => {
-                            const isBlocked = reservations.some(
-                              r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO'
+                            const isBlocked = isCourtInFullDayMaintenance(
+                              reservations,
+                              court.id,
+                              gridBounds.openMin,
+                              gridBounds.closeMin,
+                              gridBounds.startHour,
                             );
                             return (
                               <li key={court.id}>
@@ -2817,6 +2930,7 @@ function resolveManualBookingTotalCents(
                 {mobileFullView ? (
                   <div ref={mobileGridViewportRef} className="grilla-mobile-viewport flex-1 min-h-0">
                     <div
+                      ref={gridShellRef}
                       style={{
                         height: `${nativeGridHeight}px`,
                         width: mobileCanvasWidthPx ?? '100%',
@@ -2834,8 +2948,9 @@ function resolveManualBookingTotalCents(
                       />
 
                       <div
+                        ref={mobileFullView ? courtsGridRef : undefined}
                         className={clsx(
-                          'grilla-mobile-courts-row relative z-10 mb-0',
+                          'grilla-mobile-courts-row grilla-courts-grid relative z-10 mb-0',
                           mobileGridOverflows && 'grilla-mobile-courts-row--scroll',
                         )}
                         style={
@@ -2844,6 +2959,21 @@ function resolveManualBookingTotalCents(
                             : undefined
                         }
                       >
+                        <GridMarqueeLayer
+                          shellRef={gridShellRef}
+                          containerRef={courtsGridRef}
+                          visibleCourts={visibleCourts}
+                          reservations={reservations}
+                          gridStartHour={gridBounds.startHour}
+                          headerPx={compactHeaderPx}
+                          ppm={compactPxPerMinute}
+                          gridStartMin={gridStartMin}
+                          gridEndMin={gridEndMin}
+                          disabled={marqueeDisabled}
+                          selectedKeys={selectedSlotKeys}
+                          onSelectionChange={handleGridSelectionChange}
+                          onAction={handleMarqueeAction}
+                        />
                         <GridBackground compactPxPerMinute={compactPxPerMinute} />
                         {activeChip === 'today' && nowMinutes >= gridBounds.openMin && nowMinutes <= gridBounds.closeMin && (() => {
                           const topPx = compactHeaderPx + (nowMinutes - gridBounds.openMin) * compactPxPerMinute;
@@ -2877,12 +3007,16 @@ function resolveManualBookingTotalCents(
                               setFocusedCourtId(courtId);
                             }}
                             onHeaderHover={setHoveredCourtId}
-                            isMaintenanceBlocked={isNonWorkingDay || reservations.some(r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO')}
+                            isMaintenanceBlocked={isNonWorkingDay || isCourtInFullDayMaintenance(reservations, court.id, gridBounds.openMin, gridBounds.closeMin, gridBounds.startHour)}
                             isCompactView
                             compactPxPerMinute={compactPxPerMinute}
                             mobileColumnWidthPx={mobileCourtColWidthPx}
                             totalCourts={gridCourts.length}
                             typeColorOverrides={typeColorOverrides}
+                            selectedSlotKeys={selectedSlotKeys}
+                            selectMode={gridSelectMode}
+                            checkedReservationIds={checkedReservationIds}
+                            onToggleReservationSelect={toggleReservationCheck}
                           />
                         ))}
                       </div>
@@ -2896,6 +3030,7 @@ function resolveManualBookingTotalCents(
                   </div>
                 ) : (
                   <div
+                    ref={gridShellRef}
                     style={{
                       height: `${nativeGridHeight}px`,
                       zoom: scale,
@@ -2916,7 +3051,22 @@ function resolveManualBookingTotalCents(
                   >
                     <TimeAxis position="left" isCompact={false} />
 
-                    <div className="flex relative z-10 mb-0 overflow-hidden">
+                    <div ref={!mobileFullView ? courtsGridRef : undefined} className="flex grilla-courts-grid relative z-10 mb-0 overflow-hidden">
+                      <GridMarqueeLayer
+                        shellRef={gridShellRef}
+                        containerRef={courtsGridRef}
+                        visibleCourts={visibleCourts}
+                        reservations={reservations}
+                        gridStartHour={gridBounds.startHour}
+                        headerPx={28}
+                        ppm={PIXELS_PER_MINUTE}
+                        gridStartMin={gridStartMin}
+                        gridEndMin={gridEndMin}
+                        disabled={marqueeDisabled}
+                        selectedKeys={selectedSlotKeys}
+                        onSelectionChange={handleGridSelectionChange}
+                        onAction={handleMarqueeAction}
+                      />
                       <GridBackground />
                       {visibleCourts.map(court => (
                         <CourtColumn
@@ -2930,12 +3080,16 @@ function resolveManualBookingTotalCents(
                           onReservationClick={handleReservationClick}
                           onFreeSlotClick={handleFreeSlotClick}
                           isCompactView={false}
-                          isMaintenanceBlocked={isNonWorkingDay || reservations.some(r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO')}
+                          isMaintenanceBlocked={isNonWorkingDay || isCourtInFullDayMaintenance(reservations, court.id, gridBounds.openMin, gridBounds.closeMin, gridBounds.startHour)}
                           totalCourts={gridCourts.length}
                           onHeaderHover={setHoveredCourtId}
                           onHoverStart={(res, el) => setHoveredTooltip({ res, el })}
                           onHoverEnd={() => setHoveredTooltip(null)}
                           typeColorOverrides={typeColorOverrides}
+                          selectedSlotKeys={selectedSlotKeys}
+                          selectMode={gridSelectMode}
+                          checkedReservationIds={checkedReservationIds}
+                          onToggleReservationSelect={toggleReservationCheck}
                         />
                       ))}
                     </div>
@@ -3049,8 +3203,7 @@ function resolveManualBookingTotalCents(
         {maintenanceBlockTarget && (() => {
           const existing = reservations.find(
             r => r.courtId === maintenanceBlockTarget.courtId
-              && r.booking_type === 'blocked'
-              && r.matchType === 'MANTENIMIENTO'
+              && isFullDayMaintenanceReservation(r, gridBounds.openMin, gridBounds.closeMin, gridBounds.startHour)
           );
           const existingReason = existing?.notes?.replace('__COURT_MAINTENANCE__:', '').trim();
           return (
@@ -3065,6 +3218,58 @@ function resolveManualBookingTotalCents(
             />
           );
         })()}
+
+        {bulkMaintenanceOpen && selectedSlots.length > 0 && (
+          <BulkSlotMaintenanceModal
+            dateStr={selectedDateKey}
+            slots={selectedSlots}
+            reservations={reservations}
+            gridStartHour={gridBounds.startHour}
+            mode={bulkMode}
+            onClose={() => {
+              setBulkMaintenanceOpen(false);
+              clearGridSelection();
+            }}
+            onDone={() => {
+              clearGridSelection();
+              refresh();
+            }}
+          />
+        )}
+
+        {bulkUnblockOpen && selectedSlots.length > 0 && (
+          <BulkUnblockMaintenanceModal
+            slots={selectedSlots}
+            bookings={collectMaintenanceBookingsForSlots(selectedSlots, reservations, gridBounds.startHour)}
+            onClose={() => {
+              setBulkUnblockOpen(false);
+              clearGridSelection();
+            }}
+            onDone={() => {
+              clearGridSelection();
+              refresh();
+            }}
+          />
+        )}
+
+        {gridSelectMode && (
+          <GridSelectActionBar
+            count={checkedReservationIds.size}
+            onVoid={() => setGridBulkVoidOpen(true)}
+            onCancel={exitGridSelectMode}
+          />
+        )}
+
+        {gridBulkVoidOpen && checkedReservations.length > 0 && (
+          <GridBulkVoidModal
+            reservations={checkedReservations}
+            onClose={() => setGridBulkVoidOpen(false)}
+            onDone={() => {
+              exitGridSelectMode();
+              refresh();
+            }}
+          />
+        )}
       {/* Custom Tooltip */}
       <HoverTooltip
         reservation={(pendingOverrideDrop || activeId || draggingCourt) ? null : (hoveredTooltip?.res || null)}

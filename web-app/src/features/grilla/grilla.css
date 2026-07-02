@@ -96,9 +96,24 @@
   min-width: 0;
 }
 
-/* Root wrapper of the Grilla view: neutralizes iOS Safari quirks
-   (auto-zoom of small text, font rendering) and provides a known
-   anchor for the flex-shrink fix below. */
+/* Prevent text selection while marquee-selecting grid slots */
+.grilla-marquee-selecting,
+.grilla-marquee-selecting * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/* Court grid slot labels are not meant to be copy-selected */
+.grilla-courts-grid {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.grilla-time-axis {
+  touch-action: none;
+}
+
+/* Root shell: stabilizes text rendering and provides a known anchor for flex-shrink fixes. */
 .grilla-shell {
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;

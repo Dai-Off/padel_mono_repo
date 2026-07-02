@@ -34,6 +34,10 @@ interface Props {
     typeColorOverrides?: Record<string, string>;
     gridDayKind?: 'past' | 'today' | 'future';
     nowMinutes?: number;
+    selectedSlotKeys?: Set<string>;
+    selectMode?: boolean;
+    checkedReservationIds?: Set<string>;
+    onToggleReservationSelect?: (reservation: Reservation) => void;
 }
 
 function parseCourtName(name: string): { main: string; sub?: string } {
@@ -74,6 +78,10 @@ export const CourtColumn: React.FC<Props> = ({
     typeColorOverrides,
     gridDayKind = 'future',
     nowMinutes = 0,
+    selectedSlotKeys,
+    selectMode,
+    checkedReservationIds,
+    onToggleReservationSelect,
 }) => {
     const { tData } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
@@ -92,8 +100,8 @@ export const CourtColumn: React.FC<Props> = ({
 
     const ppm = (isCompactView && compactPxPerMinute) ? compactPxPerMinute : PIXELS_PER_MINUTE;
     const height = gridContentHeightPx(bounds, ppm);
-    const gridStartMin = bounds.startHour * 60;
-    const gridEndMin = bounds.endHour * 60;
+    const gridStartMin = bounds.openMin;
+    const gridEndMin = bounds.closeMin;
 
     const isVirtual = /virtual/i.test(court.name);
     const { main: courtMain, sub: courtSub } = parseCourtName(tData(court.name));
@@ -142,8 +150,24 @@ export const CourtColumn: React.FC<Props> = ({
 
     const manyCourts = totalCourts && totalCourts > 10;
 
+    const selectedOccupiedOverlays = useMemo(() => {
+        if (!selectedSlotKeys?.size) return [];
+        const result: number[] = [];
+        for (let blockStart = gridStartMin; blockStart + 30 <= gridEndMin; blockStart += 30) {
+            if (!selectedSlotKeys.has(`${court.id}:${blockStart}`)) continue;
+            const covered = reservations.some((r) => {
+                const rs = parseTime(r.startTime);
+                const re = rs + r.durationMinutes;
+                return blockStart < re && blockStart + 30 > rs;
+            });
+            if (covered) result.push(blockStart);
+        }
+        return result;
+    }, [selectedSlotKeys, court.id, gridStartMin, gridEndMin, reservations, bounds]);
+
     return (
         <div
+            data-court-column-id={court.id}
             className={clsx(
             "flex-1 border-r-2 border-white flex flex-col relative transition-all duration-300 ease-in-out",
             mobileColumnWidthPx
@@ -161,6 +185,7 @@ export const CourtColumn: React.FC<Props> = ({
         >
             <div
                 ref={setDragRef}
+                data-court-header
                 {...dragListeners}
                 {...dragAttrs}
                 onClick={() => onHeaderClick?.(court.id)}
@@ -213,14 +238,17 @@ export const CourtColumn: React.FC<Props> = ({
                 {emptyBlocks.map(({ startMins, bookable, isPast }) => {
                     const timeStr = formatTimeFromMinutes(startMins);
                     const disabled = !bookable || isPast;
+                    const isSelected = selectedSlotKeys?.has(`${court.id}:${startMins}`);
 
                     return (
                         <div
                             key={`slot-${startMins}`}
                             onClick={() => onFreeSlotClick?.(court.id, court.name, timeStr, disabled)}
                             className={clsx(
-                                "absolute inset-x-0 border-b z-0 flex items-center justify-center transition-colors",
-                                disabled
+                                "absolute inset-x-0 border-b z-0 flex items-center justify-center transition-colors select-none",
+                                isSelected
+                                    ? "bg-amber-200/90 border-amber-400 ring-1 ring-inset ring-amber-500 z-[1]"
+                                    : disabled
                                     ? "bg-[#e0e0e0] border-white cursor-not-allowed opacity-95"
                                     : "bg-[#ade88f] border-white cursor-pointer hover:bg-[#93db72]"
                             )}
@@ -230,7 +258,7 @@ export const CourtColumn: React.FC<Props> = ({
                             }}
                         >
                             <span className={clsx(
-                                "font-semibold pointer-events-none",
+                                "font-semibold pointer-events-none select-none",
                                 isCompactView
                                     ? (mobileColumnWidthPx
                                         ? "text-[8px]"
@@ -269,6 +297,20 @@ export const CourtColumn: React.FC<Props> = ({
                         onHoverStart={onHoverStart}
                         onHoverEnd={onHoverEnd}
                         typeColorOverrides={typeColorOverrides}
+                        selectMode={selectMode}
+                        checked={checkedReservationIds?.has(res.id)}
+                        onToggleSelect={onToggleReservationSelect}
+                    />
+                ))}
+
+                {selectedOccupiedOverlays.map((startMins) => (
+                    <div
+                        key={`sel-overlay-${startMins}`}
+                        className="absolute inset-x-0 z-[15] pointer-events-none bg-amber-200/70 border border-amber-400 ring-2 ring-inset ring-amber-500"
+                        style={{
+                            top: (startMins - gridStartMin) * ppm,
+                            height: 30 * ppm,
+                        }}
                     />
                 ))}
             </div>

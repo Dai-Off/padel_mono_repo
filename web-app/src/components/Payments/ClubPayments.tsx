@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { motion, useInView } from 'framer-motion';
 import {
   CreditCard,
@@ -15,9 +15,17 @@ import {
   Wallet,
   HelpCircle,
   X,
+  MoreVertical,
+  ExternalLink,
+  Pencil,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import { paymentsService, type PaymentTransaction, type PaymentParticipant } from '../../services/payments';
+import { inventoryService } from '../../services/inventory';
+import { EditCartSaleModal } from '../CashClosing/EditCartSaleModal';
 import { useTranslation } from 'react-i18next';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { localDateYmd, shiftDateYmd } from '../CashClosing/cashRegisterUi';
@@ -39,8 +47,17 @@ type Payment = {
   amount: number;
   status: PaymentStatus;
   courtName?: string;
+  bookingId?: string | null;
+  payerPlayerId?: string | null;
+  saleId?: string | null;
   participants: PaymentParticipant[];
 };
+
+function resolveSaleId(tx: PaymentTransaction): string | null {
+  if (tx.sale_id) return tx.sale_id;
+  if (tx.id.startsWith('store-meta-')) return tx.id.slice('store-meta-'.length);
+  return null;
+}
 
 function paymentMethodLabel(method: PaymentMethod): string {
   if (method === 'cash') return 'Efectivo';
@@ -188,6 +205,9 @@ function toPayment(tx: PaymentTransaction): Payment {
     amount: Math.round((tx.amount_cents ?? 0) / 100),
     status: mapStatus(tx.status),
     courtName: tx.court_name ?? undefined,
+    bookingId: tx.booking_id ?? null,
+    payerPlayerId: tx.payer_player_id ?? null,
+    saleId: resolveSaleId(tx),
     participants: tx.participants ?? [],
   };
 }
@@ -216,6 +236,7 @@ export function ClubPaymentsTab({
   clubResolved?: boolean;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const dateInputRef = useRef<HTMLInputElement>(null);
   const todayYmd = localDateYmd();
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
@@ -230,28 +251,29 @@ export function ClubPaymentsTab({
   const [dateFrom, setDateFrom] = useState(todayYmd);
   const [dateTo, setDateTo] = useState(todayYmd);
   const [showFilters, setShowFilters] = useState(false);
+  const [rowMenuOpenId, setRowMenuOpenId] = useState<string | null>(null);
+  const [editSaleId, setEditSaleId] = useState<string | null>(null);
+  const [voidConfirmPayment, setVoidConfirmPayment] = useState<Payment | null>(null);
+  const [voidingSaleId, setVoidingSaleId] = useState<string | null>(null);
+
+  const reloadPayments = useCallback(async () => {
+    if (!clubId) return;
+    setLoading(true);
+    try {
+      const rows = await paymentsService.listClubTransactions(clubId, 300);
+      setAllPayments(rows.map(toPayment));
+    } catch (e) {
+      toast.error((e as Error).message || t('payments_load_error'));
+      setAllPayments([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [clubId, t]);
 
   useEffect(() => {
     if (!clubId) return;
-    let mounted = true;
-    (async () => {
-      setLoading(true);
-      try {
-        const rows = await paymentsService.listClubTransactions(clubId, 300);
-        if (!mounted) return;
-        setAllPayments(rows.map(toPayment));
-      } catch (e) {
-        if (!mounted) return;
-        toast.error((e as Error).message || t('payments_load_error'));
-        setAllPayments([]);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [clubId, t]);
+    void reloadPayments();
+  }, [clubId, reloadPayments]);
 
   const clientOptions = useMemo(() => {
     const names = new Set<string>();
@@ -317,6 +339,35 @@ export function ClubPaymentsTab({
   }, [dateMode, selectedDate, dateFrom, dateTo]);
 
   const isTodaySelected = dateMode === 'day' && selectedDate === todayYmd;
+
+  const openBookingInGrilla = useCallback((bookingId: string) => {
+    navigate(`/grilla?booking=${encodeURIComponent(bookingId)}`);
+  }, [navigate]);
+
+  const openCartForPayment = useCallback((payment: Payment) => {
+    const q = new URLSearchParams();
+    if (payment.payerPlayerId) q.set('player', payment.payerPlayerId);
+    if (payment.bookingId) q.set('booking', payment.bookingId);
+    if (payment.saleId) q.set('sale', payment.saleId);
+    navigate(q.toString() ? `/carrito?${q}` : '/carrito');
+  }, [navigate]);
+
+  const confirmVoidSale = useCallback(async () => {
+    if (!clubId || !voidConfirmPayment?.saleId) return;
+    const saleId = voidConfirmPayment.saleId;
+    setVoidingSaleId(saleId);
+    try {
+      await inventoryService.voidSale(clubId, saleId);
+      toast.success('Venta anulada');
+      setVoidConfirmPayment(null);
+      await reloadPayments();
+    } catch (e) {
+      toast.error((e as Error).message || 'No se pudo anular la venta');
+    } finally {
+      setVoidingSaleId(null);
+      setRowMenuOpenId(null);
+    }
+  }, [clubId, voidConfirmPayment, reloadPayments]);
   const isRangeSingleDay = dateMode === 'range' && dateFrom === dateTo;
   const navigatorDateLabel =
     dateMode === 'range' && !isRangeSingleDay
@@ -721,19 +772,33 @@ export function ClubPaymentsTab({
               <p className="text-xs text-gray-400">{t('loading')}</p>
             </div>
           ) : filteredPayments.length > 0 ? (
-            filteredPayments.map((payment) => (
-              <div key={payment.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5">
+            filteredPayments.map((payment) => {
+              const menuOpen = rowMenuOpenId === payment.id;
+              const canOpenGrilla = payment.source === 'booking' && Boolean(payment.bookingId);
+              const canEditStore = payment.source === 'store' && Boolean(payment.saleId);
+              return (
+              <div key={payment.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5 relative">
                 <div className="flex items-center gap-3">
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${paymentMethodBadgeClass(payment.method)}`}>
                     <PaymentMethodIcon method={payment.method} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5">
+                    <div className="flex items-center justify-between mb-0.5 gap-2">
                       <p className="text-xs font-bold text-[#1A1A1A] truncate">{payment.client}</p>
-                      <p className="text-xs font-black text-[#1A1A1A]">EUR {payment.amount}</p>
+                      <p className="text-xs font-black text-[#1A1A1A] shrink-0">EUR {payment.amount}</p>
                     </div>
                     <div className="flex items-center gap-2 text-[10px] text-gray-400 flex-wrap">
-                      <span>{payment.concept}</span>
+                      {canOpenGrilla ? (
+                        <button
+                          type="button"
+                          onClick={() => openBookingInGrilla(payment.bookingId!)}
+                          className="font-semibold text-[#006A6A] hover:underline text-left"
+                        >
+                          {payment.concept}
+                        </button>
+                      ) : (
+                        <span>{payment.concept}</span>
+                      )}
                       <span className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${paymentMethodBadgeClass(payment.method)}`}>
                         {paymentMethodLabel(payment.method)}
                       </span>
@@ -745,6 +810,76 @@ export function ClubPaymentsTab({
                     </div>
                   </div>
                   <PaymentStatusBadge status={payment.status} />
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setRowMenuOpenId(menuOpen ? null : payment.id)}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-50"
+                      aria-label="Acciones"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                    {menuOpen && (
+                      <div className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-gray-100 rounded-xl shadow-lg py-1">
+                        {canOpenGrilla && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRowMenuOpenId(null);
+                              openBookingInGrilla(payment.bookingId!);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Abrir en grilla
+                          </button>
+                        )}
+                        {canEditStore && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRowMenuOpenId(null);
+                                setEditSaleId(payment.saleId!);
+                              }}
+                              className="w-full text-left px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              Editar venta
+                            </button>
+                            <button
+                              type="button"
+                              disabled={voidingSaleId === payment.saleId}
+                              onClick={() => {
+                                setRowMenuOpenId(null);
+                                setVoidConfirmPayment(payment);
+                              }}
+                              className="w-full text-left px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Anular venta
+                            </button>
+                          </>
+                        )}
+                        {payment.source === 'store' && !canEditStore && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRowMenuOpenId(null);
+                              openCartForPayment(payment);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Abrir en carrito
+                          </button>
+                        )}
+                        {!canOpenGrilla && !canEditStore && payment.source !== 'store' && (
+                          <p className="px-3 py-2 text-[10px] text-gray-400">Sin acciones disponibles</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 {payment.participants.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-gray-50">
@@ -792,7 +927,8 @@ export function ClubPaymentsTab({
                   </div>
                 )}
               </div>
-            ))
+            );
+            })
           ) : (
             <div className="text-center py-12">
               <DollarSign className="w-10 h-10 text-gray-200 mx-auto mb-2" />
@@ -801,6 +937,91 @@ export function ClubPaymentsTab({
           )}
         </div>
       </AnimSection>
+
+      {clubId && editSaleId && (
+        <EditCartSaleModal
+          clubId={clubId}
+          saleId={editSaleId}
+          onClose={() => setEditSaleId(null)}
+          onSaved={() => {
+            setEditSaleId(null);
+            void reloadPayments();
+          }}
+        />
+      )}
+
+      {voidConfirmPayment && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => !voidingSaleId && setVoidConfirmPayment(null)}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between p-5 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-[#1A1A1A]">Anular venta</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">{voidConfirmPayment.client}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVoidConfirmPayment(null)}
+                disabled={Boolean(voidingSaleId)}
+                className="w-9 h-9 rounded-xl border border-gray-100 flex items-center justify-center text-gray-400 hover:bg-gray-50 disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-gray-600">
+                ¿Anular esta venta de tienda? Se revertirá el stock y los cobros asociados.
+              </p>
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 text-xs space-y-1">
+                <div className="flex justify-between gap-2">
+                  <span className="text-gray-500">Concepto</span>
+                  <span className="font-semibold text-gray-800 text-right truncate">{voidConfirmPayment.concept}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-gray-500">Importe</span>
+                  <span className="font-black text-[#1A1A1A]">EUR {voidConfirmPayment.amount}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-gray-500">Fecha</span>
+                  <span className="text-gray-700">{voidConfirmPayment.dateLabel} · {voidConfirmPayment.time}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-gray-100 flex gap-2 justify-end bg-gray-50/80">
+              <button
+                type="button"
+                onClick={() => setVoidConfirmPayment(null)}
+                disabled={Boolean(voidingSaleId)}
+                className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-[#1A1A1A] bg-white hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmVoidSale()}
+                disabled={Boolean(voidingSaleId)}
+                className="px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50"
+              >
+                {voidingSaleId ? 'Anulando...' : 'Anular venta'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </motion.div>
   );
 }
