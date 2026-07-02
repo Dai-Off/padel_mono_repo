@@ -19,16 +19,13 @@ import { useTranslation } from '../i18n';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { formatPlayerLabel } from '../lib/username';
 import { useHomeData } from '../contexts/HomeDataContext';
+import { useProfileData } from '../contexts/ProfileDataContext';
 import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
 import { AnimatedTitle } from '../components/profile/AnimatedTitle';
 import { ProfileCustomizationModal } from '../components/profile/ProfileCustomizationModal';
 import { RARITY_CONFIG } from '../design/rarity';
 import { LigaChip } from '../components/profile/LigaChip';
 import type { Achievement } from '../design/achievements';
-import {
-  type ProfileCustomization,
-  type CatalogItem,
-} from '../api/profileCustomization';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
@@ -37,19 +34,9 @@ import { StatsCard } from '../components/profile/StatsCard';
 import { PlayerPreferencesCard } from '../components/profile/PlayerPreferencesCard';
 import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
 import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
-import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { CoachSkeleton } from '../components/profile/CoachSkeleton';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
-import { fetchMyCoachStats, type CoachAssessment, type CoachStats } from '../api/coachAssessment';
-import { type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
-import { fetchProfileBundle } from '../api/profileBundle';
-import {
-  fetchLevelHistory,
-  fetchPlayerStats,
-  type LevelHistory,
-  type LevelHistoryLimit,
-  type PlayerStats,
-} from '../api/profileStats';
+import { type CoachAssessment } from '../api/coachAssessment';
 import {
   uploadPlayerCoverToStorage,
   type PickedImage,
@@ -115,28 +102,42 @@ export function ProfileScreen({
     }
   }, []);
   const { session } = useAuth();
-  const { t, locale } = useTranslation();
-  const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
+  const { t } = useTranslation();
+  // Cache global del perfil (HomeData): siembra el perfil base para reentrada
+  // instantánea e invalida al resto de pantallas tras editar/onboarding.
+  const { profile: homeProfile, refreshProfile: refreshGlobalProfile } = useHomeData();
+  // Datos del perfil (warm start): sobreviven al cambiar de pestaña. loadedAt
+  // guards + SWR + invalidación por force viven en el ProfileDataProvider.
+  const {
+    customization,
+    framesCatalog,
+    allAchievements,
+    assessment,
+    peerInsight,
+    coachStats,
+    levelHistory,
+    levelLimit,
+    setLevelLimit,
+    playerStats: stats,
+    frequentClubs,
+    frequentPartners,
+    bundleReady: customizationReady,
+    assessmentLoaded,
+    levelLoading,
+    socialLoading,
+    ensureLoaded,
+    refresh: refreshProfileData,
+    reloadCoach,
+    setCustomization,
+  } = useProfileData();
+  // Perfil base local: sembrado del cache global para que reentrar sea
+  // instantáneo; loadProfile revalida en segundo plano.
+  const [profile, setProfile] = useState<MyPlayerProfile | null>(homeProfile ?? null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
-  // Evolución del nivel + estadísticas
-  const [levelHistory, setLevelHistory] = useState<LevelHistory | null>(null);
-  const [levelLoading, setLevelLoading] = useState(true);
-  const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
-  const [stats, setStats] = useState<PlayerStats | null>(null);
-  const [frequentClubs, setFrequentClubs] = useState<FrequentClub[]>([]);
-  const [frequentPartners, setFrequentPartners] = useState<FrequentPartner[]>([]);
-  const [socialLoading, setSocialLoading] = useState(true);
-  // Personalización (título/marco/insignias equipados) + catálogos para resolverlos
-  const [customization, setCustomization] = useState<ProfileCustomization | null>(null);
-  const [framesCatalog, setFramesCatalog] = useState<CatalogItem[]>([]);
-  // Lista completa de logros: alimenta a la vez las insignias del hero y la
-  // Vitrina (dedupe: un solo fetch compartido en vez de dos).
-  const [allAchievements, setAllAchievements] = useState<Achievement[]>([]);
   const [showCustomize, setShowCustomize] = useState(false);
-  const [customizationReady, setCustomizationReady] = useState(false);
-  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverUrl, setCoverUrl] = useState<string | null>(homeProfile?.coverUrl ?? null);
   const [uploadingCover, setUploadingCover] = useState(false);
 
   // Auto-abrir el modal del cuestionario de nivelación cuando el padre lo pide
@@ -149,17 +150,6 @@ export function ProfileScreen({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenOnboarding]);
-  const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
-  // Stats del Coach (A1): se piden aparte del radar y se fusionan al render, para
-  // que el radar pinte de inmediato y las cifras rellenen cuando lleguen.
-  const [coachStats, setCoachStats] = useState<CoachStats | null>(null);
-  // Distingue "cargando" de "cargado pero vacío" para no quedarse en el spinner.
-  const [assessmentLoaded, setAssessmentLoaded] = useState(false);
-  const [peerInsight, setPeerInsight] = useState<PeerFeedbackInsight | null>(null);
-  // Invalidar el cache global del HomeDataContext tras completar onboarding /
-  // editar el profile, para que el resto de pantallas (DailyLessonCard,
-  // CompetitiveLeague, etc.) vean el dato fresco sin re-fetch local.
-  const { refreshProfile: refreshGlobalProfile } = useHomeData();
 
   const loadProfile = React.useCallback(async (token: string, attempt = 0) => {
     setProfileLoading(true);
@@ -188,31 +178,6 @@ export function ProfileScreen({
     }
   }, [t]);
 
-  // Bundle above-the-fold en 1 round-trip: personalización, marcos, logros,
-  // radar del Coach y peer-insight. Marca assessmentLoaded + customizationReady.
-  const loadBundle = React.useCallback((token: string) => {
-    setAssessmentLoaded(false);
-    fetchProfileBundle(token, locale)
-      .then((b) => {
-        if (!b) return;
-        setCustomization(b.customization);
-        setFramesCatalog(b.frames);
-        setAllAchievements(b.achievements);
-        setAssessment(b.coachRadar);
-        setPeerInsight(b.peerInsight);
-      })
-      .catch(() => {})
-      .finally(() => {
-        setAssessmentLoaded(true);
-        setCustomizationReady(true);
-      });
-  }, [locale]);
-
-  // Stats del Coach (A1): contadores en vivo, aparte del radar (que va en el bundle).
-  const loadCoachStats = React.useCallback((token: string) => {
-    fetchMyCoachStats(token).then(setCoachStats).catch(() => {});
-  }, []);
-
   useEffect(() => {
     const token = session?.access_token;
     if (!token) {
@@ -221,64 +186,13 @@ export function ProfileScreen({
       return;
     }
     void loadProfile(token);
-    loadBundle(token);
-    loadCoachStats(token);
-  }, [session?.access_token, loadProfile, loadBundle, loadCoachStats]);
-
-  // Evolución del nivel (refetch al cambiar el filtro 5/10/Todos)
-  useEffect(() => {
-    const token = session?.access_token;
-    if (!token) return;
-    let cancelled = false;
-    setLevelLoading(true);
-    fetchLevelHistory(token, levelLimit)
-      .then((h) => {
-        if (!cancelled) setLevelHistory(h);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLevelLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token, levelLimit]);
-
-  // Estadísticas (depende del id del jugador)
-  useEffect(() => {
-    const token = session?.access_token;
-    const playerId = profile?.id;
-    if (!token || !playerId) return;
-    let cancelled = false;
-    fetchPlayerStats(token, playerId)
-      .then((s) => {
-        if (!cancelled) setStats(s);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token, profile?.id]);
-
-  // Clubs y compañeros frecuentes (depende del id del jugador)
-  useEffect(() => {
-    const playerId = profile?.id;
-    if (!playerId) return;
-    let cancelled = false;
-    setSocialLoading(true);
-    Promise.all([fetchFrequentClubs(playerId), fetchFrequentPartners(playerId)])
-      .then(([c, p]) => {
-        if (cancelled) return;
-        setFrequentClubs(c);
-        setFrequentPartners(p);
-      })
-      .finally(() => {
-        if (!cancelled) setSocialLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.id]);
+    // Bootstrap perezoso del cache de datos del perfil (1ª apertura). En
+    // reentradas sirve lo cacheado al instante (no re-fetch salvo force).
+    // ensureLoaded se auto-protege (guard interno) y corre en cada mount, por eso
+    // se omite de las deps (evita re-ejecutar loadProfile al cambiar su identidad).
+    ensureLoaded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.access_token, loadProfile]);
 
 
   const equippedFrame = useMemo<FrameAttrs | null>(() => {
@@ -346,8 +260,7 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    loadBundle(session.access_token);
-    loadCoachStats(session.access_token);
+    refreshProfileData({ force: true });
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).
@@ -428,10 +341,11 @@ export function ProfileScreen({
     ]);
   };
 
-  // Gate mínimo (C7): el hero solo espera al perfil. La personalización (marco,
-  // título, insignias) es opcional en el render y entra en cuanto llega, sin
-  // bloquear el pintado de la pantalla.
-  if (profileLoading && !profile) {
+  // Gate del hero: espera perfil + personalización (bundle) para aparecer
+  // COMPLETO (marco/título/insignias juntos), sin el salto de la personalización.
+  // El radar, peer, stats, evolución y social NO bloquean: entran con skeleton
+  // debajo. En reentrada todo está cacheado → instantáneo.
+  if ((profileLoading && !profile) || !customizationReady) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#F18F34" />
@@ -644,8 +558,7 @@ export function ProfileScreen({
                   style={styles.coachCtaBtn}
                   onPress={() => {
                     if (!session?.access_token) return;
-                    loadBundle(session.access_token);
-                    loadCoachStats(session.access_token);
+                    reloadCoach();
                   }}
                 >
                   <Ionicons name="refresh-outline" size={16} color="#fff" />

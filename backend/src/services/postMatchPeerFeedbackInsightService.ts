@@ -337,6 +337,24 @@ export async function getLastPeerFeedbackInsightForPlayer(
 // mucho, la primera vez que se ve a un jugador en un idioma sin cache.
 // ─────────────────────────────────────────────────────────────────────────────
 
+function emptyPeerFeedbackInsight(locale: string): PeerFeedbackInsight {
+  return {
+    ok: true,
+    empty: true,
+    match_id: null,
+    feedback_created_at: null,
+    peer_count: 0,
+    average_perceived: null,
+    distribution: null,
+    last_perceived: null,
+    recommendation_ia: null,
+    fortalezas: [],
+    a_mejorar: [],
+    insight_source: null,
+    locale,
+  };
+}
+
 function mapRowToInsight(row: Record<string, unknown>): PeerFeedbackInsight {
   const avg = row.average_perceived;
   return {
@@ -396,8 +414,10 @@ export async function computeAndStorePeerFeedbackInsight(
 }
 
 /**
- * Lectura para la ruta crítica: sirve el insight cacheado (sin OpenAI). Si no hay
- * cache para ese idioma todavía, lo genera y cachea al vuelo (1 sola vez).
+ * Lectura para la ruta crítica: sirve el insight cacheado (sin OpenAI y sin
+ * bloquear). Si no hay cache para ese idioma todavía, devuelve VACÍO al instante
+ * y dispara la generación en background (fire-and-forget): aparecerá cacheado en
+ * la siguiente apertura. Así OpenAI nunca está en el camino de una lectura.
  */
 export async function getCachedPeerFeedbackInsight(
   supabase: SupabaseClient,
@@ -412,7 +432,10 @@ export async function getCachedPeerFeedbackInsight(
     .eq('locale', locale)
     .maybeSingle();
   if (row) return mapRowToInsight(row as Record<string, unknown>);
-  return computeAndStorePeerFeedbackInsight(supabase, playerId, locale);
+  void computeAndStorePeerFeedbackInsight(supabase, playerId, locale).catch((e) =>
+    console.error('[getCachedPeerFeedbackInsight] bg gen', e instanceof Error ? e.message : e)
+  );
+  return emptyPeerFeedbackInsight(locale);
 }
 
 /**

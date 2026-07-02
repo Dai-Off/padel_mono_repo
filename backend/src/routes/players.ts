@@ -1459,20 +1459,16 @@ router.get('/:id/feedback-summary', async (req: Request, res: Response) => {
  *     summary: Bundle above-the-fold del perfil en 1 round-trip
  *     description: |
  *       Junta las lecturas baratas que el hero y el Coach necesitan
- *       (personalización, marcos, logros, radar y peer-insight cacheado) para
- *       evitar 5 peticiones en cola. NO incluye stats/level-history/social (más
- *       pesados, van aparte) ni el `profile` base (ya cacheado en el cliente).
- *       Idioma opcional: query `lang` o cabecera `Accept-Language`.
+ *       SOLO lo que bloquea el hero (personalización, marcos, logros). El radar,
+ *       el peer-insight, las stats, la evolución y el social van aparte y
+ *       rellenan su card con skeleton, para que el hero no espere a nada más.
  *     security: [{ bearerAuth: [] }]
  */
 router.get('/me/profile-bundle', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
   try {
-    const bundle = await assembleProfileBundle(playerId!, {
-      lang: req.query.lang as string | string[] | undefined,
-      acceptLanguage: req.headers['accept-language'] as string | undefined,
-    });
+    const bundle = await assembleProfileBundle(playerId!);
     return res.json({ ok: true, ...bundle });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });

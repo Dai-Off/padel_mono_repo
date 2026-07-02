@@ -1,10 +1,6 @@
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { evaluateAndGrant, getCompletedCourses } from './unlockablesEngine';
-import { getRadarAssessment } from './coachAssessmentService';
-import { localizeCoachAssessmentText, parseCoachAssessmentLocale } from '../lib/coachAssessmentLanguage';
-import { getCachedPeerFeedbackInsight } from './postMatchPeerFeedbackInsightService';
-import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lecturas puras (SIN evaluateAndGrant) de las piezas del perfil. Reutilizadas
@@ -137,35 +133,24 @@ export async function getPlayerCustomization(supabase: SupabaseClient, playerId:
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bundle above-the-fold: junta en 1 round-trip las lecturas baratas que el hero
-// y el Coach necesitan. NO incluye stats/level-history/social (más pesados, van
-// aparte y rellenan su card). El `profile` base tampoco: llega ya cacheado del
-// HomeDataContext en el cliente.
+// Bundle del HERO: junta en 1 round-trip SOLO lo que bloquea el hero
+// (personalización + marcos + logros). El radar, el peer, las stats, la
+// evolución y el social van aparte y rellenan su card con skeleton, para que el
+// hero no espere a nada más (ni al Coach, que crecerá en complejidad). El
+// `profile` base tampoco: llega ya cacheado del HomeDataContext en el cliente.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ProfileBundleLocaleInput = {
-  lang?: string | string[] | undefined;
-  acceptLanguage?: string | undefined;
-};
-
-export async function assembleProfileBundle(playerId: string, localeInput: ProfileBundleLocaleInput) {
+export async function assembleProfileBundle(playerId: string) {
   const supabase = getSupabaseServiceRoleClient();
 
   // Otorga lo recién conseguido UNA vez (en vez de por cada endpoint).
   await evaluateAndGrant(supabase, playerId);
 
-  const coachLocale = parseCoachAssessmentLocale(localeInput.lang, localeInput.acceptLanguage);
-  const peerLocale = parsePeerFeedbackLocale(localeInput.lang, localeInput.acceptLanguage);
-
-  const [customization, frames, achievements, radarRaw, peerInsight] = await Promise.all([
+  const [customization, frames, achievements] = await Promise.all([
     getPlayerCustomization(supabase, playerId),
     getPlayerUnlockablesCatalog(supabase, playerId, ['frame']),
     getPlayerAchievements(supabase, playerId),
-    getRadarAssessment(playerId),
-    getCachedPeerFeedbackInsight(supabase, playerId, { locale: peerLocale }),
   ]);
 
-  const coachRadar = radarRaw ? localizeCoachAssessmentText(radarRaw, coachLocale) : null;
-
-  return { customization, frames, achievements, coachRadar, peerInsight };
+  return { customization, frames, achievements };
 }

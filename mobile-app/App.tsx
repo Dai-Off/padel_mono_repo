@@ -10,6 +10,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
 import { HomeDataProvider } from './src/contexts/HomeDataContext';
+import { ProfileDataProvider } from './src/contexts/ProfileDataContext';
 import { CartProvider } from './src/contexts/CartContext';
 import { SplashScreen } from './src/components/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -152,9 +153,11 @@ export default function App() {
             <I18nProvider>
               <AuthProvider>
                 <HomeDataProvider>
-                  <CartProvider>
-                    <AppContent />
-                  </CartProvider>
+                  <ProfileDataProvider>
+                    <CartProvider>
+                      <AppContent />
+                    </CartProvider>
+                  </ProfileDataProvider>
                 </HomeDataProvider>
               </AuthProvider>
             </I18nProvider>
