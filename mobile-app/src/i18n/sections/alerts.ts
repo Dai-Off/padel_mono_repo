@@ -60,6 +60,8 @@ export interface AlertsTranslationKeys {
     titleLeave: string;
     bodySolo: string;
     bodyMulti: string;
+    bodyOrganizerCancel: string;
+    bodyOrganizerCancelNoRefund: string;
     bodySoloNoRefund: string;
     bodyMultiNoRefund: string;
     policyNoRefundDefault: string;
@@ -82,6 +84,11 @@ export interface AlertsTranslationKeys {
     fail: string;
   };
   tournamentInvite: {
+    accepted: string;
+    acceptedBody: string;
+    title: string;
+  };
+  matchInvite: {
     accepted: string;
     acceptedBody: string;
     title: string;

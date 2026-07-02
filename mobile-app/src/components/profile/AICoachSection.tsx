@@ -54,9 +54,8 @@ const ICON_MAP: Record<string, string> = {
 export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peerInsight }) => {
   const { t, locale } = useTranslation();
   const dateLocale = formatLocale(locale);
-  const [activeTab, setActiveTab] = useState<'today' | 'plan'>(
-    peerInsight && !peerInsight.empty ? 'today' : 'plan'
-  );
+  // Por defecto siempre "Resumen de Hoy" al abrir el perfil.
+  const [activeTab, setActiveTab] = useState<'today' | 'plan'>('today');
 
   const isToday = activeTab === 'today';
   
@@ -170,7 +169,8 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
               <Text style={styles.analysisTitle}>{t('profile.coachAnalysisTitle')}</Text>
             </View>
             
-            <SkillPolarChart 
+            <SkillPolarChart
+              max={70}
               skills={{
                 technical: assessment.skills.technical,
                 physical: assessment.skills.physical,

@@ -42,12 +42,32 @@ Deno.serve(async (req) => {
     const to = typeof body?.to === "string" ? body.to.trim() : "";
     const inviteUrl = typeof body?.inviteUrl === "string" ? body.inviteUrl.trim() : "";
     const clubName = typeof body?.clubName === "string" ? body.clubName.trim() : "";
+    const inviteKind = typeof body?.inviteKind === "string" ? body.inviteKind.trim() : "club";
+    const matchWhen = typeof body?.matchWhen === "string" ? body.matchWhen.trim() : "";
+    const inviterName = typeof body?.inviterName === "string" ? body.inviterName.trim() : "";
 
     if (!to || !inviteUrl || !clubName) {
       return json({ ok: false, error: "Missing fields: to, inviteUrl, clubName" });
     }
 
-    const html = `
+    const isPrivateMatch = inviteKind === "private_match";
+    const subject = isPrivateMatch
+      ? `Invitación a partido privado — ${clubName}`
+      : `Invitación a ${clubName}`;
+    const html = isPrivateMatch
+      ? `
+      <h2>Partido privado en ${clubName}</h2>
+      <p><strong>${inviterName || "Un jugador"}</strong> te ha invitado a un partido de pádel.</p>
+      ${matchWhen ? `<p><strong>Cuándo:</strong> ${matchWhen}</p>` : ""}
+      <p>Acepta la invitación en la app WeMatch para reservar tu plaza y pagar tu parte.</p>
+      <p>
+        <a href="${inviteUrl}"
+           style="background:#E31E24;color:#fff;padding:10px 16px;text-decoration:none;border-radius:6px;">
+           Aceptar invitación
+        </a>
+      </p>
+    `
+      : `
       <h2>Invitación a ${clubName}</h2>
       <p>Fuiste invitado a unirte al club.</p>
       <p>
@@ -67,7 +87,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: MAIL_FROM,
         to,
-        subject: `Invitación a ${clubName}`,
+        subject: isPrivateMatch ? subject : `Invitación a ${clubName}`,
         html,
       }),
     });

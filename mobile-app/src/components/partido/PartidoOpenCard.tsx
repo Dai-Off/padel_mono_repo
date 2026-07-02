@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { PlayerAvatarCircle } from "../profile/PlayerAvatarCircle";
+import { AvatarWithFrame } from "../profile/AvatarWithFrame";
 import { useHomeData } from "../../contexts/HomeDataContext";
 import {
   resolvePlayerDisplayAvatar,
@@ -80,6 +80,8 @@ type Props = {
   onPress: () => void;
   /** Ancho completo del padre (p. ej. una sola reserva en Inicio). */
   fullWidth?: boolean;
+  /** En "Mis partidos": distingue partido privado vs abierto. */
+  showVisibilityBadge?: boolean;
 };
 
 function PlayerFace({
@@ -103,18 +105,19 @@ function PlayerFace({
   }
   return (
     <View style={styles.slotFill}>
-      <PlayerAvatarCircle
+      <AvatarWithFrame
         avatarUrl={resolvePlayerDisplayAvatar(player, currentProfile, displayOpts)}
         initials={resolvePlayerDisplayInitials(player, currentProfile, displayOpts)}
-        size={40}
-        borderRadius={8}
+        size={SLOT}
+        frame={player.frame ?? null}
+        animate={false}
       />
     </View>
   );
 }
 
 /** Tarjeta alineada al listado web (imagen + meta + slots horizontales). */
-export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
+export function PartidoOpenCard({ item, onPress, fullWidth, showVisibilityBadge }: Props) {
   const { t } = useTranslation();
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const { profile } = useHomeData();
@@ -142,6 +145,7 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
   const libres = countFree(item.players);
   const phaseLabel = matchPhaseLabel(item, t);
   const isPast = (item.matchPhase ?? 'upcoming') === 'past';
+  const isPrivate = item.visibility === 'private';
 
   return (
     <Pressable
@@ -149,6 +153,7 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
       style={({ pressed }) => [
         styles.card,
         fullWidth && styles.cardFullWidth,
+        showVisibilityBadge && isPrivate && styles.cardPrivate,
         pressed && styles.pressed,
       ]}
     >
@@ -192,9 +197,26 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
           </View>
 
           <View style={styles.body}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={styles.title} numberOfLines={2}>
               {item.venue}
             </Text>
+            {showVisibilityBadge ? (
+              isPrivate ? (
+                <View style={styles.visibilityBadgePrivate}>
+                  <Ionicons name="lock-closed" size={11} color="#F18F34" />
+                  <Text style={styles.visibilityBadgePrivateTxt}>
+                    {t('partidos.detailPrivateMatch')}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.visibilityBadgePublic}>
+                  <Ionicons name="globe-outline" size={11} color="#9ca3af" />
+                  <Text style={styles.visibilityBadgePublicTxt}>
+                    {t('partidos.detailOpenMatch')}
+                  </Text>
+                </View>
+              )
+            ) : null}
             <View style={styles.timeRow}>
               <Ionicons name="time-outline" size={14} color="#6b7280" />
               <Text style={styles.dateTxt} numberOfLines={1}>
@@ -261,6 +283,9 @@ const styles = StyleSheet.create({
   cardFullWidth: {
     alignSelf: "stretch",
     width: "100%",
+  },
+  cardPrivate: {
+    borderColor: "rgba(241, 143, 52, 0.35)",
   },
   pressed: { opacity: 0.92 },
   cardBorder: {
@@ -346,7 +371,42 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#fff",
     lineHeight: 20,
-    paddingRight: 8,
+  },
+  visibilityBadgePrivate: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(241, 143, 52, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(241, 143, 52, 0.35)',
+  },
+  visibilityBadgePrivateTxt: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#F18F34',
+  },
+  visibilityBadgePublic: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  visibilityBadgePublicTxt: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#9ca3af',
   },
   timeRow: {
     flexDirection: "row",
@@ -409,12 +469,12 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   slotFill: {
-    width: SLOT,
-    height: SLOT,
-    borderRadius: 6,
+    // Sin tamaño fijo ni overflow:hidden: el marco de AvatarWithFrame sobresale
+    // del avatar; recortarlo lo ocultaría. minWidth reserva el hueco del slot.
+    minWidth: SLOT,
+    minHeight: SLOT,
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden",
   },
   slotAvatar: {
     width: SLOT,

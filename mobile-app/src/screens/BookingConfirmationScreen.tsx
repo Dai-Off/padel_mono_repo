@@ -29,8 +29,8 @@ export type BookingConfirmationData = {
   matchVisibility: 'public' | 'private';
   /** Solo público: sustituye la línea bajo el CTA. */
   playersLine?: string;
-  /** Modal de club / torneo: badge «Partido» vs «Torneo». */
-  confirmationKind?: 'match' | 'tournament';
+  /** Modal de club / torneo: badge «Partido» vs «Torneo» vs reserva de pista. */
+  confirmationKind?: 'match' | 'tournament' | 'reservation';
   /** Ej. «15/16» en inscripción a torneo. */
   spotsLine?: string;
   // Props para consumo de precio dinámico

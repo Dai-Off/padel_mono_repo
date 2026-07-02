@@ -62,6 +62,8 @@ export const alerts: AlertsTranslationKeys = {
     titleLeave: '離開球局？',
     bodySolo: '你是唯一球員：預約及球局將被取消。如已付款，將獲退款。',
     bodyMulti: '你將離開你的位置；其他球員繼續。如已付款，你的部分將獲退款。',
+    bodyOrganizerCancel: '將為所有球員取消球局。如有人已付款，將獲退款。',
+    bodyOrganizerCancelNoRefund: '將為所有球員取消球局。按俱樂部政策，不會退款。',
     bodySoloNoRefund: '你是唯一球員：預約及球局將被取消。按俱樂部政策，不會退款。',
     bodyMultiNoRefund: '你將離開你的位置。按俱樂部政策，不會退款。',
     policyNoRefundDefault: '已超過俱樂部退款期限：取消後不予退款。',
@@ -87,6 +89,11 @@ export const alerts: AlertsTranslationKeys = {
     accepted: '已接受邀請',
     acceptedBody: '你已成功報名此錦標賽。',
     title: '錦標賽邀請',
+  },
+  matchInvite: {
+    accepted: '已接受邀請',
+    acceptedBody: '你現在可以加入私人球局並支付位置。',
+    title: '球局邀請',
   },
   tournament: {
     sportAlert: '目前所有錦標賽均為板式網球。',

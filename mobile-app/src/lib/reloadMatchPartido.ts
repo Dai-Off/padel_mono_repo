@@ -2,8 +2,8 @@ import { fetchMatchById } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
-const RETRY_MS = 500;
-const MAX_PLAYER_RETRIES = 10;
+const RETRY_MS = 300;
+const MAX_PLAYER_RETRIES = 3;
 
 /** Carga el partido expandido; reintentos cubren desfase justo tras confirmar pago. */
 export async function reloadMatchPartido(

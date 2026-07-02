@@ -1,5 +1,6 @@
 import { API_URL } from '../config';
 import { normalizeMatchList } from './normalizeMatch';
+import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 export type Match = {
   id: string;
@@ -29,6 +30,8 @@ type PlayerRef = {
   elo_rating: number;
   liga?: string | null;
   avatar_url?: string | null;
+  /** Marco equipado resuelto por el backend (getEquippedFrames). */
+  frame?: FrameAttrs | null;
 };
 
 type MatchPlayerRef = {
@@ -343,7 +346,7 @@ export async function cancelMatchAsOrganizer(
     if (json.ok) {
       return {
         ok: true,
-        cancelledEntireMatch: json.cancelled_entire_match !== false,
+        cancelledEntireMatch: json.cancelled_entire_match === true,
         refundEligible: json.refund_eligible !== false,
       };
     }

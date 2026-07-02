@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Image,
   Modal,
   Pressable,
@@ -19,11 +18,15 @@ import { useStripe } from '../../stripe';
 import { useAuth } from '../../contexts/AuthContext';
 import { useHomeData } from '../../contexts/HomeDataContext';
 import { createIntentForNewMatch, confirmPaymentFromClient } from '../../api/payments';
+import { sendMatchPlayerInvites } from '../../api/matchInvites';
+import { PrivateInvitePlayerPicker, type SelectedInvitePlayer } from './PrivateInvitePlayerPicker';
+import { AppKeyboardAvoidingView } from '../ui/AppKeyboardAvoidingView';
+import { SafeScrollView } from '../ui/SafeScrollView';
 import {
   defaultFriendlyRange,
   FriendlyLevelRangeSection,
 } from './FriendlyLevelRangeSection';
-import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
+import { fetchClubAvailabilityForCreate, OPEN_MATCH_DURATION_MIN } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
@@ -35,7 +38,7 @@ import { formatLocale, useTranslation, type AppLocale } from '../../i18n';
 
 export type LocationType = 'club_wematch' | 'pista_externa';
 
-export type CrearPartidoFlowStep = 'location' | 'clubs' | 'configurar' | 'pista_externa';
+export type CrearPartidoFlowStep = 'location' | 'clubs' | 'tipo_partido' | 'configurar' | 'pista_externa';
 
 type CrearPartidoLocationSheetProps = {
   /** `fullscreen` = pantalla completa (club + horarios). `modal` = solo “¿Dónde se juega?” (+ pista externa). */
@@ -43,13 +46,15 @@ type CrearPartidoLocationSheetProps = {
   visible?: boolean;
   /** Paso inicial (p. ej. `clubs` en pantalla completa tras elegir WeMatch en el modal). */
   initialStep?: CrearPartidoFlowStep;
+  /** Tipo elegido en el modal antes de abrir pantalla completa de clubes. */
+  initialMatchVisibility?: 'public' | 'private';
   /**
-   * Si true (solo con `presentation="modal"`): al pulsar Siguiente con “WeMatch” no abre clubes aquí;
-   * llama `onContinueWeMatch` y el padre abre la pantalla completa de clubes.
+   * Si true (solo con `presentation="modal"`): tras elegir tipo de partido llama
+   * `onContinueWeMatch` y el padre abre la pantalla completa de clubes.
    */
   modalOnlyWeMatch?: boolean;
-  /** Tras WeMatch + Siguiente en modal; el padre cierra el modal y abre pantalla completa. */
-  onContinueWeMatch?: () => void;
+  /** Tras elegir tipo en modal; el padre cierra el modal y abre pantalla completa. */
+  onContinueWeMatch?: (matchVisibility: 'public' | 'private') => void;
   onClose: () => void;
   onSiguiente: (locationType: LocationType) => void;
   /** Tras pago y confirmación en backend; datos para pantalla de éxito. */
@@ -63,12 +68,8 @@ type Step = CrearPartidoFlowStep;
 
 type GenderOption = 'any' | 'male' | 'female' | 'mixed';
 
-/** Duración por defecto si el slot no trae la del club. */
-const DURATION_MIN = 90;
-
-function slotDurationMin(slot: SlotForCreate | null | undefined): number {
-  const d = Number(slot?.durationMinutes);
-  return Number.isFinite(d) && d > 0 ? d : DURATION_MIN;
+function slotDurationMin(_slot?: SlotForCreate | null): number {
+  return OPEN_MATCH_DURATION_MIN;
 }
 
 function slotPriceForDuration(slot: SlotForCreate): string {
@@ -136,6 +137,7 @@ export function CrearPartidoLocationSheet({
   presentation = 'modal',
   visible = true,
   initialStep = 'location',
+  initialMatchVisibility = 'public',
   modalOnlyWeMatch = false,
   onContinueWeMatch,
   onClose,
@@ -159,6 +161,8 @@ export function CrearPartidoLocationSheet({
   const [filterSport, setFilterSport] = useState<WeMatchSportFilter>('padel');
   const [filterCerramiento, setFilterCerramiento] = useState<CerramientoFilter>('any');
   const [creating, setCreating] = useState(false);
+  const [checkoutDone, setCheckoutDone] = useState(false);
+  const checkoutDoneRef = useRef(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -168,8 +172,18 @@ export function CrearPartidoLocationSheet({
       setCreateError(null);
       setSelectedSlot(null);
       setSelectedClub(null);
+      setMatchVisibility('public');
+      setCompactModalHeight(null);
     }
   }, [visible, presentation]);
+
+  const [matchVisibility, setMatchVisibility] = useState<'public' | 'private'>(initialMatchVisibility);
+  /** Altura natural del paso «ubicación» — la reutilizamos en «tipo de partido». */
+  const [compactModalHeight, setCompactModalHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    setMatchVisibility(initialMatchVisibility);
+  }, [initialMatchVisibility]);
 
   const [resolvedOrganizerId, setResolvedOrganizerId] = useState<string | null>(
     organizerProp ?? cachedProfile?.id ?? null,
@@ -236,7 +250,6 @@ export function CrearPartidoLocationSheet({
   }, [visible, presentation, step, modalOnlyWeMatch, loadClubs]);
 
   const [pistaReservada, setPistaReservada] = useState(false);
-  const [partidoPrivado, setPartidoPrivado] = useState(false);
 
   const [selectedSlot, setSelectedSlot] = useState<SlotForCreate | null>(null);
   const [selectedClub, setSelectedClub] = useState<ClubDisplay | null>(null);
@@ -247,7 +260,7 @@ export function CrearPartidoLocationSheet({
     date: selectedSlot?.dateStr,
     slot: selectedSlot?.time,
     durationMinutes: slotDurationMin(selectedSlot),
-    reservationType: partidoPrivado ? 'standard' : 'open_match',
+    reservationType: 'open_match',
   });
 
   const getSlotDisplayPrice = () => {
@@ -264,6 +277,7 @@ export function CrearPartidoLocationSheet({
   const [eloMax, setEloMax] = useState(() => defaultFriendlyRange(organizerElo).eloMax);
   const [gender, setGender] = useState<GenderOption>('any');
   const [onboardingCheckPending, setOnboardingCheckPending] = useState(false);
+  const [pendingInvitePlayers, setPendingInvitePlayers] = useState<SelectedInvitePlayer[]>([]);
 
   const handleSlotPress = useCallback(
     async (slot: SlotForCreate, club: ClubDisplay) => {
@@ -310,13 +324,16 @@ export function CrearPartidoLocationSheet({
       setEloMin(range.eloMin);
       setEloMax(range.eloMax);
       setGender('any');
+      setPendingInvitePlayers([]);
+      checkoutDoneRef.current = false;
+      setCheckoutDone(false);
       setStep('configurar');
     },
     [orgId, session?.access_token, cachedProfile?.id, cachedProfile, onNavigateToCompleteOnboarding, t],
   );
 
   const handleCheckout = useCallback(async () => {
-    if (!selectedSlot || !selectedClub) return;
+    if (!selectedSlot || !selectedClub || creating || checkoutDoneRef.current) return;
     const token = session?.access_token;
     if (!token) {
       Alert.alert(t('alerts.login.title'), t('alerts.createMatch.login'));
@@ -353,8 +370,8 @@ export function CrearPartidoLocationSheet({
         start_at,
         end_at,
         total_price_cents: priceData.total_price_cents,
-        pay_full: partidoPrivado,
-        visibility: partidoPrivado ? 'private' : 'public',
+        pay_full: false,
+        visibility: matchVisibility,
         competitive: false,
         gender,
         elo_min: restrictByLevel ? eloMin : null,
@@ -404,22 +421,27 @@ export function CrearPartidoLocationSheet({
       intentRes.paymentIntentId!,
       token
     );
-    setCreating(false);
     if (!confirmRes.ok) {
+      setCreating(false);
       setCreateError(t('common.paymentConfirmBookingError'));
       return;
     }
 
+    checkoutDoneRef.current = true;
+    setCheckoutDone(true);
+    setCreating(false);
+
     const currentPriceFormatted = getSlotDisplayPrice();
 
     const createdMatchId =
-      confirmRes.ok &&
       confirmRes.match &&
       typeof confirmRes.match === 'object' &&
       'id' in confirmRes.match &&
       typeof (confirmRes.match as { id: unknown }).id === 'string'
         ? (confirmRes.match as { id: string }).id
         : undefined;
+
+    const playerIdsToInvite = pendingInvitePlayers.map((p) => p.id);
 
     const confirmation: BookingConfirmationData = {
       courtName: selectedSlot.courtName,
@@ -432,7 +454,7 @@ export function CrearPartidoLocationSheet({
       ),
       duration: t('common.durationMin', { minutes: slotDurationMin(selectedSlot) }),
       priceFormatted: currentPriceFormatted,
-      matchVisibility: partidoPrivado ? 'private' : 'public',
+      matchVisibility,
       clubId: selectedClub.clubId,
       courtId: selectedSlot.courtId,
       date: selectedSlot.dateStr,
@@ -440,11 +462,15 @@ export function CrearPartidoLocationSheet({
       durationMinutes: slotDurationMin(selectedSlot),
       matchId: createdMatchId,
     };
-    /** El padre (p. ej. MainApp) cierra el flujo dentro de `onPartidoCreado`; no llamar `onClose` después para evitar carrera con la pantalla de éxito. */
+    /** Cierra el flujo y muestra confirmación antes de enviar invitaciones (evita doble pago si el envío tarda). */
     if (onPartidoCreado) {
       onPartidoCreado(confirmation);
     } else {
       onClose();
+    }
+
+    if (matchVisibility === 'private' && createdMatchId && playerIdsToInvite.length > 0) {
+      void sendMatchPlayerInvites(createdMatchId, playerIdsToInvite, token);
     }
   }, [
     selectedSlot,
@@ -459,20 +485,26 @@ export function CrearPartidoLocationSheet({
     presentPaymentSheet,
     onPartidoCreado,
     onClose,
-    partidoPrivado,
+    matchVisibility,
     priceData,
     priceLoading,
+    pendingInvitePlayers,
     t,
     locale,
   ]);
 
   const handleSiguiente = () => {
-    if (selected === 'club_wematch') {
+    if (step === 'tipo_partido') {
       if (modalOnlyWeMatch && onContinueWeMatch) {
-        onContinueWeMatch();
+        onContinueWeMatch(matchVisibility);
         return;
       }
       setStep('clubs');
+      return;
+    }
+    if (selected === 'club_wematch') {
+      setMatchVisibility('public');
+      setStep('tipo_partido');
     } else if (selected === 'pista_externa') {
       setStep('pista_externa');
     } else {
@@ -480,26 +512,34 @@ export function CrearPartidoLocationSheet({
     }
   };
 
-  /** Paso ubicación o listado de clubes o configurar: cromado oscuro (auth) unificado */
-  const matchFlowDark = step === 'location' || step === 'clubs' || step === 'configurar';
+  /** Paso ubicación, clubes, tipo de partido o configurar: cromado oscuro (auth) unificado */
+  const matchFlowDark =
+    step === 'location' || step === 'clubs' || step === 'tipo_partido' || step === 'configurar';
 
   const isModal = presentation === 'modal';
   const tallStep = step === 'clubs' || step === 'configurar' || step === 'pista_externa';
+  const isCompactModalStep = isModal && (step === 'location' || step === 'tipo_partido');
 
   const sheetBodyStyle = [
     styles.sheet,
     matchFlowDark && styles.sheetLocation,
     !isModal && styles.sheetFullscreen,
+    isCompactModalStep && step === 'tipo_partido' && compactModalHeight != null && { height: compactModalHeight },
     { paddingBottom: Math.max(insets.bottom, theme.spacing.lg) },
-    isModal &&
-      tallStep && {
-        height: Dimensions.get('window').height * 0.92,
-      },
     !isModal && tallStep && styles.sheetFullscreenTall,
   ];
 
+  const handleCompactModalLayout = useCallback(
+    (e: { nativeEvent: { layout: { height: number } } }) => {
+      if (!isModal || step !== 'location') return;
+      const next = Math.round(e.nativeEvent.layout.height);
+      setCompactModalHeight((prev) => (prev === next ? prev : next));
+    },
+    [isModal, step],
+  );
+
   const sheetElement = (
-          <View style={sheetBodyStyle}>
+          <View style={sheetBodyStyle} onLayout={handleCompactModalLayout}>
           {isModal && (
             <View style={[styles.handle, matchFlowDark && styles.handleLocation]} />
           )}
@@ -526,9 +566,9 @@ export function CrearPartidoLocationSheet({
                     pressed && styles.pressed,
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel={t('common.close')}
+                  accessibilityLabel={t('common.back')}
                 >
-                  <Ionicons name="close" size={20} color={theme.auth.text} />
+                  <Ionicons name="chevron-back" size={22} color={theme.auth.text} />
                 </Pressable>
                 <Text style={styles.headerConfigTitle} numberOfLines={1}>
                   {t('partidos.detailMatchDetails')}
@@ -555,7 +595,7 @@ export function CrearPartidoLocationSheet({
             ) : step === 'clubs' ? (
               <Pressable
                 onPress={() => {
-                  setStep('location');
+                  setStep('tipo_partido');
                   setCreateError(null);
                 }}
                 style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
@@ -571,8 +611,10 @@ export function CrearPartidoLocationSheet({
                 <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
               </Pressable>
             ) : (
-              <Text style={[styles.headerTitle, step === 'location' && styles.headerTitleLocation]}>
-                {t('partidos.sheetWhereTitle')}
+              <Text style={[styles.headerTitle, styles.headerTitleLocation]}>
+                {step === 'tipo_partido'
+                  ? t('partidos.createMatchTypeScreenSub')
+                  : t('partidos.sheetWhereTitle')}
               </Text>
             )}
             {step !== 'pista_externa' &&
@@ -668,7 +710,7 @@ export function CrearPartidoLocationSheet({
                 })}
                 <View style={styles.clubsFilterChipStatic} accessibilityRole="text">
                   <Text style={styles.clubsFilterChipTextMuted}>
-                    {clubsLoading ? '…' : t(clubs.length === 1 ? 'common.clubFoundOne' : 'common.clubFoundMany', { count: clubs.length })}
+                    {t(clubs.length === 1 ? 'common.clubFoundOne' : 'common.clubFoundMany', { count: clubs.length })}
                   </Text>
                 </View>
               </ScrollView>
@@ -751,8 +793,8 @@ export function CrearPartidoLocationSheet({
                 <Text style={styles.detailLabel}>{t('partidos.createMarkPrivate')}</Text>
                 <View style={styles.detailRight}>
                   <Switch
-                    value={partidoPrivado}
-                    onValueChange={setPartidoPrivado}
+                    value={matchVisibility === 'private'}
+                    onValueChange={(v) => setMatchVisibility(v ? 'private' : 'public')}
                     trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
                     thumbColor="#fff"
                   />
@@ -771,12 +813,27 @@ export function CrearPartidoLocationSheet({
               </Pressable>
             </ScrollView>
           ) : step === 'configurar' && selectedSlot && selectedClub ? (
-            <View style={styles.configurarWrap}>
-              <ScrollView
+            <AppKeyboardAvoidingView style={styles.configurarWrap}>
+              <SafeScrollView
                 style={styles.pistaScroll}
                 contentContainerStyle={styles.configurarContent}
                 showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                bottomOffset={Math.max(insets.bottom, 16) + 72}
               >
+                <View style={styles.configMatchTypeBadge}>
+                  <Ionicons
+                    name={matchVisibility === 'private' ? 'lock-closed' : 'globe-outline'}
+                    size={14}
+                    color={theme.auth.accent}
+                  />
+                  <Text style={styles.configMatchTypeBadgeText}>
+                    {matchVisibility === 'private'
+                      ? t('partidos.createPrivateLabel')
+                      : t('partidos.createPublicLabel')}
+                  </Text>
+                </View>
+
                 <View style={styles.configSection}>
                   <Text style={styles.configSectionTitle}>{t('partidos.createFriendlySection')}</Text>
                   <Text style={styles.configFriendlyNote}>
@@ -816,24 +873,20 @@ export function CrearPartidoLocationSheet({
                   ))}
                 </View>
 
-                <View style={styles.configSection}>
-                  <Text style={styles.configSectionTitle}>{t('partidos.createPrivacySection')}</Text>
-                  <View style={styles.privacyRow}>
-                    <View style={styles.privacyLeft}>
-                      <Ionicons name="lock-closed-outline" size={18} color={theme.auth.textMuted} />
-                      <View style={styles.privacyTextWrap}>
-                        <Text style={styles.privacyLabel}>{t('partidos.createPrivateLabel')}</Text>
-                        <Text style={styles.privacySub}>{t('partidos.createPrivateSub')}</Text>
-                      </View>
-                    </View>
-                    <Switch
-                      value={partidoPrivado}
-                      onValueChange={setPartidoPrivado}
-                      trackColor={{ false: 'rgba(255,255,255,0.2)', true: theme.auth.accent }}
-                      thumbColor="#fff"
+                {matchVisibility === 'private' ? (
+                  <View style={styles.configSection}>
+                    <Text style={styles.configSectionTitle}>{t('partidos.createPrivateInvitesSection')}</Text>
+                    <Text style={styles.configFriendlyNote}>
+                      {t('partidos.createPrivateInvitesPrePay')}
+                    </Text>
+                    <PrivateInvitePlayerPicker
+                      selected={pendingInvitePlayers}
+                      onSelectedChange={setPendingInvitePlayers}
+                      accessToken={session?.access_token}
+                      excludePlayerIds={orgId ? [orgId] : []}
                     />
                   </View>
-                </View>
+                ) : null}
 
                 <View style={styles.configClubCard}>
                   {selectedClub.imageUrl ? (
@@ -863,59 +916,43 @@ export function CrearPartidoLocationSheet({
                     <Text style={styles.createErrorText}>{createError}</Text>
                   </View>
                 )}
-              </ScrollView>
-              <View style={styles.configurarFooter}>
+              </SafeScrollView>
+              <View style={[styles.configurarFooter, { paddingBottom: Math.max(insets.bottom, theme.spacing.md) }]}>
                 <Pressable
                   style={({ pressed }) => [styles.ctaButton, styles.ctaButtonConfig, pressed && styles.pressed]}
                   onPress={handleCheckout}
-                  disabled={creating}
+                  disabled={creating || checkoutDone}
                 >
-                  <Text style={styles.ctaButtonText}>{creating ? t('common.saving') : t('partidos.createNext')}</Text>
+                  <Text style={styles.ctaButtonText}>
+                    {creating ? t('common.saving') : checkoutDone ? t('common.paymentDone') : t('partidos.createNext')}
+                  </Text>
                 </Pressable>
               </View>
-            </View>
+            </AppKeyboardAvoidingView>
           ) : step === 'clubs' ? (
-            clubsLoading ? (
-              <View style={styles.clubsStateWrapper}>
-                <View style={[styles.clubsStateCard, styles.clubsStateCardDark]}>
-                  <View style={[styles.clubsStateIconWrap, styles.clubsStateIconWrapDark]}>
-                    <ActivityIndicator size="large" color={theme.auth.accent} />
-                  </View>
-                  <Text style={[styles.clubsStateTitle, styles.clubsStateTitleDark]}>{t('partidos.createSearchingCourts')}</Text>
-                  <Text style={[styles.clubsStateSub, styles.clubsStateSubDark]}>
-                    {t('common.searchingClubs')}
-                  </Text>
-                </View>
+            clubsLoading && clubs.length === 0 && !clubsError ? (
+              <View style={styles.clubsLoadingWrap}>
+                <ActivityIndicator size="small" color={theme.auth.accent} />
+                <Text style={styles.clubsLoadingTitle}>{t('partidos.createSearchingCourts')}</Text>
+                <Text style={styles.clubsLoadingSub}>{t('common.searchingClubs')}</Text>
               </View>
             ) : clubsError ? (
-              <View style={styles.clubsStateWrapper}>
-                <View style={[styles.clubsStateCard, styles.clubsStateCardDark]}>
-                  <View style={[styles.clubsStateIconWrap, styles.clubsStateIconWrapDark]}>
-                    <Ionicons name="cloud-offline-outline" size={32} color={theme.auth.textMuted} />
-                  </View>
-                  <Text style={[styles.clubsStateTitle, styles.clubsStateTitleDark]}>{clubsError}</Text>
-                  <Text style={[styles.clubsStateSub, styles.clubsStateSubDark]}>
-                    {t('common.connectionError')}
-                  </Text>
-                  <Pressable
-                    style={({ pressed }) => [styles.retryButton, styles.retryButtonApp, pressed && styles.pressed]}
-                    onPress={loadClubs}
-                  >
-                    <Text style={styles.retryButtonText}>{t('partidos.createRetry')}</Text>
-                  </Pressable>
-                </View>
+              <View style={styles.clubsFeedbackWrap}>
+                <Ionicons name="cloud-offline-outline" size={36} color={theme.auth.textMuted} />
+                <Text style={styles.clubsFeedbackTitle}>{clubsError}</Text>
+                <Text style={styles.clubsFeedbackSub}>{t('common.connectionError')}</Text>
+                <Pressable
+                  style={({ pressed }) => [styles.retryButton, styles.retryButtonApp, pressed && styles.pressed]}
+                  onPress={loadClubs}
+                >
+                  <Text style={styles.retryButtonText}>{t('partidos.createRetry')}</Text>
+                </Pressable>
               </View>
             ) : clubs.length === 0 ? (
-              <View style={styles.clubsStateWrapper}>
-                <View style={[styles.clubsStateCard, styles.clubsStateCardDark]}>
-                  <View style={[styles.clubsStateIconWrap, styles.clubsStateIconWrapDark]}>
-                    <Text style={styles.clubsEmptyEmoji}>🏟️</Text>
-                  </View>
-                  <Text style={[styles.clubsStateTitle, styles.clubsStateTitleDark]}>{t('partidos.createNoCourts')}</Text>
-                  <Text style={[styles.clubsStateSub, styles.clubsStateSubDark]}>
-                    {t('partidos.noOpenMatchesHint')}
-                  </Text>
-                </View>
+              <View style={styles.clubsFeedbackWrap}>
+                <Ionicons name="business-outline" size={36} color={theme.auth.textMuted} />
+                <Text style={styles.clubsFeedbackTitle}>{t('partidos.createNoCourts')}</Text>
+                <Text style={styles.clubsFeedbackSub}>{t('partidos.noOpenMatchesHint')}</Text>
               </View>
             ) : (
               <ScrollView
@@ -929,6 +966,12 @@ export function CrearPartidoLocationSheet({
                     <Text style={styles.createErrorText}>{createError}</Text>
                   </View>
                 )}
+                {clubsLoading ? (
+                  <View style={styles.clubsRefreshRow}>
+                    <ActivityIndicator size="small" color={theme.auth.accent} />
+                    <Text style={styles.clubsRefreshText}>{t('common.searchingClubs')}</Text>
+                  </View>
+                ) : null}
                 <View style={styles.bannerGlass}>
                   <Text style={styles.bannerGlassTitle}>{t('partidos.createAvailabilityBanner')}</Text>
                   <Text style={styles.bannerGlassSub}>
@@ -999,14 +1042,83 @@ export function CrearPartidoLocationSheet({
                 <View style={styles.bottomSpacer} />
               </ScrollView>
             )
+          ) : step === 'tipo_partido' ? (
+            <View style={styles.modalStepBody}>
+              <View>
+              {([
+                {
+                  value: 'public' as const,
+                  label: t('partidos.createPublicLabel'),
+                  sub: t('partidos.createPublicSub'),
+                  icon: 'globe-outline' as const,
+                },
+                {
+                  value: 'private' as const,
+                  label: t('partidos.createPrivateLabel'),
+                  sub: t('partidos.createPrivateSub'),
+                  icon: 'lock-closed-outline' as const,
+                },
+              ]).map((opt, index) => {
+                const selected = matchVisibility === opt.value;
+                return (
+                <Pressable
+                  key={opt.value}
+                  style={({ pressed }) => [
+                    styles.optionCard,
+                    styles.optionCardLocation,
+                    index === 1 && styles.optionCardLocationSecond,
+                    selected && styles.optionCardLocationSelected,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => setMatchVisibility(opt.value)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                >
+                  <View
+                    style={[
+                      styles.optionIconWrap,
+                      selected
+                        ? styles.optionIconWrapLocationSelected
+                        : styles.optionIconWrapLocationNeutral,
+                    ]}
+                  >
+                    <Ionicons
+                      name={opt.icon}
+                      size={20}
+                      color={selected ? theme.auth.accent : theme.auth.textMuted}
+                    />
+                  </View>
+                  <View style={styles.optionBody}>
+                    <Text style={[styles.optionTitle, styles.optionTitleLocation]}>{opt.label}</Text>
+                    <Text style={[styles.optionDesc, styles.optionDescLocation]}>{opt.sub}</Text>
+                  </View>
+                </Pressable>
+              );
+              })}
+              </View>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.ctaButton,
+                  styles.ctaButtonLocation,
+                  pressed && styles.pressed,
+                ]}
+                onPress={handleSiguiente}
+                accessibilityRole="button"
+                accessibilityLabel={t('partidos.createNext')}
+              >
+                <Text style={[styles.ctaButtonText, styles.ctaButtonTextLocation]}>
+                  {t('partidos.createNext')}
+                </Text>
+              </Pressable>
+            </View>
           ) : (
           <>
           <Pressable
             style={({ pressed }) => [
               styles.optionCard,
-              selected === 'club_wematch' && step !== 'location' && styles.optionSelected,
-              step === 'location' && styles.optionCardLocation,
-              selected === 'club_wematch' && step === 'location' && styles.optionCardLocationSelected,
+              selected === 'club_wematch' && styles.optionSelected,
+              styles.optionCardLocation,
+              selected === 'club_wematch' && styles.optionCardLocationSelected,
               pressed && styles.pressed,
             ]}
             onPress={() => setSelected('club_wematch')}
@@ -1022,7 +1134,11 @@ export function CrearPartidoLocationSheet({
                     : styles.optionIconWrapLocationNeutral),
               ]}
             >
-              <Text style={styles.optionEmoji}>🏟️</Text>
+              <Ionicons
+                name="business-outline"
+                size={20}
+                color={selected === 'club_wematch' ? theme.auth.accent : theme.auth.textMuted}
+              />
             </View>
             <View style={styles.optionBody}>
               <Text style={[styles.optionTitle, step === 'location' && styles.optionTitleLocation]}>
@@ -1143,6 +1259,11 @@ const styles = StyleSheet.create({
     paddingTop: theme.spacing.sm,
     width: '100%',
     alignSelf: 'stretch',
+  },
+  modalStepBody: {
+    flex: 1,
+    justifyContent: 'space-between',
+    minHeight: 0,
   },
   /** Pantalla completa: sin forma de bottom sheet */
   sheetFullscreen: {
@@ -1588,59 +1709,58 @@ const styles = StyleSheet.create({
     color: theme.auth.textMuted,
     fontStyle: 'italic',
   },
-  clubsStateWrapper: {
+  clubsLoadingWrap: {
     flex: 1,
     justifyContent: 'center',
-    paddingVertical: 32,
-  },
-  clubsStateCard: {
-    backgroundColor: '#f9fafb',
-    borderRadius: 16,
-    padding: 24,
     alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 48,
+    gap: 10,
   },
-  clubsStateIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
+  clubsLoadingTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: theme.auth.text,
+    marginTop: 4,
   },
-  clubsStateTitle: {
-    fontSize: theme.fontSize.base,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  clubsStateSub: {
-    fontSize: theme.fontSize.xs,
-    color: '#6b7280',
+  clubsLoadingSub: {
+    fontSize: 13,
+    color: theme.auth.textMuted,
     textAlign: 'center',
     lineHeight: 20,
-    marginBottom: 16,
   },
-  clubsStateCardDark: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+  clubsFeedbackWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 48,
+    gap: 10,
   },
-  clubsStateIconWrapDark: {
-    backgroundColor: 'rgba(241, 143, 52, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(241, 143, 52, 0.25)',
-  },
-  clubsStateTitleDark: {
+  clubsFeedbackTitle: {
+    fontSize: 15,
+    fontWeight: '600',
     color: theme.auth.text,
+    textAlign: 'center',
   },
-  clubsStateSubDark: {
+  clubsFeedbackSub: {
+    fontSize: 13,
     color: theme.auth.textMuted,
-    marginBottom: 0,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 8,
   },
-  clubsEmptyEmoji: {
-    fontSize: 28,
+  clubsRefreshRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    marginBottom: 4,
+  },
+  clubsRefreshText: {
+    fontSize: 13,
+    color: theme.auth.textMuted,
   },
   retryButton: {
     marginTop: 8,
@@ -1868,6 +1988,24 @@ const styles = StyleSheet.create({
     color: theme.auth.textMuted,
     marginBottom: 12,
     lineHeight: 18,
+  },
+  configMatchTypeBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.25)',
+    marginBottom: 16,
+  },
+  configMatchTypeBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.auth.accent,
   },
   configOption: {
     flexDirection: 'row',

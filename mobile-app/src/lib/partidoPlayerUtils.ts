@@ -1,11 +1,27 @@
-import type { PartidoItem } from '../screens/PartidosScreen';
+import type { PartidoItem, PartidoPlayer } from '../screens/PartidosScreen';
 import { normalizePlayerAvatarUrl } from '../api/playerAvatar';
+import { isPartidoCancelled } from '../domain/matchLifecycle';
 
 /** Avatares ya vistos en pantalla — sobreviven a refetch sin URL en la API. */
 const knownPlayerAvatars = new Map<string, string>();
 
 /** ELO formateado por jugador — evita badge amarillo vacío tras unirse. */
 const knownPlayerLevels = new Map<string, string>();
+
+/** Marco equipado por jugador — evita que parpadee/desaparezca en refetches. */
+type PlayerFrame = NonNullable<PartidoItem['players'][number]['frame']>;
+const knownPlayerFrames = new Map<string, PlayerFrame>();
+
+export function cachePlayerFrame(playerId: string | null | undefined, frame: PlayerFrame | null | undefined): void {
+  const id = playerId?.trim();
+  if (id && frame) knownPlayerFrames.set(id, frame);
+}
+
+export function getCachedPlayerFrame(playerId: string | null | undefined): PlayerFrame | null {
+  const id = playerId?.trim();
+  if (!id) return null;
+  return knownPlayerFrames.get(id) ?? null;
+}
 
 export function cachePlayerAvatar(playerId: string | null | undefined, url: string | null | undefined): void {
   const id = playerId?.trim();
@@ -61,6 +77,43 @@ function rememberPartidoAvatars(partido: PartidoItem): void {
   for (const [pid, uri] of collectAvatarsByPlayerId(partido)) {
     knownPlayerAvatars.set(pid, uri);
   }
+}
+
+function collectFramesByPlayerId(partido: PartidoItem): Map<string, PlayerFrame> {
+  const map = new Map<string, PlayerFrame>();
+  partido.players.forEach((p, index) => {
+    const pid = playerIdAtSlot(partido, index, p);
+    if (pid && p.frame) map.set(pid, p.frame);
+  });
+  return map;
+}
+
+function rememberPartidoFrames(partido: PartidoItem): void {
+  for (const [pid, frame] of collectFramesByPlayerId(partido)) {
+    knownPlayerFrames.set(pid, frame);
+  }
+}
+
+/**
+ * Tras un refetch, no descartar el marco que ya teníamos si el nuevo llega sin
+ * él (misma plaza, mismo jugador). Evita el parpadeo "marco → sin marco → marco".
+ */
+export function preservePartidoPlayerFrames(
+  previous: PartidoItem,
+  incoming: PartidoItem,
+): PartidoItem {
+  const prevById = collectFramesByPlayerId(previous);
+  const players = incoming.players.map((p, index) => {
+    if (p.frame) return p;
+    const pid = playerIdAtSlot(incoming, index, p) ?? playerIdAtSlot(previous, index, p);
+    const prevFrame = (pid ? prevById.get(pid) : null) ?? (pid ? getCachedPlayerFrame(pid) : null);
+    if (prevFrame) return { ...p, frame: prevFrame };
+    return p;
+  });
+  const changed = players.some((p, i) => p.frame !== incoming.players[i]?.frame);
+  const result = changed ? { ...incoming, players } : incoming;
+  rememberPartidoFrames(result);
+  return result;
 }
 
 export type ProfileForPartidoEnrich = {
@@ -244,6 +297,21 @@ function playerParticipatesInPartido(partido: PartidoItem, playerId: string): bo
   );
 }
 
+export function isPlayerInPartido(partido: PartidoItem, playerId: string | null | undefined): boolean {
+  const pid = playerId?.trim();
+  if (!pid) return false;
+  return playerParticipatesInPartido(partido, pid);
+}
+
+export function findPlayerSlotIndex(partido: PartidoItem, playerId: string): number | null {
+  const pid = playerId.trim();
+  if (!pid) return null;
+  const bySlot = (partido.playerIdsBySlot ?? []).findIndex((id) => id === pid);
+  if (bySlot >= 0) return bySlot;
+  const byPlayer = partido.players.findIndex((p) => p.id === pid);
+  return byPlayer >= 0 ? byPlayer : null;
+}
+
 function shouldEnrichSlot(
   partido: PartidoItem,
   index: number,
@@ -258,6 +326,8 @@ function shouldEnrichSlot(
 export type EnrichPartidoOptions = {
   /** Tras unirse: rellena la plaza aunque la API aún no devolvió al jugador. */
   forceSlotIndex?: number;
+  /** Tras salir: no re-añadir al viewer aunque el servidor aún lo liste. */
+  excludeViewerId?: string;
 };
 
 /** Rellena nombre, iniciales y avatar del jugador actual desde el perfil cacheado. */
@@ -351,7 +421,78 @@ export function enrichPartidoWithProfileAvatar(
   if (uri) cachePlayerAvatar(pid, uri);
   rememberPartidoAvatars(result);
   rememberPartidoLevels(result);
+  rememberPartidoFrames(result);
   return result;
+}
+
+/** Quita al jugador actual de las plazas (salida optimista tras cancel API). */
+export function removeViewerFromPartido(partido: PartidoItem, playerId: string): PartidoItem {
+  const pid = playerId.trim();
+  if (!pid) return partido;
+
+  const emptySlot: PartidoPlayer = { name: '', level: '', isFree: true };
+  const players = partido.players.map((p, index) => {
+    const slotId = partido.playerIdsBySlot?.[index];
+    if (p.id === pid || slotId === pid) return { ...emptySlot };
+    return p;
+  });
+
+  const playerIds = (partido.playerIds ?? []).filter((id) => id !== pid);
+  const playerIdsBySlot = [...(partido.playerIdsBySlot ?? [null, null, null, null])].map((id) =>
+    id === pid ? null : id,
+  );
+  while (playerIdsBySlot.length < 4) playerIdsBySlot.push(null);
+
+  return {
+    ...partido,
+    players,
+    playerIds,
+    playerIdsBySlot,
+    organizerPlayerId: partido.organizerPlayerId === pid ? null : partido.organizerPlayerId,
+  };
+}
+
+/** UI inmediata tras confirmar pago de unión (antes del refetch del servidor). */
+export function applyPartidoJoinAfterPayment(
+  partido: PartidoItem,
+  profile: ProfileForPartidoEnrich,
+  slotIndex: number,
+): PartidoItem {
+  const pid = profile.id.trim();
+  const emptySlot: PartidoPlayer = { name: '', level: '', isFree: true };
+  const playerIdsBySlot = [...(partido.playerIdsBySlot ?? [null, null, null, null])];
+  while (playerIdsBySlot.length < 4) playerIdsBySlot.push(null);
+
+  const players = partido.players.map((p, index) => {
+    if (index === slotIndex) return { ...emptySlot };
+    const slotId = playerIdsBySlot[index];
+    if (p.id === pid || slotId === pid) return { ...emptySlot };
+    return p;
+  });
+
+  for (let i = 0; i < 4; i++) {
+    if (i !== slotIndex && playerIdsBySlot[i] === pid) playerIdsBySlot[i] = null;
+  }
+  playerIdsBySlot[slotIndex] = pid;
+
+  const playerIds = [...new Set([...(partido.playerIds ?? []).filter((id) => id !== pid), pid])];
+  const cleared = {
+    ...partido,
+    players,
+    playerIds,
+    playerIdsBySlot,
+  };
+
+  let next = enrichPartidoWithProfileAvatar(cleared, profile, { forceSlotIndex: slotIndex });
+  const filled = next.players.filter((p) => !p.isFree).length;
+  if (filled >= 4) {
+    next = {
+      ...next,
+      bookingStatus: 'confirmed',
+      matchStatus: next.matchStatus === 'open' ? 'full' : next.matchStatus,
+    };
+  }
+  return next;
 }
 
 function normalizeLevelDisplay(level: string | undefined): string {
@@ -387,7 +528,13 @@ export function preservePartidoPlayerLevels(
   return changed ? { ...incoming, players } : incoming;
 }
 
-/** True si la UI de jugadores (avatar, nombre, ELO) no cambiaría visiblemente. */
+/** Clave estable del marco equipado, para comparar sin re-render innecesario. */
+function frameKey(frame: PartidoItem['players'][number]['frame']): string {
+  if (!frame) return '';
+  return [frame.style ?? '', frame.animationType ?? '', frame.rarity ?? '', (frame.colors ?? []).join(',')].join('|');
+}
+
+/** True si la UI de jugadores (avatar, nombre, ELO, marco) no cambiaría visiblemente. */
 export function partidoPlayersDisplayEqual(a: PartidoItem, b: PartidoItem): boolean {
   if (a.players.length !== b.players.length) return false;
   return a.players.every((pa, i) => {
@@ -398,6 +545,7 @@ export function partidoPlayersDisplayEqual(a: PartidoItem, b: PartidoItem): bool
     if ((pa.name ?? '') !== (pb.name ?? '')) return false;
     if (normalizeLevelDisplay(pa.level) !== normalizeLevelDisplay(pb.level)) return false;
     if ((pa.initial ?? '') !== (pb.initial ?? '')) return false;
+    if (frameKey(pa.frame) !== frameKey(pb.frame)) return false;
     const avA = normalizePlayerAvatarUrl(pa.avatar);
     const avB = normalizePlayerAvatarUrl(pb.avatar);
     return avA === avB;
@@ -411,10 +559,33 @@ export function mergePartidoWithServer(
   profile: ProfileForPartidoEnrich | null | undefined,
   opts?: EnrichPartidoOptions,
 ): PartidoItem {
-  const base = preservePartidoPlayerAvatars(previous, fromServer);
+  let server = fromServer;
+  const pid = profile?.id?.trim();
+  const excludeId = opts?.excludeViewerId?.trim();
+
+  if (excludeId && playerParticipatesInPartido(server, excludeId) && !playerParticipatesInPartido(previous, excludeId)) {
+    server = removeViewerFromPartido(server, excludeId);
+  }
+
+  if (pid && profile) {
+    const onServer = playerParticipatesInPartido(server, pid);
+    const onPrevious = playerParticipatesInPartido(previous, pid);
+    if (onPrevious && !onServer) {
+      const slot =
+        opts?.forceSlotIndex ??
+        findPlayerSlotIndex(previous, pid) ??
+        findPlayerSlotIndex(server, pid);
+      if (slot != null && slot >= 0 && slot <= 3) {
+        server = applyPartidoJoinAfterPayment(server, profile, slot);
+      }
+    }
+  }
+
+  const base = preservePartidoPlayerAvatars(previous, server);
   let next = enrichPartidoWithProfileAvatar(base, profile, opts);
   next = preservePartidoPlayerAvatars(previous, next);
   next = preservePartidoPlayerLevels(previous, next);
+  next = preservePartidoPlayerFrames(previous, next);
   return {
     ...next,
     organizerPlayerId: next.organizerPlayerId ?? previous.organizerPlayerId,
@@ -424,6 +595,23 @@ export function mergePartidoWithServer(
     hasMyFeedback: next.hasMyFeedback === true || previous.hasMyFeedback === true,
     venueImage: next.venueImage ?? previous.venueImage,
     venueAddress: next.venueAddress ?? previous.venueAddress,
+  };
+}
+
+/** Aplica merge conservando plazas locales si la UI de jugadores no cambió. */
+export function applyPartidoServerMerge(
+  previous: PartidoItem,
+  fromServer: PartidoItem,
+  profile: ProfileForPartidoEnrich | null | undefined,
+  opts?: EnrichPartidoOptions,
+): PartidoItem {
+  const merged = mergePartidoWithServer(previous, fromServer, profile, opts);
+  if (!partidoPlayersDisplayEqual(previous, merged)) return merged;
+  return {
+    ...merged,
+    players: previous.players,
+    playerIds: previous.playerIds,
+    playerIdsBySlot: previous.playerIdsBySlot,
   };
 }
 
@@ -456,6 +644,7 @@ export function upsertMisPartidosList(items: PartidoItem[], next: PartidoItem): 
   const idx = items.findIndex((p) => p.id === next.id);
   const mergedItem = idx >= 0 ? preservePartidoPlayerAvatars(items[idx], next) : next;
   rememberPartidoAvatars(mergedItem);
+  rememberPartidoFrames(mergedItem);
   const merged =
     idx >= 0 ? items.map((p, i) => (i === idx ? mergedItem : p)) : [mergedItem, ...items];
   const upcoming = merged.filter((p) => p.matchPhase !== 'past');
@@ -499,6 +688,12 @@ export function isPartidoMine(
   return (partido.playerIdsBySlot ?? []).some((id) => id === pid);
 }
 
+export function removeMisPartidoFromList(items: PartidoItem[], matchId: string): PartidoItem[] {
+  const id = matchId.trim();
+  if (!id) return items;
+  return items.filter((p) => p.id !== id);
+}
+
 /**
  * Tras /matches/mine, conserva partidos locales que la API aún no devolvió
  * (desfase tras crear/unirse/pago). `previous` solo contiene partidos del usuario.
@@ -506,17 +701,36 @@ export function isPartidoMine(
 export function mergeMisPartidosFromServer(
   previous: PartidoItem[],
   fromServer: PartidoItem[],
+  profile?: ProfileForPartidoEnrich | null,
+  everSyncedIds?: ReadonlySet<string>,
+  pendingLocalIds?: ReadonlyMap<string, number>,
 ): PartidoItem[] {
   const prevById = new Map(previous.map((p) => [p.id, p]));
+  const pid = profile?.id?.trim();
   let merged = fromServer.map((incoming) => {
     const prev = prevById.get(incoming.id);
-    return prev ? preservePartidoPlayerAvatars(prev, incoming) : incoming;
+    if (!prev) return incoming;
+    let serverRow = incoming;
+    if (pid && !isPlayerInPartido(prev, pid) && isPlayerInPartido(incoming, pid)) {
+      serverRow = removeViewerFromPartido(incoming, pid);
+    }
+    if (pid) {
+      return applyPartidoServerMerge(prev, serverRow, profile);
+    }
+    return preservePartidoPlayerAvatars(prev, serverRow);
   });
   const serverIds = new Set(fromServer.map((p) => p.id));
+  const pendingGraceMs = 120_000;
+  const now = Date.now();
   for (const p of previous) {
     if (serverIds.has(p.id) || p.matchPhase === 'past') continue;
+    if (isPartidoCancelled(p)) continue;
+    if (everSyncedIds?.has(p.id)) continue;
+    const pendingAt = pendingLocalIds?.get(p.id);
+    if (pendingAt == null || now - pendingAt > pendingGraceMs) continue;
     merged = upsertMisPartidosList(merged, p);
   }
   merged.forEach(rememberPartidoAvatars);
-  return merged;
+  merged.forEach(rememberPartidoFrames);
+  return merged.filter((p) => !isPartidoCancelled(p));
 }

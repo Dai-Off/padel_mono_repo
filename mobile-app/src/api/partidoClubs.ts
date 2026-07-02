@@ -5,8 +5,8 @@ import { fetchSearchCourts } from './search';
 import { fetchAvailableSlots } from './availability';
 import type { SearchCourtResult } from './search';
 
-/** Duración por defecto si el club no reporta su `slot_minutes`. */
-const DEFAULT_SLOT_MIN = 90;
+/** Partidos públicos/privados: siempre 90 min, sin usar el turno mínimo del club. */
+export const OPEN_MATCH_DURATION_MIN = 90;
 
 function durationLabel(min: number): string {
   return `${min}min`;
@@ -82,8 +82,8 @@ function toSlots(r: SearchCourtResult, dateStr: string, dateLabel: string): Slot
   const times = filterSlotsStartingAfterNow(dateStr, r.timeSlots ?? [], now);
   return times.map((time) => ({
     time,
-    duration: durationLabel(DEFAULT_SLOT_MIN),
-    durationMinutes: DEFAULT_SLOT_MIN,
+    duration: durationLabel(OPEN_MATCH_DURATION_MIN),
+    durationMinutes: OPEN_MATCH_DURATION_MIN,
     courtId: r.id,
     courtName: r.courtName,
     dateStr,
@@ -211,11 +211,10 @@ export async function fetchClubAvailabilityForCreate(
     }
   });
 
-  // Obtenemos disponibilidad real (requiere token) en BATCH para mejorar performance.
-  // Sin forzar duración: el backend usa la duración de turno configurada por cada club.
+  // Disponibilidad forzada a 90 min: partidos open_match ignoran slot_duration_min del club.
   const [day1Res, day2Res, clubTzMap] = await Promise.all([
-    fetchAvailableSlots({ clubIds, date: today, token }),
-    fetchAvailableSlots({ clubIds, date: tomorrow, token }),
+    fetchAvailableSlots({ clubIds, date: today, token, durationMinutes: OPEN_MATCH_DURATION_MIN }),
+    fetchAvailableSlots({ clubIds, date: tomorrow, token, durationMinutes: OPEN_MATCH_DURATION_MIN }),
     fetchClubTimezones(clubIds),
   ]);
 
@@ -237,13 +236,12 @@ export async function fetchClubAvailabilityForCreate(
         (r) => r.club_id === clubId && todayCourtIdsForClub.has(r.court_id)
       );
       for (const courtRes of clubCourts) {
-        const slotMin = courtRes.slot_minutes ?? DEFAULT_SLOT_MIN;
         const clubTimezone = courtRes.club_timezone ?? clubTzMap.get(clubId);
         const startAtUtcByTime = buildStartAtUtcByTime(courtRes.free_slots);
         const slotUtcByTime = new Map(
           courtRes.free_slots
             .filter((s) => s.start_at)
-            .map((s) => [s.start, { startAtUtc: s.start_at!, endAtUtc: s.end_at }]),
+            .map((s) => [s.start, s.start_at!]),
         );
         const filteredTimes = filterSlotsStartingAfterNow(
           today,
@@ -254,11 +252,14 @@ export async function fetchClubAvailabilityForCreate(
         for (const time of filteredTimes) {
           const p = todayPrices.find(r => r.id === courtRes.court_id);
           const cm = metaByCourt.get(courtRes.court_id);
-          const utc = slotUtcByTime.get(time);
+          const startAtUtc = slotUtcByTime.get(time);
+          const endAtUtc = startAtUtc
+            ? new Date(new Date(startAtUtc).getTime() + OPEN_MATCH_DURATION_MIN * 60 * 1000).toISOString()
+            : undefined;
           slots.push({
             time,
-            duration: durationLabel(slotMin),
-            durationMinutes: slotMin,
+            duration: durationLabel(OPEN_MATCH_DURATION_MIN),
+            durationMinutes: OPEN_MATCH_DURATION_MIN,
             courtId: courtRes.court_id,
             courtName: courtRes.court_name,
             dateStr: today,
@@ -267,8 +268,8 @@ export async function fetchClubAvailabilityForCreate(
             minPriceFormatted: p?.minPriceFormatted ?? '-',
             courtSport: cm?.sport ?? 'padel',
             courtIndoor: cm?.indoor ?? false,
-            startAtUtc: utc?.startAtUtc,
-            endAtUtc: utc?.endAtUtc,
+            startAtUtc,
+            endAtUtc,
             clubTimezone,
           });
         }
@@ -295,13 +296,12 @@ export async function fetchClubAvailabilityForCreate(
         (r) => r.club_id === clubId && tomorrowCourtIdsForClub.has(r.court_id)
       );
       for (const courtRes of clubCourts) {
-        const slotMin = courtRes.slot_minutes ?? DEFAULT_SLOT_MIN;
         const clubTimezone = courtRes.club_timezone ?? clubTzMap.get(clubId);
         const startAtUtcByTime = buildStartAtUtcByTime(courtRes.free_slots);
         const slotUtcByTime = new Map(
           courtRes.free_slots
             .filter((s) => s.start_at)
-            .map((s) => [s.start, { startAtUtc: s.start_at!, endAtUtc: s.end_at }]),
+            .map((s) => [s.start, s.start_at!]),
         );
         const filteredTimes = filterSlotsStartingAfterNow(
           tomorrow,
@@ -312,11 +312,14 @@ export async function fetchClubAvailabilityForCreate(
         for (const time of filteredTimes) {
           const p = tomorrowPrices.find(r => r.id === courtRes.court_id);
           const cm = metaByCourt.get(courtRes.court_id);
-          const utc = slotUtcByTime.get(time);
+          const startAtUtc = slotUtcByTime.get(time);
+          const endAtUtc = startAtUtc
+            ? new Date(new Date(startAtUtc).getTime() + OPEN_MATCH_DURATION_MIN * 60 * 1000).toISOString()
+            : undefined;
           slots.push({
             time,
-            duration: durationLabel(slotMin),
-            durationMinutes: slotMin,
+            duration: durationLabel(OPEN_MATCH_DURATION_MIN),
+            durationMinutes: OPEN_MATCH_DURATION_MIN,
             courtId: courtRes.court_id,
             courtName: courtRes.court_name,
             dateStr: tomorrow,
@@ -325,8 +328,8 @@ export async function fetchClubAvailabilityForCreate(
             minPriceFormatted: p?.minPriceFormatted ?? '-',
             courtSport: cm?.sport ?? 'padel',
             courtIndoor: cm?.indoor ?? false,
-            startAtUtc: utc?.startAtUtc,
-            endAtUtc: utc?.endAtUtc,
+            startAtUtc,
+            endAtUtc,
             clubTimezone,
           });
         }

@@ -42,10 +42,6 @@ import { fetchMyPlayerId } from "../api/players";
 import { useAuth } from "../contexts/AuthContext";
 import { useHomeData } from "../contexts/HomeDataContext";
 import { PartidoCard } from "../components/partido/PartidoCard";
-import {
-  defaultFriendlyRange,
-  FriendlyLevelRangeSection,
-} from "../components/partido/FriendlyLevelRangeSection";
 import type { BookingConfirmationData } from "./BookingConfirmationScreen";
 import { PrivateReservationModal } from "../components/partido/PrivateReservationModal";
 import type { PartidoItem } from "./PartidosScreen";
@@ -508,10 +504,6 @@ export function ClubDetailScreen({
   const [expandedCourtId, setExpandedCourtId] = useState<string | null>(null);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
   const [reserving, setReserving] = useState(false);
-  const [partidoPrivado, setPartidoPrivado] = useState(false);
-  const [restrictByLevel, setRestrictByLevel] = useState(false);
-  const [eloMin, setEloMin] = useState(() => defaultFriendlyRange(3.5).eloMin);
-  const [eloMax, setEloMax] = useState(() => defaultFriendlyRange(3.5).eloMax);
   const activeTz = clubTimezone ?? clubIanaTimeZone();
   const dateOptions = useMemo(
     () =>
@@ -736,7 +728,7 @@ export function ClubDetailScreen({
         return;
       }
 
-      const shouldOfferPayLater = c.allow_payment_after_play === true && partidoPrivado;
+      const shouldOfferPayLater = c.allow_payment_after_play === true;
       const askPayLaterChoice = () =>
         new Promise<"pay_now" | "pay_later" | "cancel">((resolve) => {
           if (!shouldOfferPayLater) {
@@ -798,7 +790,8 @@ export function ClubDetailScreen({
           ),
           duration: t("common.durationMin", { minutes: duration }),
           priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
-          matchVisibility: partidoPrivado ? "private" : "public",
+          matchVisibility: "private",
+          confirmationKind: "reservation",
           clubId: court.clubId,
           courtId: c.id,
           date: dateStrForSlots,
@@ -816,11 +809,6 @@ export function ClubDetailScreen({
           end_at,
           total_price_cents: totalPriceCents,
           pay_full: true,
-          visibility: partidoPrivado ? "private" : "public",
-          competitive: false,
-          gender: "any",
-          elo_min: !partidoPrivado && restrictByLevel ? eloMin : null,
-          elo_max: !partidoPrivado && restrictByLevel ? eloMax : null,
         },
         session.access_token,
       );
@@ -891,7 +879,8 @@ export function ClubDetailScreen({
         ),
         duration: t("common.durationMin", { minutes: duration }),
         priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
-        matchVisibility: partidoPrivado ? "private" : "public",
+        matchVisibility: "private",
+        confirmationKind: "reservation",
         clubId: court.clubId,
         courtId: c.id,
         date: dateStrForSlots,
@@ -910,10 +899,7 @@ export function ClubDetailScreen({
       profile?.id,
       session?.access_token,
       court.clubName,
-      partidoPrivado,
-      restrictByLevel,
-      eloMin,
-      eloMax,
+      court.clubId,
       duration,
       initPaymentSheet,
       presentPaymentSheet,
@@ -1187,38 +1173,8 @@ export function ClubDetailScreen({
             <View style={styles.section}>
               <Text style={styles.reservaTitle}>{t("partidos.yourReservation")}</Text>
               <Text style={styles.reservaSub}>
-                {partidoPrivado
-                  ? t("partidos.createPrivateSub")
-                  : t("partidos.noOpenMatchesHint")}
+                {t("partidos.courtReservationSub")}
               </Text>
-              <View style={styles.reservaToggleRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.reservaToggleTitle}>
-                    {t("partidos.createPrivateLabel")}
-                  </Text>
-                  <Text style={styles.reservaToggleSub}>
-                    {t("partidos.createPrivateSub")}
-                  </Text>
-                </View>
-                <Switch
-                  value={partidoPrivado}
-                  onValueChange={setPartidoPrivado}
-                  trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
-                  thumbColor="#fff"
-                />
-              </View>
-              {!partidoPrivado ? (
-                <View style={styles.reservaLevelWrap}>
-                  <FriendlyLevelRangeSection
-                    restrictByLevel={restrictByLevel}
-                    onRestrictByLevelChange={setRestrictByLevel}
-                    eloMin={eloMin}
-                    eloMax={eloMax}
-                    onEloMinChange={setEloMin}
-                    onEloMaxChange={setEloMax}
-                  />
-                </View>
-              ) : null}
               <View style={styles.courtList}>
                 {!selectedTimeSlot ? (
                   <Text style={styles.partidosEmptySubtitle}>

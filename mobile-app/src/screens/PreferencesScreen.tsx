@@ -166,6 +166,7 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   preferredPlayStyle: 'balanced',
   preferredMatchDurationMin: 90,
   preferredPartnerLevel: 'any',
+  dominantHand: null,
   favoriteClubs: [],
   notifNewMatches: true,
   notifTournamentReminders: true,
@@ -186,6 +187,7 @@ function preferencesEqual(a: PlayerPreferences, b: PlayerPreferences): boolean {
     a.preferredPlayStyle === b.preferredPlayStyle &&
     a.preferredMatchDurationMin === b.preferredMatchDurationMin &&
     a.preferredPartnerLevel === b.preferredPartnerLevel &&
+    a.dominantHand === b.dominantHand &&
     arraysEqual(a.favoriteClubs, b.favoriteClubs) &&
     a.notifNewMatches === b.notifNewMatches &&
     a.notifTournamentReminders === b.notifTournamentReminders &&
@@ -351,6 +353,49 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                   style={styles.sideOptionPressable}
                 >
                   {prefs.preferredSide === opt.id ? (
+                    <LinearGradient
+                      colors={['#F18F34', '#E95F32']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.sideOptionActive}
+                    >
+                      <Text style={styles.sideOptionActiveText} numberOfLines={1}>
+                        {opt.label}
+                      </Text>
+                    </LinearGradient>
+                  ) : (
+                    <View style={styles.sideOptionIdle}>
+                      <Text style={styles.sideOptionIdleText} numberOfLines={1}>
+                        {opt.label}
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionIconWrap, { backgroundColor: 'rgba(241,143,52,0.2)' }]}>
+                <Ionicons name="hand-left-outline" size={18} color="#F18F34" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Mano preferida</Text>
+                <Text style={styles.cardSubtitle}>¿Con qué mano juegas?</Text>
+              </View>
+            </View>
+            <View style={styles.sideGrid}>
+              {[
+                { id: 'right', label: 'Derecha' },
+                { id: 'left', label: 'Izquierda' },
+              ].map((opt) => (
+                <Pressable
+                  key={opt.id}
+                  onPress={() => setPrefs((prev) => ({ ...prev, dominantHand: opt.id as PlayerPreferences['dominantHand'] }))}
+                  style={styles.sideOptionPressable}
+                >
+                  {prefs.dominantHand === opt.id ? (
                     <LinearGradient
                       colors={['#F18F34', '#E95F32']}
                       start={{ x: 0, y: 0 }}

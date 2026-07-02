@@ -1,27 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Image,
-  Pressable,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchPublicPlayerProfile, type PublicPlayerProfile } from '../api/players';
-import { theme } from '../theme';
-import { AICoachSection } from '../components/profile/AICoachSection';
-import { formatLocale, useTranslation } from '../i18n';
+import {
+  fetchPlayerLevelHistory,
+  fetchPlayerStats,
+  type LevelHistory,
+  type LevelHistoryLimit,
+  type PlayerStats,
+} from '../api/profileStats';
+import { fetchPlayerPublicCustomization, type PublicProfileCustomization } from '../api/profileCustomization';
+import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
+import { AnimatedTitle } from '../components/profile/AnimatedTitle';
+import { LigaChip } from '../components/profile/LigaChip';
+import { LevelEvolutionCard } from '../components/profile/LevelEvolutionCard';
+import { StatsCard } from '../components/profile/StatsCard';
+import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
+import { PlayerPreferencesCard } from '../components/profile/PlayerPreferencesCard';
+import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
+import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
+import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
+import { RARITY_CONFIG } from '../design/rarity';
 
 type PublicProfileScreenProps = {
   playerId: string;
   onBack: () => void;
   onChatPress?: (playerId: string, name: string) => void;
+  onOpenMatch?: (matchId: string) => void;
+  onOpenPlayer?: (playerId: string) => void;
 };
 
 function getInitials(firstName?: string | null, lastName?: string | null): string {
@@ -30,22 +40,84 @@ function getInitials(firstName?: string | null, lastName?: string | null): strin
   return '??';
 }
 
-export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicProfileScreenProps) {
-  const { t, locale } = useTranslation();
-  const dateLocale = formatLocale(locale);
+export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch, onOpenPlayer }: PublicProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const token = session?.access_token ?? null;
+
   const [profile, setProfile] = useState<PublicPlayerProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [customization, setCustomization] = useState<PublicProfileCustomization | null>(null);
+  const [levelHistory, setLevelHistory] = useState<LevelHistory | null>(null);
+  const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
+  const [levelLoading, setLevelLoading] = useState(true);
+  const [stats, setStats] = useState<PlayerStats | null>(null);
+  const [frequentClubs, setFrequentClubs] = useState<FrequentClub[]>([]);
+  const [frequentPartners, setFrequentPartners] = useState<FrequentPartner[]>([]);
+  const [socialLoading, setSocialLoading] = useState(true);
 
+  // Datos base + personalización (gate del spinner)
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    fetchPublicPlayerProfile(playerId, session?.access_token, locale)
-      .then((p) => {
+    Promise.all([fetchPublicPlayerProfile(playerId, token), fetchPlayerPublicCustomization(playerId)])
+      .then(([p, c]) => {
+        if (cancelled) return;
         setProfile(p);
+        setCustomization(c);
       })
-      .finally(() => setLoading(false));
-  }, [playerId, session?.access_token, locale]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId, token]);
+
+  // Estadísticas (independiente)
+  useEffect(() => {
+    let cancelled = false;
+    fetchPlayerStats(token, playerId).then((s) => {
+      if (!cancelled) setStats(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId, token]);
+
+  // Clubs y compañeros frecuentes (públicos)
+  useEffect(() => {
+    let cancelled = false;
+    setSocialLoading(true);
+    Promise.all([fetchFrequentClubs(playerId), fetchFrequentPartners(playerId)])
+      .then(([c, p]) => {
+        if (cancelled) return;
+        setFrequentClubs(c);
+        setFrequentPartners(p);
+      })
+      .finally(() => {
+        if (!cancelled) setSocialLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId]);
+
+  // Evolución del nivel (recarga al cambiar el límite)
+  useEffect(() => {
+    let cancelled = false;
+    setLevelLoading(true);
+    fetchPlayerLevelHistory(playerId, levelLimit)
+      .then((h) => {
+        if (!cancelled) setLevelHistory(h);
+      })
+      .finally(() => {
+        if (!cancelled) setLevelLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId, levelLimit]);
 
   if (loading) {
     return (
@@ -58,430 +130,234 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
   if (!profile) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.errorText}>{t('profile.profileLoadFail')}</Text>
+        <Text style={styles.errorText}>No se pudo cargar el perfil.</Text>
         <Pressable onPress={onBack} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>{t('common.back')}</Text>
+          <Text style={styles.backBtnText}>Volver</Text>
         </Pressable>
       </View>
     );
   }
 
   const initials = getInitials(profile.firstName, profile.lastName);
-  const displayName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || t('common.playerFallback');
+  const displayName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || 'Jugador';
+  const usernameLine = profile.username ? `@${profile.username}` : null;
+  const pinnedBadges = customization?.pinnedBadges ?? [];
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={styles.header}>
         <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.headerContent}>
-          <Pressable onPress={onBack} style={styles.headerIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#fff" />
+          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel="Volver">
+            <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {t('profile.title')} {profile.firstName}
+            Perfil de {profile.firstName}
           </Text>
-          <Pressable 
-            onPress={() => onChatPress?.(profile.id, displayName)} 
-            style={styles.headerIconBtn}
-          >
-            <Ionicons name="chatbubble-outline" size={24} color="#fff" />
-          </Pressable>
         </View>
       </View>
 
-      <ScrollView 
-        style={styles.scroll} 
+      <ScrollView
+        style={styles.scroll}
         contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Cover Photo */}
+        {/* Cover del jugador */}
         <View style={styles.coverWrap}>
-          <Image 
-            source={{ uri: 'https://images.unsplash.com/photo-1657704358775-ed705c7388d2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwYWRlbCUyMHNwb3J0JTIwcmFja2V0JTIwY291cnR8ZW58MXx8fHwxNzczNjEwMzA3fDA&ixlib=rb-4.1.0&q=80&w=1080' }} 
-            style={styles.coverImg} 
-          />
-          <LinearGradient 
-            colors={['rgba(15,15,15,0.6)', 'transparent', '#0F0F0F']} 
-            style={StyleSheet.absoluteFill} 
-          />
+          {profile.coverUrl?.trim() ? (
+            <Image source={{ uri: profile.coverUrl }} style={styles.coverImg} resizeMode="cover" />
+          ) : (
+            <LinearGradient colors={['#1a1a1a', '#0F0F0F', '#0F0F0F']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.coverImg} />
+          )}
+          <LinearGradient colors={['rgba(241,143,52,0.25)', 'transparent', '#0F0F0F']} style={StyleSheet.absoluteFill} />
         </View>
 
-        {/* Profile Card */}
-        <View style={styles.profileCardWrap}>
+        {/* Hero */}
+        <View style={styles.heroWrap}>
           <View style={styles.profileCard}>
-            <View style={styles.eloBadge}>
-              <Text style={styles.eloLabel}>{t('profile.levelLabel')}</Text>
-              <Text style={styles.eloValue}>
-                {profile.eloRating?.toFixed(2) ?? '--'}
-              </Text>
-            </View>
             <View style={styles.profileHeader}>
               <View style={styles.avatarContainer}>
-                {profile.avatarUrl ? (
-                  <Image source={{ uri: profile.avatarUrl }} style={styles.avatarImg} />
-                ) : (
-                  <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.avatar}>
-                    <Text style={styles.avatarText}>{initials}</Text>
-                  </LinearGradient>
-                )}
+                <AvatarWithFrame
+                  avatarUrl={profile.avatarUrl}
+                  initials={initials}
+                  size={80}
+                  frame={customization?.frame ?? null}
+                  level={profile.eloRating != null && Number.isFinite(profile.eloRating) ? profile.eloRating : null}
+                />
+                <LigaChip liga={profile.liga} style={{ marginTop: 16 }} />
               </View>
               <View style={styles.profileInfo}>
+                {customization?.titleId ? (
+                  <View style={{ marginBottom: 2 }}>
+                    <AnimatedTitle titleId={customization.titleId} />
+                  </View>
+                ) : null}
                 <Text style={styles.profileName}>{displayName}</Text>
-                <View style={styles.genderRow}>
-                  <Ionicons 
-                    name={profile.gender === 'female' ? 'woman-outline' : 'man-outline'} 
-                    size={12} 
-                    color="#6B7280" 
-                  />
-                  <Text style={styles.genderText}>
-                    {profile.gender === 'female' ? t('common.female') : t('common.male')}
-                  </Text>
-                </View>
+                {usernameLine ? <Text style={styles.usernameText}>{usernameLine}</Text> : null}
+                {pinnedBadges.length > 0 ? (
+                  <View style={styles.pinnedRow}>
+                    {pinnedBadges.map((b) => {
+                      const conf = RARITY_CONFIG[b.rarity];
+                      return (
+                        <View key={b.id} style={[styles.pinnedBadge, { backgroundColor: conf.bg, borderColor: conf.border }]}>
+                          <Ionicons name={b.icon as keyof typeof Ionicons.glyphMap} size={12} color={conf.color} />
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
               </View>
             </View>
 
             {/* Stats Row */}
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{profile.mmWins + profile.mmLosses + profile.mmDraws}</Text>
-                <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
+                <Text style={styles.statValue}>{profile.matchesPlayedTotal ?? 0}</Text>
+                <Text style={styles.statLabel}>PARTIDOS</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{profile.mmWins}</Text>
-                <Text style={styles.statLabel}>{t('messages.iaStatsWins')}</Text>
+                <Text style={styles.statValue}>--</Text>
+                <Text style={styles.statLabel}>SEGUIDORES</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{profile.sp}</Text>
-                <Text style={styles.statLabel}>SP</Text>
+                <Text style={styles.statValue}>--</Text>
+                <Text style={styles.statLabel}>SEGUIDOS</Text>
               </View>
             </View>
 
-            {/* Liga MM */}
-            {profile.liga && (
-              <View style={styles.ligaBox}>
-                <LinearGradient 
-                  colors={['rgba(241,143,52,0.1)', 'transparent']} 
-                  style={styles.ligaGradient}
-                  start={{x:0, y:0.5}} end={{x:1, y:0.5}}
-                />
-                <Ionicons name="trophy-outline" size={16} color="#F18F34" />
-                <Text style={styles.ligaText}>
-                  {t('common.competitive')}: <Text style={styles.ligaName}>{profile.liga.toUpperCase()}</Text>
-                </Text>
-              </View>
-            )}
+            {/* Acciones: Seguir (placeholder) + Mensaje (chat) */}
+            <View style={styles.actionButtonsRow}>
+              <Pressable style={styles.followBtn} onPress={() => {}}>
+                <Text style={styles.followText}>Seguir</Text>
+              </Pressable>
+              <Pressable style={styles.messageBtn} onPress={() => onChatPress?.(profile.id, displayName)}>
+                <Ionicons name="chatbubble-outline" size={14} color="#F18F34" />
+                <Text style={styles.messageText}>Mensaje</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
 
-        {/* AI Coach / Radar Section */}
-        {profile.coachAssessment ? (
-          <AICoachSection 
-            assessment={profile.coachAssessment} 
-            peerInsight={null} // Only show base assessment for others
-          />
-        ) : (
-          <View style={styles.emptyCardContainer}>
-            <View style={styles.emptyCard}>
-              <Ionicons name="analytics-outline" size={24} color="#374151" />
-              <Text style={styles.emptyCardText}>{t('onboarding.profileLevelCoachDesc')}</Text>
-            </View>
-          </View>
-        )}
+        {/* Evolución del nivel */}
+        <LevelEvolutionCard
+          matches={levelHistory?.matches ?? []}
+          currentElo={levelHistory?.currentElo ?? profile.eloRating ?? 0}
+          limit={levelLimit}
+          onChangeLimit={setLevelLimit}
+          loading={levelLoading}
+          onOpenMatch={onOpenMatch}
+        />
 
-        {/* Recent Matches */}
-        {profile.recentMatches?.length > 0 && (
-          <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>{t('profile.coachMatches')}</Text>
-            {profile.recentMatches.map((m: any, idx: number) => (
-              <View key={m.match_id} style={[styles.matchItem, idx === profile.recentMatches.length -1 && { borderBottomWidth: 0 }]}>
-                <View style={styles.matchInfo}>
-                  <Text style={styles.matchDate}>
-                    {new Date(m.matches.start_at).toLocaleDateString(dateLocale)}
-                  </Text>
-                  <Text style={styles.matchType}>
-                    {m.matches.match_type === 'matchmaking' ? t('common.competitive') : t('common.friendly')}
-                  </Text>
-                </View>
-                <View style={[
-                  styles.resultBadge, 
-                  m.result === 'win' ? styles.resultWin : m.result === 'loss' ? styles.resultLoss : styles.resultDraw
-                ]}>
-                  <Text style={styles.resultText}>
-                    {m.result === 'win'
-                      ? t('messages.iaStatsWins')
-                      : m.result === 'loss'
-                        ? t('profile.coachDistLow').toUpperCase()
-                        : t('profile.coachDistNormal').toUpperCase()}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
+        {/* Estadísticas */}
+        <StatsCard stats={stats} loading={stats == null} />
+
+        {/* Vitrina de logros (solo visibles) */}
+        <TrophyShowcaseSection playerId={playerId} />
+
+        {/* Preferencias de jugador */}
+        <PlayerPreferencesCard
+          dominantHand={profile.dominantHand}
+          preferredSide={profile.preferredSide}
+          preferredPlayStyle={profile.preferredPlayStyle}
+        />
+
+        {/* Personas con las que juega */}
+        <FrequentPartnersCard
+          title={`Con quién juega ${profile.firstName ?? ''}`.trim()}
+          partners={frequentPartners}
+          loading={socialLoading}
+          onOpenPlayer={onOpenPlayer}
+        />
+
+        {/* Clubs donde juega (al final) */}
+        <FrequentClubsCard
+          title={`Clubs donde juega ${profile.firstName ?? ''}`.trim()}
+          clubs={frequentClubs}
+          loading={socialLoading}
+        />
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F0F0F',
-  },
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    zIndex: 100,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
+  container: { flex: 1, backgroundColor: '#0F0F0F' },
+  centered: { justifyContent: 'center', alignItems: 'center' },
+  header: { zIndex: 100, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingVertical: 12,
   },
-  headerIconBtn: {
-    padding: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-    marginHorizontal: 10,
-  },
-  scroll: {
-    flex: 1,
-  },
-  coverWrap: {
-    position: 'relative',
-    height: 140,
-  },
-  coverImg: {
-    width: '100%',
-    height: '100%',
-  },
-  profileCardWrap: {
-    paddingHorizontal: 16,
-    marginTop: -40,
-    zIndex: 10,
-  },
+  headerIconBtn: { padding: 8, borderRadius: 12 },
+  headerTitle: { flex: 1, fontSize: 18, fontWeight: '700', color: '#fff', marginLeft: 12 },
+  scroll: { flex: 1 },
+  coverWrap: { position: 'relative', height: 128, overflow: 'hidden' },
+  coverImg: { width: '100%', height: 128 },
+  heroWrap: { paddingHorizontal: 16, marginTop: -40, zIndex: 10 },
   profileCard: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: 20,
     position: 'relative',
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 20,
-  },
-  avatarContainer: {
-    // No margin top needed here if card is relative
-  },
-  avatar: {
-    width: 72,
-    height: 72,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 16,
+  },
+  profileHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
+  avatarContainer: { marginTop: -40, alignItems: 'center' },
+  profileInfo: { flex: 1, paddingTop: 2 },
+  profileName: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  usernameText: { fontSize: 13, color: '#F18F34', marginTop: 2, marginBottom: 2 },
+  pinnedRow: { flexDirection: 'row', gap: 6, marginTop: 6 },
+  pinnedBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  avatarImg: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-  },
-  avatarText: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  genderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-  },
-  genderText: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  eloBadge: {
-    position: 'absolute',
-    top: -20,
-    right: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: '#F18F34',
-    alignItems: 'center',
-    shadowColor: '#F18F34',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  eloLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#fff',
-    opacity: 0.8,
-  },
-  eloValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#fff',
+    borderWidth: 1,
   },
   statsRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
     backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 12,
+    paddingVertical: 12,
     marginBottom: 16,
   },
-  statItem: {
+  statItem: { flex: 1, alignItems: 'center' },
+  statValue: { fontSize: 20, fontWeight: '700', color: '#fff' },
+  statLabel: { fontSize: 10, color: '#6B7280', fontWeight: '600', letterSpacing: 0.5, marginTop: 2 },
+  statDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.08)' },
+  actionButtonsRow: { flexDirection: 'row', gap: 10 },
+  followBtn: {
     flex: 1,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#F18F34',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  statLabel: {
-    fontSize: 10,
-    color: '#6B7280',
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: '100%',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  ligaBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    backgroundColor: 'rgba(241,143,52,0.05)',
+  followText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  messageBtn: {
+    flex: 1,
+    height: 40,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.1)',
-    overflow: 'hidden',
-  },
-  ligaGradient: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 100,
-  },
-  ligaText: {
-    fontSize: 13,
-    color: '#9CA3AF',
-  },
-  ligaName: {
-    color: '#F18F34',
-    fontWeight: '700',
-  },
-  emptyCardContainer: {
-    paddingHorizontal: 16,
-    marginTop: 16,
-  },
-  emptyCard: {
-    padding: 30,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    alignItems: 'center',
-    gap: 12,
-  },
-  emptyCardText: {
-    color: '#4B5563',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  sectionContainer: {
-    paddingHorizontal: 16,
-    marginTop: 24,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 12,
-  },
-  matchItem: {
+    borderColor: 'rgba(241,143,52,0.3)',
+    backgroundColor: 'rgba(241,143,52,0.05)',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'center',
+    gap: 6,
   },
-  matchInfo: {
-    gap: 2,
-  },
-  matchDate: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  matchType: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  resultBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-  },
-  resultWin: { backgroundColor: 'rgba(16, 185, 129, 0.15)' },
-  resultLoss: { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
-  resultDraw: { backgroundColor: 'rgba(107, 114, 128, 0.15)' },
-  resultText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  errorText: {
-    color: '#EF4444',
-    marginBottom: 20,
-  },
-  backBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    backgroundColor: '#F18F34',
-    borderRadius: 10,
-  },
-  backBtnText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
+  messageText: { color: '#F18F34', fontSize: 14, fontWeight: '600' },
+  errorText: { color: '#EF4444', marginBottom: 20 },
+  backBtn: { paddingVertical: 10, paddingHorizontal: 20, backgroundColor: '#F18F34', borderRadius: 10 },
+  backBtnText: { color: '#fff', fontWeight: '600' },
 });

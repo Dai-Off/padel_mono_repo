@@ -91,6 +91,15 @@ export function shouldIncludeInHomeMisPartidos(
 }
 
 /** Carrusel home (PartidoItem mapeado): misma regla que PartidoDetailScreen. */
+export function isPartidoCancelled(p: {
+  matchStatus?: string;
+  bookingStatus?: string;
+}): boolean {
+  if (String(p.matchStatus ?? '').toLowerCase() === 'cancelled') return true;
+  if (String(p.bookingStatus ?? '').toLowerCase() === 'cancelled') return true;
+  return false;
+}
+
 export function shouldIncludePartidoInHomeCarousel(p: {
   matchPhase?: MatchListPhase;
   hasMyFeedback?: boolean;
@@ -98,10 +107,9 @@ export function shouldIncludePartidoInHomeCarousel(p: {
   bookingStatus?: string;
   players: Array<{ isFree: boolean }>;
 }): boolean {
+  if (isPartidoCancelled(p)) return false;
   if (p.matchPhase !== 'past') return true;
   if (p.hasMyFeedback) return false;
-  if (String(p.matchStatus ?? '').toLowerCase() === 'cancelled') return false;
-  if (String(p.bookingStatus ?? '').toLowerCase() === 'cancelled') return false;
   const filled = p.players.filter((x) => !x.isFree).length;
   return canRecordMatchScore(p.matchStatus, filled);
 }

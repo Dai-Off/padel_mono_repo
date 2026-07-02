@@ -1,5 +1,8 @@
+import Stripe from 'stripe';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { evictDemoPlayersWhenRealJoins } from '../lib/demoPlayerEvict';
+import { acceptMatchInviteAfterGuestPayment } from '../lib/matchInviteAccess';
+import { isStripePaymentIntentId } from './paymentRefundService';
 
 type Db = ReturnType<typeof getSupabaseServiceRoleClient>;
 
@@ -213,6 +216,52 @@ function firstFreeSlot(taken: Set<number>): number | null {
   return null;
 }
 
+function normalizePreferredSlot(preferredSlot: number | null | undefined): number | null {
+  if (preferredSlot == null || !Number.isFinite(Number(preferredSlot))) return null;
+  const n = Math.trunc(Number(preferredSlot));
+  return n >= 0 && n <= 3 ? n : null;
+}
+
+/** Si el guest ya está en el partido pero en otra plaza, lo mueve a la elegida si está libre. */
+async function ensureGuestInPreferredSlot(
+  supabase: Db,
+  matchId: string,
+  playerId: string,
+  currentSlot: number,
+  preferredSlot: number | null | undefined,
+): Promise<{ slot_index: number; reassigned: boolean }> {
+  const pref = normalizePreferredSlot(preferredSlot);
+  if (pref == null || pref === currentSlot) {
+    return { slot_index: currentSlot, reassigned: false };
+  }
+
+  const { data: occupant, error: occErr } = await supabase
+    .from('match_players')
+    .select('player_id')
+    .eq('match_id', matchId)
+    .eq('slot_index', pref)
+    .maybeSingle();
+  if (occErr) {
+    console.warn('[matchPlayerSlotService] ensureGuestInPreferredSlot read:', occErr.message);
+    return { slot_index: currentSlot, reassigned: false };
+  }
+  const occupantId = String((occupant as { player_id?: string } | null)?.player_id ?? '');
+  if (occupantId && occupantId !== playerId) {
+    return { slot_index: currentSlot, reassigned: false };
+  }
+
+  const { error: updErr } = await supabase
+    .from('match_players')
+    .update({ slot_index: pref, team: teamFromSlot(pref) })
+    .eq('match_id', matchId)
+    .eq('player_id', playerId);
+  if (updErr) {
+    console.warn('[matchPlayerSlotService] ensureGuestInPreferredSlot update:', updErr.message);
+    return { slot_index: currentSlot, reassigned: false };
+  }
+  return { slot_index: pref, reassigned: true };
+}
+
 function isRpcUnavailableError(message: string, code?: string): boolean {
   const m = message.toLowerCase();
   if (code === 'PGRST202' || code === '42883') return true;
@@ -241,7 +290,18 @@ async function claimSlotInApp(
   if (already) {
     const s = (already as { slot_index?: number | null }).slot_index;
     const idx = s != null && s >= 0 && s <= 3 ? s : 0;
-    return { ok: true, slot_index: idx, reassigned: false };
+    const resolved = await ensureGuestInPreferredSlot(
+      supabase,
+      matchId,
+      playerId,
+      idx,
+      preferredSlot,
+    );
+    return {
+      ok: true,
+      slot_index: resolved.slot_index,
+      reassigned: resolved.reassigned,
+    };
   }
 
   const { data: slotRows, error: slotErr } = await supabase
@@ -374,7 +434,7 @@ export async function guestJoinMatchAfterPayment(
 ): Promise<GuestJoinAfterPaymentResult> {
   const { data: match, error: matchErr } = await supabase
     .from('matches')
-    .select('id')
+    .select('id, visibility')
     .eq('booking_id', bookingId)
     .maybeSingle();
   if (matchErr) {
@@ -393,7 +453,19 @@ export async function guestJoinMatchAfterPayment(
   if (existing) {
     const s = (existing as { slot_index?: number | null }).slot_index;
     const idx = s != null && s >= 0 && s <= 3 ? s : 0;
-    return { ok: true, match_id: match.id, slot_index: idx, reassigned: false };
+    const resolved = await ensureGuestInPreferredSlot(
+      supabase,
+      match.id,
+      playerId,
+      idx,
+      preferredSlot,
+    );
+    return {
+      ok: true,
+      match_id: match.id,
+      slot_index: resolved.slot_index,
+      reassigned: resolved.reassigned,
+    };
   }
 
   try {
@@ -406,18 +478,77 @@ export async function guestJoinMatchAfterPayment(
   if (!ins.ok) {
     return ins;
   }
+  if (String((match as { visibility?: string }).visibility ?? '').toLowerCase() === 'private') {
+    await acceptMatchInviteAfterGuestPayment(supabase, match.id, playerId);
+  }
   return { ok: true, match_id: match.id, slot_index: ins.slot_index, reassigned: ins.reassigned };
+}
+
+export function parsePreferredSlotIndex(raw: unknown): number | null {
+  const n = raw != null ? parseInt(String(raw), 10) : NaN;
+  return Number.isFinite(n) && n >= 0 && n <= 3 ? n : null;
+}
+
+export function parsePreferredSlotFromMeta(
+  meta: Record<string, string | undefined> | null | undefined,
+): number | null {
+  if (!meta) return null;
+  return parsePreferredSlotIndex(meta.slot_index);
+}
+
+function getStripeClient(): Stripe | null {
+  const key = process.env.STRIPE_SECRET_KEY?.trim();
+  return key ? new Stripe(key) : null;
+}
+
+/** Plaza elegida al crear/reutilizar el PaymentIntent (metadata Stripe). */
+export async function resolveGuestPreferredSlotFromBooking(
+  supabase: Db,
+  bookingId: string,
+  playerId: string,
+  explicitSlot?: number | null,
+): Promise<number | null> {
+  const fromRequest = parsePreferredSlotIndex(explicitSlot);
+  if (fromRequest != null) return fromRequest;
+
+  const stripe = getStripeClient();
+  if (!stripe) return null;
+
+  const { data: txs } = await supabase
+    .from('payment_transactions')
+    .select('stripe_payment_intent_id')
+    .eq('booking_id', bookingId)
+    .eq('payer_player_id', playerId)
+    .in('status', ['succeeded', 'requires_action', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  for (const tx of txs ?? []) {
+    const piId = String((tx as { stripe_payment_intent_id?: string }).stripe_payment_intent_id ?? '');
+    if (!isStripePaymentIntentId(piId)) continue;
+    try {
+      const pi = await stripe.paymentIntents.retrieve(piId);
+      const slot = parsePreferredSlotFromMeta(
+        pi.metadata as Record<string, string | undefined>,
+      );
+      if (slot != null) return slot;
+    } catch {
+      /* siguiente PI */
+    }
+  }
+  return null;
 }
 
 /**
  * Si un guest figura `paid` en el booking pero no tiene fila en `match_players` (bug histórico / carrera),
- * lo inserta en el primer slot libre. Llamar tras GET /matches/:id?expand=1 con usuario autenticado.
+ * lo inserta respetando la plaza del PaymentIntent. Llamar tras GET /matches/:id?expand=1 con usuario autenticado.
  */
 export async function tryRepairPaidGuestMissingFromMatch(
   supabase: Db,
   matchId: string,
   bookingId: string,
   playerId: string,
+  preferredSlot?: number | null,
 ): Promise<boolean> {
   const { data: bp } = await supabase
     .from('booking_participants')
@@ -438,7 +569,10 @@ export async function tryRepairPaidGuestMissingFromMatch(
     .maybeSingle();
   if (inMatch) return false;
 
-  const r = await insertGuestMatchPlayerAfterPayment(supabase, matchId, playerId, null);
+  const slot =
+    (await resolveGuestPreferredSlotFromBooking(supabase, bookingId, playerId, preferredSlot)) ??
+    null;
+  const r = await insertGuestMatchPlayerAfterPayment(supabase, matchId, playerId, slot);
   if (r.ok) {
     if (r.reassigned) {
       console.warn('[matchPlayerSlotService] repair: guest placed in first free slot', {

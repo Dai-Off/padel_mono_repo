@@ -1,4 +1,5 @@
 import { API_URL } from '../config';
+import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 export type TournamentPrize = { label: string; amount_cents: number };
 
@@ -221,6 +222,8 @@ export type TournamentParticipantRow = {
   avatar_url?: string | null;
   elo_rating?: number | null;
   inscription_status?: string;
+  /** Marco equipado del participante (para pintar el pack). */
+  frame?: FrameAttrs | null;
 };
 
 export type TournamentChatMessage = {
