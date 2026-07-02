@@ -1,11 +1,11 @@
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { evaluateAndGrant, getCompletedCourses } from './unlockablesEngine';
+import { getCompletedCourses } from './unlockablesEngine';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Lecturas puras (SIN evaluateAndGrant) de las piezas del perfil. Reutilizadas
-// por las rutas individuales (que llaman evaluateAndGrant aparte) y por el
-// endpoint agregado /players/me/profile-bundle (que lo llama UNA sola vez).
+// Lecturas puras de las piezas del perfil, reutilizadas por las rutas
+// individuales (unlockables.ts) y por el bundle. Los logros se otorgan por
+// EVENTO (evaluateAndGrant en la acción), nunca en estas lecturas.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type CatalogEmbed = {
@@ -143,9 +143,7 @@ export async function getPlayerCustomization(supabase: SupabaseClient, playerId:
 export async function assembleProfileBundle(playerId: string) {
   const supabase = getSupabaseServiceRoleClient();
 
-  // Otorga lo recién conseguido UNA vez (en vez de por cada endpoint).
-  await evaluateAndGrant(supabase, playerId);
-
+  // Lectura pura: los logros se otorgan por EVENTO (ver evaluateAndGrant), no aquí.
   const [customization, frames, achievements] = await Promise.all([
     getPlayerCustomization(supabase, playerId),
     getPlayerUnlockablesCatalog(supabase, playerId, ['frame']),

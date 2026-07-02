@@ -17,6 +17,7 @@ import {
 import { addSeasonPassSp } from '../services/seasonPassService';
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { recomputeRadarForPlayers } from '../services/coachAssessmentService';
+import { evaluateAndGrant } from '../services/unlockablesEngine';
 
 const router = Router();
 
@@ -593,6 +594,8 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
     // El rendimiento por área en learning cambió -> recalculamos y persistimos ya
     // el radar (write-through). Fire-and-forget: no bloquea la respuesta del submit.
     void recomputeRadarForPlayers([player.id]);
+    // Cambia la señal daily_lesson_streak -> otorgar logros por evento (no on-read).
+    void evaluateAndGrant(supabase, player.id);
 
     // 2. Update individual streak (post-update value drives the multiplier)
     const streak = await updateIndividualStreak(player.id, tz);

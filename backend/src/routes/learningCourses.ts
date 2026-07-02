@@ -4,6 +4,7 @@ import { requireAuth, getPlayerFromAuth, requireOnboarding } from './learningHel
 import { getMultiplier } from './learningStreaks';
 import { SharedStreakRow, lazyResetSharedStreak, normalizePair } from './learningStreaks';
 import { dayKeyInTz, previousDayKey } from './learningTimezone';
+import { evaluateAndGrant } from '../services/unlockablesEngine';
 
 const router = Router();
 
@@ -477,6 +478,9 @@ router.post('/courses/:id/complete-lesson', requireAuth, async (req: Request, re
       );
 
     if (upsertErr) return res.status(500).json({ ok: false, error: upsertErr.message });
+
+    // Cambia la señal courses_completed -> otorgar logros por evento (no on-read).
+    void evaluateAndGrant(supabase, player.id);
 
     const lessonIds = (allLessons || []).map((l: any) => l.id);
     const { data: progress } = await supabase

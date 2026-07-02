@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
-import { evaluateAndGrant, getCompletedCourses } from '../services/unlockablesEngine';
+import { getCompletedCourses } from '../services/unlockablesEngine';
 import { getEquippedFrames } from '../services/equippedFramesService';
 import {
   getPlayerAchievements,
@@ -41,8 +41,7 @@ router.get('/me/achievements', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
 
   try {
-    // Otorga lo recién conseguido antes de leer.
-    await evaluateAndGrant(supabase, playerId!);
+    // Lectura pura: los logros se otorgan por EVENTO (ver evaluateAndGrant), no aquí.
     const achievements = await getPlayerAchievements(supabase, playerId!);
     return res.json({ ok: true, achievements });
   } catch (err) {
@@ -157,9 +156,8 @@ router.get('/me/unlocks/pending', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
 
   try {
-    // Evalúa primero, así un poll desde cualquier pantalla detecta lo nuevo.
-    await evaluateAndGrant(supabase, playerId!);
-
+    // Lectura pura: los eventos ya otorgaron (notified_at=null = pendiente de
+    // mostrar). El poll solo lee; no re-evalúa (grant por evento, no on-read).
     const { data, error } = await supabase
       .from('player_unlockables')
       .select('unlocked_at, unlockables!inner(id, kind, title, description, rarity, icon, animation_type, style)')
@@ -236,7 +234,7 @@ router.get('/me/unlockables', async (req: Request, res: Response) => {
     .filter(Boolean);
 
   try {
-    await evaluateAndGrant(supabase, playerId!);
+    // Lectura pura: catálogo + estado ya otorgado (grant por evento, no on-read).
     const items = await getPlayerUnlockablesCatalog(supabase, playerId!, kinds);
     return res.json({ ok: true, items });
   } catch (err) {
