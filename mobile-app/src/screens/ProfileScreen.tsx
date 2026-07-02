@@ -26,12 +26,9 @@ import { RARITY_CONFIG } from '../design/rarity';
 import { LigaChip } from '../components/profile/LigaChip';
 import type { Achievement } from '../design/achievements';
 import {
-  fetchCustomization,
-  fetchUnlockables,
   type ProfileCustomization,
   type CatalogItem,
 } from '../api/profileCustomization';
-import { fetchAchievements } from '../api/unlockables';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
@@ -43,8 +40,9 @@ import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard
 import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { CoachSkeleton } from '../components/profile/CoachSkeleton';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
-import { fetchMyCoachAssessment, fetchMyCoachStats, type CoachAssessment, type CoachStats } from '../api/coachAssessment';
-import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
+import { fetchMyCoachStats, type CoachAssessment, type CoachStats } from '../api/coachAssessment';
+import { type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
+import { fetchProfileBundle } from '../api/profileBundle';
 import {
   fetchLevelHistory,
   fetchPlayerStats,
@@ -117,7 +115,7 @@ export function ProfileScreen({
     }
   }, []);
   const { session } = useAuth();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -171,7 +169,6 @@ export function ProfileScreen({
       if (p) {
         setProfile(p);
         setCoverUrl(p.coverUrl);
-        fetchMyPeerFeedbackInsight(token, p.id).then(setPeerInsight).catch(() => {});
         setProfileLoading(false);
         return;
       }
@@ -191,17 +188,29 @@ export function ProfileScreen({
     }
   }, [t]);
 
-  // Carga el Coach: radar (rápido, ruta crítica) y stats por separado (A1). El
-  // radar marca assessmentLoaded; las stats rellenan aparte cuando llegan.
-  const loadCoach = React.useCallback((token: string) => {
+  // Bundle above-the-fold en 1 round-trip: personalización, marcos, logros,
+  // radar del Coach y peer-insight. Marca assessmentLoaded + customizationReady.
+  const loadBundle = React.useCallback((token: string) => {
     setAssessmentLoaded(false);
-    fetchMyCoachAssessment(token)
-      .then(setAssessment)
+    fetchProfileBundle(token, locale)
+      .then((b) => {
+        if (!b) return;
+        setCustomization(b.customization);
+        setFramesCatalog(b.frames);
+        setAllAchievements(b.achievements);
+        setAssessment(b.coachRadar);
+        setPeerInsight(b.peerInsight);
+      })
       .catch(() => {})
-      .finally(() => setAssessmentLoaded(true));
-    fetchMyCoachStats(token)
-      .then(setCoachStats)
-      .catch(() => {});
+      .finally(() => {
+        setAssessmentLoaded(true);
+        setCustomizationReady(true);
+      });
+  }, [locale]);
+
+  // Stats del Coach (A1): contadores en vivo, aparte del radar (que va en el bundle).
+  const loadCoachStats = React.useCallback((token: string) => {
+    fetchMyCoachStats(token).then(setCoachStats).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -212,8 +221,9 @@ export function ProfileScreen({
       return;
     }
     void loadProfile(token);
-    loadCoach(token);
-  }, [session?.access_token, loadProfile, loadCoach]);
+    loadBundle(token);
+    loadCoachStats(token);
+  }, [session?.access_token, loadProfile, loadBundle, loadCoachStats]);
 
   // Evolución del nivel (refetch al cambiar el filtro 5/10/Todos)
   useEffect(() => {
@@ -270,27 +280,6 @@ export function ProfileScreen({
     };
   }, [profile?.id]);
 
-  // Personalización equipada + catálogos para el hero. En paralelo con el perfil
-  // (endpoints /me, solo necesitan token) para que todo aparezca a la vez.
-  useEffect(() => {
-    const token = session?.access_token;
-    if (!token) return;
-    let cancelled = false;
-    Promise.all([fetchCustomization(token), fetchUnlockables(token, ['frame']), fetchAchievements(token)])
-      .then(([c, frames, achievements]) => {
-        if (cancelled) return;
-        setCustomization(c ?? { titleId: null, frameId: null, pinnedBadgeIds: [] });
-        setFramesCatalog(frames);
-        setAllAchievements(achievements);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setCustomizationReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token]);
 
   const equippedFrame = useMemo<FrameAttrs | null>(() => {
     const fid = customization?.frameId;
@@ -357,7 +346,8 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    loadCoach(session.access_token);
+    loadBundle(session.access_token);
+    loadCoachStats(session.access_token);
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).
@@ -654,7 +644,8 @@ export function ProfileScreen({
                   style={styles.coachCtaBtn}
                   onPress={() => {
                     if (!session?.access_token) return;
-                    loadCoach(session.access_token);
+                    loadBundle(session.access_token);
+                    loadCoachStats(session.access_token);
                   }}
                 >
                   <Ionicons name="refresh-outline" size={16} color="#fff" />
