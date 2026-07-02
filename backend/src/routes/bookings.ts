@@ -460,6 +460,244 @@ router.post('/block-maintenance', async (req: Request, res: Response) => {
   }
 });
 
+const COURT_MAINTENANCE_PREFIX = '__COURT_MAINTENANCE__';
+
+/**
+ * @openapi
+ * /bookings/bulk-block-slots:
+ *   post:
+ *     tags: [Bookings]
+ *     summary: Bloquear varios tramos de pista (mantenimiento o torneo)
+ *     description: |
+ *       Crea bloqueos en lote para los tramos indicados. Solo inserta slots sin conflicto;
+ *       no cancela reservas existentes ni desplaza jugadores.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [ranges]
+ *             properties:
+ *               booking_type:
+ *                 type: string
+ *                 enum: [blocked, tournament]
+ *                 default: blocked
+ *               reason:
+ *                 type: string
+ *                 example: Mantenimiento
+ *               ranges:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [court_id, start_at, end_at]
+ *                   properties:
+ *                     court_id:
+ *                       type: string
+ *                       format: uuid
+ *                     start_at:
+ *                       type: string
+ *                       format: date-time
+ *                     end_at:
+ *                       type: string
+ *                       format: date-time
+ *           example:
+ *             booking_type: blocked
+ *             reason: Cambio de césped
+ *             ranges:
+ *               - court_id: "00000000-0000-0000-0000-000000000001"
+ *                 start_at: "2026-07-01T09:00:00.000Z"
+ *                 end_at: "2026-07-01T11:00:00.000Z"
+ *     responses:
+ *       201:
+ *         description: Bloqueos creados (puede incluir tramos omitidos por conflicto)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean }
+ *                 created: { type: integer }
+ *                 skipped:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       court_id: { type: string }
+ *                       start_at: { type: string }
+ *                       end_at: { type: string }
+ *                       error: { type: string }
+ *       400:
+ *         description: Petición inválida
+ *       409:
+ *         description: Ningún tramo válido
+ */
+router.post('/bulk-block-slots', async (req: Request, res: Response) => {
+  const { ranges, booking_type, reason } = req.body ?? {};
+  if (!Array.isArray(ranges) || ranges.length === 0) {
+    return res.status(400).json({ ok: false, error: 'ranges es obligatorio y no puede estar vacío' });
+  }
+
+  const reservationType = normalizeReservationTypeSlug(booking_type ?? 'blocked');
+  if (reservationType !== 'blocked' && reservationType !== 'tournament') {
+    return res.status(400).json({ ok: false, error: 'booking_type debe ser blocked o tournament' });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const trimmedReason = String(reason ?? '').trim() || (reservationType === 'tournament' ? 'Torneo' : 'Mantenimiento');
+    const notes =
+      reservationType === 'blocked'
+        ? `${COURT_MAINTENANCE_PREFIX}: ${trimmedReason}`
+        : trimmedReason;
+
+    const toInsert: Record<string, unknown>[] = [];
+    const skipped: { court_id: string; start_at: string; end_at: string; error: string }[] = [];
+    const timezoneByCourt = new Map<string, string>();
+    let merged = 0;
+
+    for (const range of ranges) {
+      const court_id = range?.court_id;
+      const start_at = range?.start_at;
+      const end_at = range?.end_at;
+      if (!court_id || !start_at || !end_at) {
+        skipped.push({
+          court_id: String(court_id ?? ''),
+          start_at: String(start_at ?? ''),
+          end_at: String(end_at ?? ''),
+          error: 'court_id, start_at y end_at son obligatorios',
+        });
+        continue;
+      }
+      if (bookingStartIsTooFarInPast(String(start_at))) {
+        skipped.push({
+          court_id: String(court_id),
+          start_at: String(start_at),
+          end_at: String(end_at),
+          error: BOOKING_START_PAST_ERROR,
+        });
+        continue;
+      }
+
+      const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+        courtId: String(court_id),
+        startAt: String(start_at),
+        endAt: String(end_at),
+        reservationType,
+      });
+      if (!hoursCheck.ok) {
+        skipped.push({
+          court_id: String(court_id),
+          start_at: String(start_at),
+          end_at: String(end_at),
+          error: hoursCheck.error,
+        });
+        continue;
+      }
+
+      if (reservationType === 'blocked') {
+        const startMs = new Date(String(start_at)).getTime();
+        const endMs = new Date(String(end_at)).getTime();
+        const { data: maintRows } = await supabase
+          .from('bookings')
+          .select('id, start_at, end_at, notes')
+          .eq('court_id', court_id)
+          .eq('reservation_type', 'blocked')
+          .neq('status', 'cancelled')
+          .is('deleted_at', null)
+          .like('notes', `${COURT_MAINTENANCE_PREFIX}%`);
+        const overlapping = (maintRows ?? []).find((row: { start_at: string; end_at: string; notes?: string | null }) => {
+          if (!row.notes?.includes(COURT_MAINTENANCE_PREFIX)) return false;
+          const rStart = new Date(row.start_at).getTime();
+          const rEnd = new Date(row.end_at).getTime();
+          return startMs <= rEnd && endMs >= rStart;
+        }) as { id: string; start_at: string; end_at: string } | undefined;
+        if (overlapping) {
+          const mergedStart = new Date(Math.min(startMs, new Date(overlapping.start_at).getTime())).toISOString();
+          const mergedEnd = new Date(Math.max(endMs, new Date(overlapping.end_at).getTime())).toISOString();
+          const { error: updErr } = await supabase
+            .from('bookings')
+            .update({ start_at: mergedStart, end_at: mergedEnd, notes, updated_at: new Date().toISOString() })
+            .eq('id', overlapping.id);
+          if (updErr) {
+            skipped.push({ court_id: String(court_id), start_at: String(start_at), end_at: String(end_at), error: updErr.message });
+          } else {
+            merged += 1;
+          }
+          continue;
+        }
+      }
+
+      const conflict = await hasCourtConflict({
+        courtId: String(court_id),
+        startAt: String(start_at),
+        endAt: String(end_at),
+        reservationType,
+        occupiesCourtImmediately: true,
+      });
+      if (conflict.conflict) {
+        skipped.push({
+          court_id: String(court_id),
+          start_at: String(start_at),
+          end_at: String(end_at),
+          error: conflict.reason ?? 'Conflicto de horario',
+        });
+        continue;
+      }
+
+      let bookingTimezone = timezoneByCourt.get(String(court_id));
+      if (!bookingTimezone) {
+        const { data: courtData } = await supabase
+          .from('courts')
+          .select('club:clubs(timezone)')
+          .eq('id', court_id)
+          .maybeSingle();
+        bookingTimezone = clubTimezoneOrDefault(
+          (courtData as { club?: { timezone?: string | null } } | null)?.club?.timezone,
+        );
+        timezoneByCourt.set(String(court_id), bookingTimezone);
+      }
+
+      toInsert.push({
+        court_id,
+        organizer_player_id: null,
+        start_at,
+        end_at,
+        timezone: bookingTimezone,
+        total_price_cents: 0,
+        currency: 'EUR',
+        status: 'confirmed',
+        notes,
+        reservation_type: reservationType,
+        source_channel: 'manual',
+      });
+    }
+
+    if (toInsert.length === 0) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Ningún tramo válido para bloquear',
+        skipped,
+      });
+    }
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from('bookings')
+      .insert(toInsert)
+      .select('id');
+    if (insertErr) return res.status(500).json({ ok: false, error: insertErr.message });
+
+    return res.status(201).json({
+      ok: true,
+      created: (inserted ?? []).length,
+      merged,
+      skipped,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 /**
  * @openapi
  * /bookings:

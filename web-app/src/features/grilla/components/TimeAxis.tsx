@@ -1,6 +1,6 @@
 import React from 'react';
 import { PIXELS_PER_MINUTE } from '../utils/timeGrid';
-import { getGridIntervalsForBounds, useGridBounds } from '../context/GridBoundsContext';
+import { getGridIntervalsForBounds, parseTimeStrInBounds, useGridBounds } from '../context/GridBoundsContext';
 import clsx from 'clsx';
 import { useZoom } from '../context/ZoomContext';
 
@@ -17,8 +17,9 @@ export const TimeAxis: React.FC<{ position: 'left' | 'right'; isCompact?: boolea
 
     return (
         <div
+            data-time-axis
             className={clsx(
-                'shrink-0 bg-white z-20',
+                'grilla-time-axis shrink-0 bg-white z-20',
                 isCompact ? 'w-8' : 'w-[34px]',
                 position === 'left'
                     ? 'border-r-2 border-r-white pl-1.5'
@@ -39,8 +40,10 @@ export const TimeAxis: React.FC<{ position: 'left' | 'right'; isCompact?: boolea
                     return (
                         <div
                             key={time}
+                            data-time-axis-row
+                            data-slot-mins={parseTimeStrInBounds(time, bounds)}
                             className={clsx(
-                                "flex items-start relative",
+                                "flex items-start relative cursor-crosshair",
                                 position === 'left' ? 'justify-end pr-1' : 'justify-start pl-1'
                             )}
                             style={{ height: time === '00:00' ? '0px' : `${rowHeightPx}px` }}

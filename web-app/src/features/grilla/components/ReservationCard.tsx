@@ -8,6 +8,7 @@ import { PIXELS_PER_MINUTE } from '../utils/timeGrid';
 import { useGridBounds } from '../context/GridBoundsContext';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { useZoom } from '../context/ZoomContext';
+import { isReservationCheckboxSelectable } from '../utils/gridSelectUtils';
 
 interface Props {
     reservation: Reservation;
@@ -18,6 +19,9 @@ interface Props {
     onHoverStart?: (res: Reservation, el: HTMLElement) => void;
     onHoverEnd?: () => void;
     typeColorOverrides?: Record<string, string>;
+    selectMode?: boolean;
+    checked?: boolean;
+    onToggleSelect?: (reservation: Reservation) => void;
 }
 
 // Color is driven by booking_type (the "what"), not by payment status
@@ -37,13 +41,18 @@ const bookingTypeColors: Record<ReservationType, string> = {
 // Pending payment: dashed border to indicate "not yet paid"
 const pendingPaymentStyle = 'border-dashed opacity-80';
 
-export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justDropped, onClick, compactPxPerMinute, onHoverStart, onHoverEnd, typeColorOverrides }) => {
+export const ReservationCard: React.FC<Props> = ({
+    reservation, isOverlay, justDropped, onClick, compactPxPerMinute, onHoverStart, onHoverEnd, typeColorOverrides,
+    selectMode, checked, onToggleSelect,
+}) => {
     const { tData, t } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
+    const selectable = isReservationCheckboxSelectable(reservation);
+
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: reservation.id,
         data: reservation,
-        disabled: isOverlay,
+        disabled: isOverlay || selectMode || !selectable,
     });
 
     const source = (reservation.matchType || reservation.playerName || '').trim();
@@ -137,18 +146,30 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
         <div
             id={reservation.id}
             ref={isOverlay ? undefined : setNodeRef}
+            data-reservation-card
+            data-maintenance-block={
+                reservation.booking_type === 'blocked' && reservation.notes?.includes('__COURT_MAINTENANCE__')
+                    ? 'true'
+                    : undefined
+            }
             style={{ ...style, ...typeColorStyle }}
             {...(isOverlay ? {} : listeners)}
             {...(isOverlay ? {} : attributes)}
             data-dnd-draggable
             onClick={(e) => {
-                if (!isDragging && onClick) {
+                if (isDragging) return;
+                if (selectMode && onToggleSelect && selectable) {
+                    e.stopPropagation();
+                    onToggleSelect(reservation);
+                    return;
+                }
+                if (onClick) {
                     e.stopPropagation();
                     onClick(reservation);
                 }
             }}
             onMouseEnter={(e) => {
-                if (!isDragging && onHoverStart) {
+                if (!isDragging && !selectMode && onHoverStart) {
                     onHoverStart(reservation, e.currentTarget);
                 }
             }}
@@ -159,15 +180,31 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
             }}
             className={clsx(
                 // Rectangular card: no rounded corners, border on all sides
-                'absolute inset-x-0 border flex flex-col overflow-hidden cursor-pointer hover:brightness-95 transition-[filter]',
+                'absolute inset-x-0 border flex flex-col overflow-hidden transition-[filter,box-shadow]',
+                selectMode ? 'cursor-pointer' : 'cursor-pointer hover:brightness-95',
                 isShortBooking && !isCompact && 'justify-center items-center',
                 isCompact ? 'p-0 px-0.5 text-[8px]' : isShortBooking ? 'p-0 px-0.5' : isSmallZoom ? 'p-1.5 text-[18px]' : 'p-1.5 text-xs',
                 typeColorClass,
                 reservation.status === 'pending_payment' && pendingPaymentStyle,
                 isOverlay && 'shadow-lg scale-[1.02] ring-2 ring-blue-400 opacity-95 cursor-grabbing !transition-none',
-                justDropped && 'relative z-20'
+                justDropped && 'relative z-20',
+                selectMode && checked && 'ring-2 ring-emerald-400 ring-inset brightness-110',
             )}
         >
+            {selectMode && selectable && (
+                <div className="absolute top-0.5 left-0.5 z-20 pointer-events-none">
+                    <div className={clsx(
+                        'w-3.5 h-3.5 rounded border flex items-center justify-center',
+                        checked ? 'bg-emerald-500 border-emerald-500' : 'bg-white/90 border-gray-300',
+                    )}>
+                        {checked && (
+                            <svg viewBox="0 0 12 12" className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M2 6l3 3 5-5" />
+                            </svg>
+                        )}
+                    </div>
+                </div>
+            )}
             <AnimatePresence>
                 {justDropped && (
                     <motion.div

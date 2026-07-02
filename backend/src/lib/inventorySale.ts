@@ -361,6 +361,7 @@ export type ClubPaymentLedgerEntry = {
   payer_player_id: string | null;
   concept: string;
   source: 'booking' | 'store';
+  sale_id?: string | null;
   payment_method: 'cash' | 'card' | 'wallet' | 'app';
   participants: Array<{
     player_id: string | null;
@@ -487,6 +488,7 @@ export async function listClubStorePaymentEntries(
       payer_player_id: parsed.playerId,
       concept: `Tienda · ${parsed.name}`,
       source: 'store',
+      sale_id: parsed.saleId,
       payment_method: method,
       participants: [],
     });
@@ -535,6 +537,7 @@ export async function listClubStorePaymentEntries(
       payer_player_id: payerId || null,
       concept: `Tienda · ${customLinesLabel(metaEntry.meta.custom_lines)}`,
       source: 'store',
+      sale_id: parsedRef.saleId,
       payment_method: paymentMethodFromStripeRef(stripeRef),
       participants: [],
     });
@@ -567,6 +570,7 @@ export async function listClubStorePaymentEntries(
       payer_player_id: entry.meta.player_id || null,
       concept: `Tienda · ${customLinesLabel(entry.meta.custom_lines)}`,
       source: 'store',
+      sale_id: saleId,
       payment_method: 'wallet',
       participants: [],
     });

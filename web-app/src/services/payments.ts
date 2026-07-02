@@ -31,6 +31,7 @@ export type PaymentTransaction = {
   payer_player_id?: string | null;
   concept?: string;
   source?: 'booking' | 'store';
+  sale_id?: string | null;
   payment_method?: 'cash' | 'card' | 'wallet' | 'app';
   participants?: PaymentParticipant[];
 };

@@ -67,14 +67,21 @@ export function PortalTealHeader({ clubName, onMenuClick }: PortalTealHeaderProp
             <Menu className="w-5 h-5 text-white" />
           </button>
         )}
-        <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
-          <div className="w-full h-full rounded-full border border-gray-900 bg-white flex items-center justify-center">
-            <span className="font-extrabold text-[10px] sm:text-xs text-black italic tracking-tighter">X7</span>
+        <button
+          type="button"
+          onClick={() => navigate('/grilla?menu=reservas')}
+          className="flex items-center gap-3 md:gap-4 min-w-0 rounded-lg hover:bg-white/10 transition-colors -ml-1 pl-1 pr-2 py-0.5"
+          title={title}
+        >
+          <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
+            <div className="w-full h-full rounded-full border border-gray-900 bg-white flex items-center justify-center">
+              <span className="font-extrabold text-[10px] sm:text-xs text-black italic tracking-tighter">X7</span>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-col min-w-0">
-          <h1 className="text-[13px] md:text-sm font-bold text-white leading-tight truncate">{title}</h1>
-        </div>
+          <div className="flex flex-col min-w-0 text-left">
+            <h1 className="text-[13px] md:text-sm font-bold text-white leading-tight truncate">{title}</h1>
+          </div>
+        </button>
       </div>
       <div className="relative flex items-center gap-2 flex-shrink-0">
         <div className="relative" ref={langRef}>
