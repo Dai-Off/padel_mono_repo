@@ -38,6 +38,10 @@ import {
 
 /** Cooldown entre refrescos al volver del background. */
 const BACKGROUND_REFRESH_COOLDOWN_MS = 30_000;
+/** SWR: al reentrar al perfil, si el cache es más viejo que esto se revalida en
+ * silencio (recoge cambios hechos fuera: partidos/lecciones). Reentradas rápidas
+ * (< TTL) siguen sirviendo cache sin re-fetch. */
+const REVALIDATE_TTL_MS = 30_000;
 
 type ProfileDataValue = {
   // Bundle above-the-fold
@@ -107,6 +111,7 @@ export function ProfileDataProvider({ children }: { children: ReactNode }) {
   const socialLoadedAt = useRef(0);
   const [bootstrapped, setBootstrapped] = useState(false);
   const lastBackgroundRefreshAt = useRef(0);
+  const lastLoadAt = useRef(0);
 
   // ── Loaders (con guard + SWR: spinner solo en 1ª carga) ──
 
@@ -224,19 +229,10 @@ export function ProfileDataProvider({ children }: { children: ReactNode }) {
 
   // ── Acciones expuestas ──
 
-  const ensureLoaded = useCallback(() => {
-    if (bootstrapped) return; // reentrada: sirve lo cacheado, sin fetch.
-    setBootstrapped(true);
-    // Token-only. Los que dependen de playerId (peer/stats/social) los dispara el
-    // efecto [bootstrapped, playerId] de abajo (una sola vía, evita doble carga).
-    loadBundle(false);
-    loadRadar(false);
-    loadLevel(false);
-  }, [bootstrapped, loadBundle, loadRadar, loadLevel]);
-
   const refresh = useCallback(
     ({ force = false }: { force?: boolean } = {}) => {
       setBootstrapped(true);
+      lastLoadAt.current = Date.now();
       loadBundle(force);
       loadRadar(force);
       loadLevel(force);
@@ -246,6 +242,23 @@ export function ProfileDataProvider({ children }: { children: ReactNode }) {
     },
     [loadBundle, loadRadar, loadLevel, loadPeer, loadStats, loadSocial],
   );
+
+  const ensureLoaded = useCallback(() => {
+    if (bootstrapped) {
+      // SWR: reentrada instantánea desde cache; si es viejo (> TTL) se revalida en
+      // SILENCIO (los loaders solo muestran spinner en la 1ª carga, no en refrescos).
+      // Recoge cambios hechos fuera del perfil (partidos/lecciones).
+      if (Date.now() - lastLoadAt.current > REVALIDATE_TTL_MS) refresh({ force: true });
+      return;
+    }
+    setBootstrapped(true);
+    lastLoadAt.current = Date.now();
+    // Token-only. Los que dependen de playerId (peer/stats/social) los dispara el
+    // efecto [bootstrapped, playerId] de abajo (una sola vía, evita doble carga).
+    loadBundle(false);
+    loadRadar(false);
+    loadLevel(false);
+  }, [bootstrapped, loadBundle, loadRadar, loadLevel, refresh]);
 
   const reloadCoach = useCallback(() => {
     loadRadar(true);

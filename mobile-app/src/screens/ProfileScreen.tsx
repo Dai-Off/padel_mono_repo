@@ -194,6 +194,17 @@ export function ProfileScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token, loadProfile]);
 
+  // Reflejar los cambios del cache global (HomeData) en el perfil local: al editar
+  // preferencias / perfil se hace refreshGlobalProfile, y así el hero y la card de
+  // preferencias se actualizan sin tener que remontar la pantalla (antes se
+  // quedaban con la copia vieja sembrada al montar).
+  useEffect(() => {
+    if (homeProfile) {
+      setProfile(homeProfile);
+      setCoverUrl(homeProfile.coverUrl);
+    }
+  }, [homeProfile]);
+
 
   const equippedFrame = useMemo<FrameAttrs | null>(() => {
     const fid = customization?.frameId;
