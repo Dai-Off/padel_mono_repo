@@ -16,6 +16,7 @@ export interface ProfileTranslationKeys {
   coachTabPlan: string;
   coachTodaySummary: string;
   coachAnalysisTitle: string;
+  skillRadarTitle: string;
   coachRecommendation: string;
   coachRecommendationSelf: string;
   coachPeerPerception: string;

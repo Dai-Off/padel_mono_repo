@@ -28,6 +28,7 @@ import { LigaChip } from '../components/profile/LigaChip';
 import type { Achievement } from '../design/achievements';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
+import { SkillRadarCard } from '../components/profile/SkillRadarCard';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
 import { LevelEvolutionCard } from '../components/profile/LevelEvolutionCard';
 import { StatsCard } from '../components/profile/StatsCard';
@@ -524,6 +525,11 @@ export function ProfileScreen({
             </View>
           </View>
         </View>
+
+        {/* Radar de nivel (primero): identidad del jugador, antes del Coach IA */}
+        {!needsLevelOnboarding && coachAssessment ? (
+          <SkillRadarCard skills={coachAssessment.skills} levelName={coachAssessment.level_name} />
+        ) : null}
 
         {/* Virtual Coach Card / Analysis */}
         {needsLevelOnboarding ? (

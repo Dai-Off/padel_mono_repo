@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SkillPolarChart } from './SkillPolarChart';
 
 import { CoachAssessment } from '../../api/coachAssessment';
 import { PeerFeedbackInsight } from '../../api/peerFeedbackInsight';
@@ -130,25 +129,8 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
       {/* TAB RESUMEN DE HOY */}
       {activeTab === 'today' && (
         <>
-          {/* Análisis Level Card */}
+          {/* Recomendación (el radar se movió a SkillRadarCard, arriba del Coach) */}
           <View style={styles.analysisCard}>
-            <View style={styles.analysisHeader}>
-              <View style={styles.analysisIconBox}>
-                <Ionicons name="analytics-outline" size={14} color="#F18F34" />
-              </View>
-              <Text style={styles.analysisTitle}>{t('profile.coachAnalysisTitle')}</Text>
-            </View>
-            
-            <SkillPolarChart
-              max={70}
-              skills={{
-                technical: assessment.skills.technical,
-                physical: assessment.skills.physical,
-                mental: assessment.skills.mental,
-                tactical: assessment.skills.tactical
-              }}
-            />
-
             {/* Recomendación IA */}
             <View style={styles.recommendationBox}>
               <View style={styles.recIconContainer}>

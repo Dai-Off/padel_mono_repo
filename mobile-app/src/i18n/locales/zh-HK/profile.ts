@@ -17,6 +17,7 @@ export const profile: ProfileTranslationKeys = {
   coachTabPlan: '計劃',
   coachTodaySummary: '今日摘要',
   coachAnalysisTitle: '你目前水平分析',
+  skillRadarTitle: '水平分析',
   coachRecommendation: '{source} 建議：',
   coachRecommendationSelf: '建議：',
   coachPeerPerception: '其他球員眼中的水平',

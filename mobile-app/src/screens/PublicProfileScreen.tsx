@@ -19,6 +19,7 @@ import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 import { AnimatedTitle } from '../components/profile/AnimatedTitle';
 import { LigaChip } from '../components/profile/LigaChip';
 import { LevelEvolutionCard } from '../components/profile/LevelEvolutionCard';
+import { SkillRadarCard } from '../components/profile/SkillRadarCard';
 import { StatsCard } from '../components/profile/StatsCard';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
 import { PlayerPreferencesCard } from '../components/profile/PlayerPreferencesCard';
@@ -242,6 +243,14 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
             </View>
           </View>
         </View>
+
+        {/* Radar de nivel (identidad del jugador; el perfil ajeno solo muestra esto del Coach) */}
+        {profile.coachAssessment?.skills ? (
+          <SkillRadarCard
+            skills={profile.coachAssessment.skills}
+            levelName={profile.coachAssessment.level_name}
+          />
+        ) : null}
 
         {/* Evolución del nivel */}
         <LevelEvolutionCard

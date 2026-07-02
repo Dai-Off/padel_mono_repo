@@ -17,6 +17,7 @@ export const profile: ProfileTranslationKeys = {
   coachTabPlan: 'Plan',
   coachTodaySummary: 'Resumen de Hoy',
   coachAnalysisTitle: 'Análisis de tu Nivel Actual',
+  skillRadarTitle: 'Análisis de nivel',
   coachRecommendation: 'Recomendación {source}:',
   coachRecommendationSelf: 'Recomendación:',
   coachPeerPerception: 'Nivel percibido por otros jugadores',
