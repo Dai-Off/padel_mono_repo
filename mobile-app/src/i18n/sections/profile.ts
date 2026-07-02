@@ -17,6 +17,7 @@ export interface ProfileTranslationKeys {
   coachTodaySummary: string;
   coachAnalysisTitle: string;
   coachRecommendation: string;
+  coachRecommendationSelf: string;
   coachPeerPerception: string;
   coachLastTrend: string;
   coachDistHigh: string;
