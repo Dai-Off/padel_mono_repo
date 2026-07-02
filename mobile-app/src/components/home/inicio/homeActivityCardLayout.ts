@@ -1,0 +1,12 @@
+/** Dimensiones compartidas: cards de partido y reserva en el carrusel del home. */
+export const HOME_ACTIVITY_THUMB_SIZE = 96;
+export const HOME_ACTIVITY_SLOTS_HEIGHT = 36;
+export const HOME_ACTIVITY_COL_GAP = 6;
+export const HOME_ACTIVITY_ROW_GAP = 10;
+export const HOME_ACTIVITY_CARD_PADDING = 12;
+
+export const HOME_ACTIVITY_LEFT_COL_HEIGHT =
+  HOME_ACTIVITY_THUMB_SIZE + HOME_ACTIVITY_COL_GAP + HOME_ACTIVITY_SLOTS_HEIGHT;
+
+export const HOME_ACTIVITY_CARD_MIN_HEIGHT =
+  HOME_ACTIVITY_CARD_PADDING * 2 + HOME_ACTIVITY_LEFT_COL_HEIGHT;

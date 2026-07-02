@@ -80,7 +80,13 @@ function PendingPaymentCard({
       </Text>
       <Text style={styles.pendingWhen}>{formatBookingWhen(booking.start_at, t, numberLocale)}</Text>
       <Text style={styles.pendingAmount}>
-        {t('wallet.walletYourShare', { amount: formatAmount(booking.amount_due_cents, numberLocale) })}
+        {booking.reservation_type === 'standard'
+          ? t('wallet.walletCourtReservationTotal', {
+              amount: formatAmount(booking.amount_due_cents, numberLocale),
+            })
+          : t('wallet.walletYourShare', {
+              amount: formatAmount(booking.amount_due_cents, numberLocale),
+            })}
       </Text>
       <Pressable
         style={({ pressed }) => [

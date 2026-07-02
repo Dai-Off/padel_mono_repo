@@ -14,8 +14,10 @@ export type SlotBookingTimeInput = {
 
 /**
  * Resuelve el rango UTC de una reserva a partir del slot elegido.
- * Prioriza los instantes que devuelve la API (zona del club); si no hay,
- * convierte fecha+hora civil usando la zona del club, no la del dispositivo.
+ * El fin siempre se calcula como inicio + `durationMinutes` (la duración elegida
+ * por el usuario). No se usa `endAtUtc` de la API para persistir: puede venir
+ * con el turno por defecto del club (p. ej. 90 min) aunque el usuario haya
+ * elegido 120 min en reserva de pista.
  */
 export function resolveSlotStartEndUtc(slot: SlotBookingTimeInput): {
   start_at: string;
@@ -28,10 +30,11 @@ export function resolveSlotStartEndUtc(slot: SlotBookingTimeInput): {
   const clubTz = slot.clubTimezone?.trim() || DEFAULT_CLUB_TIMEZONE;
 
   if (slot.startAtUtc) {
-    const end_at =
-      slot.endAtUtc ??
-      new Date(new Date(slot.startAtUtc).getTime() + durationMin * 60 * 1000).toISOString();
-    return { start_at: slot.startAtUtc, end_at };
+    const start_at = slot.startAtUtc;
+    const end_at = new Date(
+      new Date(start_at).getTime() + durationMin * 60 * 1000,
+    ).toISOString();
+    return { start_at, end_at };
   }
 
   const start_at = clubLocalDateTimeToUtcIso(slot.dateStr, slot.time, clubTz);

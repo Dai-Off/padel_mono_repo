@@ -62,6 +62,7 @@ import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { rejectMatchmakingProposal, leaveMatchmaking } from '../api/matchmaking';
 import { buildLeaveMatchAlertMessage, buildLeaveMatchDoneMessage } from '../utils/matchLeaveAlert';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
+import { OpenMatchPriceBreakdown } from '../components/partido/OpenMatchPriceBreakdown';
 import { MatchLeaveTrashButton } from '../components/partido/MatchLeaveTrashButton';
 import { PrivateMatchInvitesSection } from '../components/partido/PrivateMatchInvitesSection';
 import { SafeScrollView } from '../components/ui/SafeScrollView';
@@ -933,9 +934,16 @@ export function PartidoDetailScreen({
     isInMatch &&
     !showFinishBar &&
     !pendingMmPay &&
-    matchPhase !== 'past';
+    matchPhase !== 'past' &&
+    partido.visibility !== 'private';
+  const showPrivateOrganizerBar =
+    playerContextResolved &&
+    partido.visibility === 'private' &&
+    userIsOrganizer &&
+    matchPhase !== 'past' &&
+    !showFinishBar;
   const bottomBarNeedsStack = pendingMmPay || canDeclineMmProposal;
-  const bottomReserve = insets.bottom + (showFinishBar || showLeaveBar ? 100 : bottomBarNeedsStack ? 148 : 88);
+  const bottomReserve = insets.bottom + (showFinishBar || showLeaveBar || showPrivateOrganizerBar ? 100 : bottomBarNeedsStack ? 148 : 88);
   const canPressCta =
     playerContextResolved &&
     !joinBusy &&
@@ -1184,10 +1192,16 @@ export function PartidoDetailScreen({
                     <Text style={styles.gridValue}>{levelDisplay}</Text>
                   </View>
                   <View style={styles.gridCell}>
-                    <Text style={styles.gridLabel}>{t('common.sortByPrice')}</Text>
+                    <Text style={styles.gridLabel}>{t('partidos.createYourShare')}</Text>
                     <Text style={styles.gridValue}>{partido.pricePerPlayer}</Text>
                   </View>
                 </View>
+                {matchPhase !== 'past' && (partido.totalPriceCents ?? 0) > 0 ? (
+                  <OpenMatchPriceBreakdown
+                    totalCents={partido.totalPriceCents}
+                    variant="inline"
+                  />
+                ) : null}
                 <DetailRow
                   icon="calendar-outline"
                   label={t('partidos.detailDate')}
@@ -1400,6 +1414,14 @@ export function PartidoDetailScreen({
             </View>
           </View>
         </View>
+      ) : showPrivateOrganizerBar ? (
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <MatchLeaveTrashButton
+            loading={leaveMatchBusy}
+            onPress={handleTrashMatch}
+            accessibilityLabel={t('partidos.detailLeaveA11y')}
+          />
+        </View>
       ) : pendingMmPay ? (
         <View style={[styles.bottomBar, styles.bottomBarStack, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <Pressable
@@ -1431,7 +1453,7 @@ export function PartidoDetailScreen({
             </Pressable>
           ) : null}
         </View>
-      ) : (
+      ) : partido.visibility === 'private' && isInMatch ? null : (
         <View style={[styles.bottomBar, styles.bottomBarStack, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           {needsOnboardingForJoin ? (
             // Partido competitivo + onboarding pendiente: el botón principal

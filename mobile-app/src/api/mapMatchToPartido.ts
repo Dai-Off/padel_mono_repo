@@ -231,6 +231,7 @@ export function mapMatchToPartido(
     location: city ? `${city}` : '—',
     price: formatPrice(totalPriceCents, b.currency ?? 'EUR'),
     pricePerPlayer: formatPrice(Math.ceil(totalPriceCents / 4), b.currency ?? 'EUR'),
+    totalPriceCents,
     duration: `${durationMin}min`,
     matchType: m.type ?? undefined,
     matchStatus: m.status,

@@ -1,4 +1,5 @@
 import type { MatchInviteRow } from '../api/matchInvites';
+import type { ReceivedMatchInvite } from '../api/matchInvites';
 import type { PlayerSearchHit } from '../api/players';
 
 export type EnrichedMatchInvite = MatchInviteRow & {
@@ -164,4 +165,21 @@ export function inviteStatusMeta(
     return t('partidos.privateInviteMetaCancelled');
   }
   return inv.status;
+}
+
+export function receivedMatchInviteBannerTitle(
+  invite: ReceivedMatchInvite,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  const name = invite.inviter_name;
+  if (invite.match_competitive) {
+    return t('partidos.matchInviteBannerTitleCompetitive', { name });
+  }
+  const visibility = invite.match_visibility?.toLowerCase();
+  // Las invitaciones in-app solo aplican a partidos privados; si el backend
+  // aún no envía visibility, asumimos privado (no confundir con competitivo).
+  if (!visibility || visibility === 'private') {
+    return t('partidos.matchInviteBannerTitlePrivate', { name });
+  }
+  return t('partidos.matchInviteBannerTitle', { name });
 }

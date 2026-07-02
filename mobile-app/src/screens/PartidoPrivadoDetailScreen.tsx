@@ -14,6 +14,7 @@ import { cancelMatchAsOrganizer, fetchMatchById } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId } from '../api/players';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
+import { OpenMatchPriceBreakdown } from '../components/partido/OpenMatchPriceBreakdown';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { useTranslation } from '../i18n';
@@ -171,10 +172,13 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
               <Text style={styles.infoCellValue}>{partidoLocal.levelRange}</Text>
             </View>
             <View style={styles.infoCell}>
-              <Text style={styles.infoCellLabel}>{t('common.sortByPrice').toUpperCase()}</Text>
-              <Text style={styles.infoCellValue}>{partidoLocal.price}</Text>
+              <Text style={styles.infoCellLabel}>{t('partidos.createYourShare').toUpperCase()}</Text>
+              <Text style={styles.infoCellValue}>{partidoLocal.pricePerPlayer}</Text>
             </View>
           </View>
+          {(partidoLocal.totalPriceCents ?? 0) > 0 ? (
+            <OpenMatchPriceBreakdown totalCents={partidoLocal.totalPriceCents} variant="inline" />
+          ) : null}
         </View>
 
         <View style={styles.statusRow}>

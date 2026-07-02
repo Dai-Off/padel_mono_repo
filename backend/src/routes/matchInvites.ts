@@ -304,7 +304,7 @@ router.get('/invites/received', async (req: Request, res: Response) => {
         `${MATCH_INVITE_SELECT},
          inviter:invited_by_player_id ( id, first_name, last_name, username, avatar_url ),
          matches (
-           id, status, visibility,
+           id, status, visibility, competitive,
            bookings ( start_at, end_at, status, deleted_at, courts ( name, clubs ( name ) ) )
          )`,
       )
@@ -380,6 +380,8 @@ router.get('/invites/received', async (req: Request, res: Response) => {
         end_at: endAt,
         has_schedule_conflict,
         match_when: formatMatchWhen(startAt),
+        match_visibility: String((match as { visibility?: string } | null)?.visibility ?? 'public').toLowerCase(),
+        match_competitive: (match as { competitive?: boolean } | null)?.competitive === true,
       };
     })
       .filter((inv): inv is NonNullable<typeof inv> => inv != null);

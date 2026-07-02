@@ -26,6 +26,7 @@ export const wallet: WalletTranslationKeys = {
   walletPendingPayments: '待付款項',
   walletRecentMovements: '最近交易',
   walletYourShare: '你需支付 {amount}',
+  walletCourtReservationTotal: '應付總額 {amount}',
   walletPendingBookingTitle: '{club} 預約',
   walletLoadFundsSoon: '稍後可於應用程式內儲值。',
   walletWithdrawSoon: '稍後可於應用程式內提款。',

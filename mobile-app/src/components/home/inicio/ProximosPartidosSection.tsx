@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -10,53 +10,66 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import type { CourtReservation } from '../../../api/bookings';
 import type { PartidoItem } from '../../../screens/PartidosScreen';
-import { isPartidoCancelled } from '../../../domain/matchLifecycle';
 import { PartidoOpenCard } from '../../partido/PartidoOpenCard';
+import { CourtReservationHomeCard } from '../../partido/CourtReservationHomeCard';
+import { filterTheme } from '../../filters/filterTheme';
 import { INICIO_PAD_H } from './constants';
-import { androidReadableText } from './textStyles';
+import { androidReadableText, androidSectionHeading } from './textStyles';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
 import { useTranslation } from '../../../i18n';
+import {
+  buildHomeActivityItems,
+  filterHomeActivityItems,
+  type HomeActivityItem,
+  type HomeActivityType,
+} from './homeActivityFilters';
+import { HOME_ACTIVITY_CARD_MIN_HEIGHT } from './homeActivityCardLayout';
+import { MisActividadesFiltersSheet } from './MisActividadesFiltersSheet';
 
 const CARD_RADIUS = 12;
-/** Máximo por slide; el real se acota al ancho de pantalla menos padding del home. */
 const CAROUSEL_CARD_W_MAX = 300;
-/** Aire entre el borde útil y la tarjeta (evita recorte en pantallas estrechas). */
 const CAROUSEL_INNER_PAD = 12;
 
-/** Equiv. Tailwind: bg-gradient-to-br from-[#F18F34]/8 via-transparent to-transparent */
-const GRADIENT_BR_ORANGE_FADE = {
-  colors: [
-    'rgba(241, 143, 52, 0.08)',
-    'rgba(241, 143, 52, 0)',
-    'rgba(241, 143, 52, 0)',
-  ] as const,
-  locations: [0, 0.45, 1] as const,
-  start: { x: 0, y: 0 },
-  end: { x: 1, y: 1 },
-};
-
 type Props = {
-  items: PartidoItem[];
+  partidos: PartidoItem[];
+  reservations: CourtReservation[];
   loading?: boolean;
   onPartidoPress?: (partido: PartidoItem) => void;
+  onReservationPress?: (reservation: CourtReservation) => void;
 };
 
-
-/**
- * Capa absolute inset-0 como en web (hover allí = opacity-100; aquí siempre visible).
- * elevation > card para que en Android no quede debajo del elevation del PartidoOpenCard.
- */
 function CarouselItem({ width, children }: { width: number; children: ReactNode }) {
   return <View style={[styles.carouselItem, { width }]}>{children}</View>;
 }
 
-function isUpcomingPartido(item: PartidoItem): boolean {
-  if (isPartidoCancelled(item)) return false;
-  const phase = item.matchPhase ?? 'upcoming';
-  if (phase === 'past') return false;
-  return true;
+function ReservaCard({
+  item,
+  onPress,
+  fullWidth,
+  theme,
+}: {
+  item: CourtReservation;
+  onPress: () => void;
+  fullWidth: boolean;
+  theme: { orb1Color: string };
+}) {
+  return (
+    <View style={[styles.cardShell, fullWidth && styles.cardShellFull]}>
+      <CourtReservationHomeCard item={item} onPress={onPress} fullWidth={fullWidth} />
+      <LinearGradient
+        pointerEvents="none"
+        colors={[`rgba(${theme.orb1Color}, 0.1)`, 'transparent']}
+        locations={[0, 0.85]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0.5 }}
+        style={styles.cardGlowOverlay}
+      />
+    </View>
+  );
 }
 
 function ProximoCard({
@@ -68,7 +81,7 @@ function ProximoCard({
   item: PartidoItem;
   onPress: () => void;
   fullWidth: boolean;
-  theme: any;
+  theme: { orb1Color: string };
 }) {
   return (
     <View style={[styles.cardShell, fullWidth && styles.cardShellFull]}>
@@ -76,7 +89,7 @@ function ProximoCard({
       <LinearGradient
         pointerEvents="none"
         colors={[`rgba(${theme.orb1Color}, 0.1)`, 'transparent']}
-        locations={[0, 0.85]} // Difuminado total a lo largo de la tarjeta
+        locations={[0, 0.85]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0.5 }}
         style={styles.cardGlowOverlay}
@@ -85,49 +98,129 @@ function ProximoCard({
   );
 }
 
+function renderActivityCard(
+  item: HomeActivityItem,
+  fullWidth: boolean,
+  theme: { orb1Color: string },
+  onPartidoPress?: (p: PartidoItem) => void,
+  onReservationPress?: (r: CourtReservation) => void,
+) {
+  if (item.kind === 'partido') {
+    return (
+      <ProximoCard
+        item={item.data}
+        fullWidth={fullWidth}
+        onPress={() => onPartidoPress?.(item.data)}
+        theme={theme}
+      />
+    );
+  }
+  return (
+    <ReservaCard
+      item={item.data}
+      fullWidth={fullWidth}
+      onPress={() => onReservationPress?.(item.data)}
+      theme={theme}
+    />
+  );
+}
+
 export function ProximosPartidosSection({
-  items,
+  partidos,
+  reservations,
   loading,
   onPartidoPress,
+  onReservationPress,
 }: Props) {
   const { t } = useTranslation();
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const insets = useSafeAreaInsets();
   const { width: windowW } = useWindowDimensions();
-  const upcomingItems = useMemo(() => items.filter(isUpcomingPartido), [items]);
-  const usableW = windowW - INICIO_PAD_H * 2;
-  /** Una reserva: card a todo el ancho útil del Inicio. Dos o más: ancho tipo carrusel (como antes). */
-  const carouselCardW = Math.min(
-    CAROUSEL_CARD_W_MAX,
-    Math.max(200, usableW - CAROUSEL_INNER_PAD),
-  );
-  const singleCardW = Math.max(200, usableW);
-  const cardWidth =
-    !loading && upcomingItems.length === 1 ? singleCardW : carouselCardW;
 
-  // Si ya cargó y no hay partidos próximos, ocultar toda la sección.
-  if (!loading && upcomingItems.length === 0) {
-    return null;
-  }
+  const [typeFilters, setTypeFilters] = useState<HomeActivityType[]>([]);
+  const [showFinished, setShowFinished] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const allItems = useMemo(
+    () => buildHomeActivityItems(partidos, reservations),
+    [partidos, reservations],
+  );
+
+  const visibleItems = useMemo(
+    () =>
+      filterHomeActivityItems(allItems, {
+        typeFilters,
+        showFinished,
+      }),
+    [allItems, typeFilters, showFinished],
+  );
+
+  const activeFilterCount = typeFilters.length + (showFinished ? 1 : 0);
+
+  const usableW = windowW - INICIO_PAD_H * 2;
+  const carouselCardW = Math.min(CAROUSEL_CARD_W_MAX, Math.max(200, usableW - CAROUSEL_INNER_PAD));
+  const singleCardW = Math.max(200, usableW);
+  const cardWidth = !loading && visibleItems.length === 1 ? singleCardW : carouselCardW;
+
+  const hasAnyData = allItems.length > 0;
+  if (!loading && !hasAnyData) return null;
+
+  const subtitle =
+    loading && visibleItems.length === 0
+      ? t('home.misActividades.loading')
+      : visibleItems.length === 0
+        ? t('home.misActividades.emptyFiltered')
+        : visibleItems.length === 1
+          ? t('home.misActividades.oneItem')
+          : t('home.misActividades.manyItems', { count: visibleItems.length });
 
   return (
     <View style={styles.section}>
       <View style={styles.headerRow}>
-        <View style={styles.headerTextCol}>
-          <Text style={styles.title}>{t('home.proximosPartidos.title')}</Text>
-          <Text style={styles.subtitle}>
-            {loading && upcomingItems.length === 0
-              ? t('home.proximosPartidos.loading')
-              : upcomingItems.length === 0
-                ? t('home.proximosPartidos.empty')
-                : upcomingItems.length === 1
-                  ? t('home.proximosPartidos.oneConfirmed')
-                  : t('home.proximosPartidos.manyConfirmed', { count: upcomingItems.length })}
+        <View style={styles.titleRow}>
+          <Text style={styles.title} numberOfLines={2}>
+            {t('home.misActividades.title')}
           </Text>
+          {hasAnyData ? (
+            <Pressable
+              onPress={() => setFiltersOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('search.filtersTitle')}
+              style={({ pressed }) => [
+                styles.filterBtn,
+                activeFilterCount > 0 && styles.filterBtnActive,
+                pressed && styles.filterBtnPressed,
+              ]}
+            >
+              <Ionicons
+                name="options-outline"
+                size={16}
+                color={activeFilterCount > 0 ? filterTheme.accent : '#9ca3af'}
+              />
+              {activeFilterCount > 0 ? (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          ) : null}
         </View>
+        <Text style={styles.subtitle}>{subtitle}</Text>
       </View>
 
-      {loading && upcomingItems.length === 0 ? (
+      <MisActividadesFiltersSheet
+        visible={filtersOpen}
+        allItems={allItems}
+        typeFilters={typeFilters}
+        showFinished={showFinished}
+        onClose={() => setFiltersOpen(false)}
+        onApply={(types, finished) => {
+          setTypeFilters(types);
+          setShowFinished(finished);
+        }}
+      />
+
+      {loading && visibleItems.length === 0 ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -135,10 +228,7 @@ export function ProximosPartidosSection({
           removeClippedSubviews={false}
           scrollEnabled={false}
           style={styles.carouselScroll}
-          contentContainerStyle={[
-            styles.carouselContent,
-            { paddingRight: 12 + insets.right },
-          ]}
+          contentContainerStyle={[styles.carouselContent, { paddingRight: 12 + insets.right }]}
         >
           <CarouselItem width={carouselCardW}>
             <Pressable style={[styles.skeletonCard, { width: carouselCardW }]} disabled>
@@ -154,32 +244,40 @@ export function ProximosPartidosSection({
             </Pressable>
           </CarouselItem>
         </ScrollView>
+      ) : visibleItems.length === 0 ? (
+        <View style={styles.emptyFilteredWrap}>
+          <Text style={styles.emptyFilteredText}>{t('home.misActividades.emptyFiltered')}</Text>
+        </View>
       ) : (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           nestedScrollEnabled
           removeClippedSubviews={false}
-          scrollEnabled={upcomingItems.length > 1}
+          scrollEnabled={visibleItems.length > 1}
           style={styles.carouselScroll}
           contentContainerStyle={[
             styles.carouselContent,
             {
-              paddingRight:
-                upcomingItems.length === 1 ? insets.right : 12 + insets.right,
+              paddingRight: visibleItems.length === 1 ? insets.right : 12 + insets.right,
             },
           ]}
         >
-            {upcomingItems.map((item) => (
-              <CarouselItem key={item.id} width={cardWidth}>
-                <ProximoCard
-                  item={item}
-                  fullWidth={upcomingItems.length === 1}
-                  onPress={() => onPartidoPress?.(item)}
-                  theme={theme}
-                />
+          {visibleItems.map((item) => {
+            const key =
+              item.kind === 'partido' ? `partido-${item.data.id}` : `reservation-${item.data.id}`;
+            return (
+              <CarouselItem key={key} width={cardWidth}>
+                {renderActivityCard(
+                  item,
+                  visibleItems.length === 1,
+                  theme,
+                  onPartidoPress,
+                  onReservationPress,
+                )}
               </CarouselItem>
-            ))}
+            );
+          })}
         </ScrollView>
       )}
     </View>
@@ -193,53 +291,89 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   headerRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 12,
+    gap: 2,
   },
-  headerTextCol: {
-    alignSelf: 'stretch',
-    width: '100%',
-    maxWidth: '100%',
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
   },
   title: {
-    ...androidReadableText({
+    flex: 1,
+    minWidth: 0,
+    ...androidSectionHeading({
       fontSize: 20,
       fontWeight: '900',
       color: '#ffffff',
       letterSpacing: -0.3,
     }),
     ...Platform.select({
-      android: {
-        includeFontPadding: false,
-        width: '100%' as const,
-        flexShrink: 0,
-      },
+      android: { width: '100%' as const, flexShrink: 0 },
       default: {},
     }),
+  },
+  filterBtn: {
+    width: 30,
+    height: 30,
+    marginTop: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  filterBtnActive: {
+    borderColor: filterTheme.chipActiveBorder,
+    backgroundColor: filterTheme.chipActiveBg,
+  },
+  filterBtnPressed: {
+    opacity: 0.88,
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 15,
+    height: 15,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    backgroundColor: filterTheme.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#fff',
   },
   subtitle: {
     ...androidReadableText({
       fontSize: 12,
       color: '#6b7280',
-      marginTop: 2,
       fontWeight: '500',
     }),
     ...Platform.select({
-      android: {
-        includeFontPadding: false,
-        width: '100%' as const,
-        flexShrink: 0,
-      },
+      android: { includeFontPadding: false, width: '100%' as const, flexShrink: 0 },
       default: {},
     }),
   },
+  emptyFilteredWrap: {
+    paddingVertical: 20,
+    paddingHorizontal: 4,
+  },
+  emptyFilteredText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#6b7280',
+    textAlign: 'center',
+  },
   carouselScroll: {
     overflow: 'visible',
-    /** iOS: ScrollView horizontal dentro de ScrollView vertical a veces mide altura 0 sin mínimo. */
     ...Platform.select({
-      ios: { minHeight: 180 },
+      ios: { minHeight: HOME_ACTIVITY_CARD_MIN_HEIGHT },
       default: {},
     }),
   },
@@ -269,15 +403,12 @@ const styles = StyleSheet.create({
     borderRadius: CARD_RADIUS,
     ...Platform.select({
       ios: { zIndex: 2 },
-      android: {
-        zIndex: 2,
-        elevation: 10,
-      },
+      android: { zIndex: 2, elevation: 10 },
       default: {},
     }),
   },
   skeletonCard: {
-    minHeight: 120,
+    minHeight: HOME_ACTIVITY_CARD_MIN_HEIGHT,
     borderRadius: CARD_RADIUS,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',

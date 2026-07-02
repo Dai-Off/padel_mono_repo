@@ -60,6 +60,7 @@ import { buildStoreSalesForCashClosing, listClubStorePaymentEntries, paymentMeth
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import {
+  assertCourtSlotAvailableForExclusiveReservation,
   assertCourtSlotAvailableForNewContentionMatch,
   cancelDisplacedBookingsForOccupyingReservation,
   contentionStatusForNewMatchBooking,
@@ -67,6 +68,19 @@ import {
 } from '../lib/courtContentionService';
 import { evictDemoPlayersWhenRealJoins } from '../lib/demoPlayerEvict';
 import { parseEloLevel, parseEloRange } from '../lib/openMatchRules';
+
+async function assertCourtSlotAvailableForNewReservation(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  courtId: string,
+  startAt: string,
+  endAt: string,
+  isPayFull: boolean,
+): Promise<string | null> {
+  if (isPayFull) {
+    return assertCourtSlotAvailableForExclusiveReservation(supabase, courtId, startAt, endAt);
+  }
+  return assertCourtSlotAvailableForNewContentionMatch(supabase, courtId, startAt, endAt);
+}
 
 /**
  * Helper to fetch player and match/club/court details and send the join confirmation email.
@@ -370,11 +384,12 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       }
     }
 
-    const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+    const slotConflict = await assertCourtSlotAvailableForNewReservation(
       supabase,
       court_id,
       start_at,
       effectiveEndAt,
+      isPayFull,
     );
     if (slotConflict) {
       res.status(400).json({ ok: false, error: slotConflict });
@@ -1809,10 +1824,12 @@ export async function listPendingBookingsHandler(req: Request, res: Response): P
         total_price_cents,
         currency,
         status,
+        reservation_type,
         courts(name, clubs(name)),
         booking_participants(id, player_id, role, share_amount_cents, payment_status)
       `)
       .eq('organizer_player_id', player.id)
+      .eq('reservation_type', 'standard')
       .eq('status', 'pending_payment')
       .is('deleted_at', null)
       .order('start_at', { ascending: true })
@@ -1846,6 +1863,7 @@ export async function listPendingBookingsHandler(req: Request, res: Response): P
         currency: row.currency ?? 'EUR',
         court_name: court?.name ?? null,
         club_name: club?.name ?? null,
+        reservation_type: row.reservation_type ?? 'standard',
       };
     }).filter((b) => b.participant_id);
 
@@ -3580,11 +3598,12 @@ async function processNewMatchPayment(
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
 
-  const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+  const slotConflict = await assertCourtSlotAvailableForNewReservation(
     supabase,
     court_id,
     start_at,
     effectiveEndAt,
+    isPayFull,
   );
   if (slotConflict) {
     console.error('[payments/webhook] Slot blocked for contention match, skipping booking creation.', {
@@ -3801,11 +3820,12 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         reservation_type,
       );
 
-      const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+      const slotConflict = await assertCourtSlotAvailableForNewReservation(
         supabase,
         court_id,
         start_at,
         effectiveEndAt,
+        isPayFull,
       );
       if (slotConflict) {
         res.status(400).json({
@@ -4523,11 +4543,12 @@ export async function simulateBookingPaymentHandler(req: Request, res: Response)
           ? meta.reservation_type
           : 'open_match';
 
-    const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+    const slotConflict = await assertCourtSlotAvailableForNewReservation(
       supabase,
       court_id,
       start_at,
       end_at,
+      isPayFull,
     );
     if (slotConflict) {
       res.status(400).json({

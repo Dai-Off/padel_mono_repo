@@ -19,7 +19,6 @@ export function useSlotPrice(params: {
       const fetchPrice = async () => {
         setLoading(true);
         setError(null);
-        console.log('[useSlotPrice] Fetching price for:', params);
         try {
           const result = await getSlotPrice({
             club_id: params.clubId!,
@@ -30,10 +29,8 @@ export function useSlotPrice(params: {
             reservation_type: params.reservationType,
             token: params.token,
           });
-          console.log('[useSlotPrice] Success:', result);
           setPriceData(result);
         } catch (err) {
-          console.error('[useSlotPrice] Error:', err);
           setError(err instanceof Error ? err.message : 'Error desconocido');
         } finally {
           setLoading(false);

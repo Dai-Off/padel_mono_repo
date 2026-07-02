@@ -184,6 +184,16 @@ function playerMatchesCurrentProfile(
   return false;
 }
 
+/** True si el slot corresponde al jugador logueado (home: ocultar "yo", mostrar los otros 3). */
+export function isPartidoPlayerCurrentViewer(
+  player: PartidoItem['players'][number],
+  profile: ProfileForPartidoEnrich | null | undefined,
+  opts?: ResolvePlayerDisplayOpts,
+): boolean {
+  if (!profile?.id?.trim()) return false;
+  return playerMatchesCurrentProfile(player, profile, opts);
+}
+
 /** Misma fuente que Perfil: si es el jugador logueado, usa su avatarUrl del contexto. */
 export function resolvePlayerDisplayAvatar(
   player: PartidoItem['players'][number],

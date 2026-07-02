@@ -28,6 +28,27 @@ export interface HomeTranslationKeys {
     oneConfirmed: string;
     manyConfirmed: string;
   };
+  proximasReservasPista: {
+    title: string;
+    loading: string;
+    empty: string;
+    oneConfirmed: string;
+    manyConfirmed: string;
+  };
+  misActividades: {
+    title: string;
+    loading: string;
+    emptyFiltered: string;
+    oneItem: string;
+    manyItems: string;
+    filterOpen: string;
+    filterClosed: string;
+    filterReservation: string;
+    filterFinished: string;
+    filtersSectionType: string;
+    filtersSectionStatus: string;
+    filtersClear: string;
+  };
   quickActions: {
     findMatch: string;
     findMatchSub: string;

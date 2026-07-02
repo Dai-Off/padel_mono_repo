@@ -7,6 +7,8 @@ import type { SearchCourtResult } from './search';
 
 /** Partidos públicos/privados: siempre 90 min, sin usar el turno mínimo del club. */
 export const OPEN_MATCH_DURATION_MIN = 90;
+/** Inicios de turno cada media hora; la reserva sigue siendo de 90 min. */
+export const OPEN_MATCH_SLOT_STEP_MIN = 30;
 
 function durationLabel(min: number): string {
   return `${min}min`;
@@ -211,10 +213,22 @@ export async function fetchClubAvailabilityForCreate(
     }
   });
 
-  // Disponibilidad forzada a 90 min: partidos open_match ignoran slot_duration_min del club.
+  // Disponibilidad forzada a 90 min con inicios cada 30 min (open_match).
   const [day1Res, day2Res, clubTzMap] = await Promise.all([
-    fetchAvailableSlots({ clubIds, date: today, token, durationMinutes: OPEN_MATCH_DURATION_MIN }),
-    fetchAvailableSlots({ clubIds, date: tomorrow, token, durationMinutes: OPEN_MATCH_DURATION_MIN }),
+    fetchAvailableSlots({
+      clubIds,
+      date: today,
+      token,
+      durationMinutes: OPEN_MATCH_DURATION_MIN,
+      slotStepMinutes: OPEN_MATCH_SLOT_STEP_MIN,
+    }),
+    fetchAvailableSlots({
+      clubIds,
+      date: tomorrow,
+      token,
+      durationMinutes: OPEN_MATCH_DURATION_MIN,
+      slotStepMinutes: OPEN_MATCH_SLOT_STEP_MIN,
+    }),
     fetchClubTimezones(clubIds),
   ]);
 

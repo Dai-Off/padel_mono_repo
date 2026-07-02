@@ -33,6 +33,16 @@ function overlaps(startMs: number, endMs: number, otherStart: string, otherEnd: 
   return startMs < e && endMs > s;
 }
 
+/** Cualquier reserva activa bloquea el turno (reserva de pista completa, sin competencia). */
+export function bookingBlocksCourtForExclusiveReservation(booking: {
+  status?: string | null;
+  court_contention_status?: CourtContentionStatus | null;
+}): boolean {
+  if (booking.status === 'cancelled') return false;
+  if (booking.court_contention_status === 'lost') return false;
+  return true;
+}
+
 /** Bookings that occupy the court exclusively (not in open competition). */
 export function bookingBlocksCourtForAvailability(booking: {
   status?: string | null;
@@ -288,6 +298,22 @@ export async function assertCourtSlotAvailableForNewContentionMatch(
   return null;
 }
 
+/** Reserva de pista completa: bloquea cualquier turno ya ocupado (incl. partidos en competencia). */
+export async function assertCourtSlotAvailableForExclusiveReservation(
+  supabase: SupabaseClient,
+  courtId: string,
+  startAt: string,
+  endAt: string,
+): Promise<string | null> {
+  const overlapping = await findOverlappingBookings(supabase, courtId, startAt, endAt);
+  for (const b of overlapping) {
+    if (bookingBlocksCourtForExclusiveReservation(b)) {
+      return 'Esa pista ya está reservada para ese horario. Elige otra hora.';
+    }
+  }
+  return null;
+}
+
 type ContenderSnapshot = BookingContentionRow & { paidCount: number; thirdPaidAt: string };
 
 async function buildContenderSnapshot(
@@ -451,6 +477,9 @@ export function overlappingBookingBlocksNewReservation(
     (newReservationType === 'open_match' || newReservationType === 'standard') && !newOccupiesCourtImmediately;
   if (entersContention) {
     return existingBookingBlocksNewContentionMatch(existing);
+  }
+  if (newOccupiesCourtImmediately) {
+    return bookingBlocksCourtForExclusiveReservation(existing);
   }
   return bookingBlocksCourtForAvailability(existing);
 }

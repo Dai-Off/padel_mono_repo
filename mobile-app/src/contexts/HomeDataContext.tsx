@@ -15,13 +15,12 @@ import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
 import { fetchHomeStats, type HomeStats } from '../api/home';
+import { fetchMyCourtReservations, type CourtReservation } from '../api/bookings';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import {
   getMatchBooking,
   getMatchListPhase,
   isPartidoCancelled,
-  shouldIncludeInHomeMisPartidos,
-  shouldIncludePartidoInHomeCarousel,
 } from '../domain/matchLifecycle';
 import { normalizeMatchEnriched } from '../api/normalizeMatch';
 import { defaultPartidosDiscoveryDateRange } from '../domain/partidosFilters';
@@ -82,6 +81,11 @@ type HomeDataValue = {
     },
   ) => Promise<void>;
 
+  // Reservas de pista privada (standard) — flujo aparte de partidos.
+  misReservasPista: CourtReservation[];
+  courtReservationsLoading: boolean;
+  refreshCourtReservations: (opts?: { force?: boolean }) => Promise<void>;
+
   // Tournaments (solo el count, que es lo que usa el home).
   publicTournamentsCount: number | null;
   tournamentsLoading: boolean;
@@ -137,6 +141,9 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
   const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
+  const [misReservasPista, setMisReservasPista] = useState<CourtReservation[]>([]);
+  const [courtReservationsLoading, setCourtReservationsLoading] = useState(false);
+  const courtReservationsLoadedAt = useRef(0);
   useEffect(() => {
     misPartidosRef.current = misPartidos;
   }, [misPartidos]);
@@ -214,7 +221,13 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         const b = getMatchBooking(m);
         return Boolean(b?.start_at && b?.end_at);
       });
-      const mineVisible = mineRawBase.filter((m) => shouldIncludeInHomeMisPartidos(m));
+      const mineVisible = mineRawBase.filter((m) => {
+        const b = getMatchBooking(m);
+        if (b?.deleted_at != null) return false;
+        if (String(m.status).toLowerCase() === 'cancelled') return false;
+        if (String(b?.status ?? '').toLowerCase() === 'cancelled') return false;
+        return true;
+      });
       const mineRaw = [
         ...mineVisible
           .filter((m) => {
@@ -241,7 +254,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       const mapped = mineRaw
         .map((m) => mapMatchToPartido(m, { viewerPlayerId }))
         .filter((p): p is PartidoItem => p != null)
-        .filter(shouldIncludePartidoInHomeCarousel);
+        .filter((p) => !isPartidoCancelled(p));
       return enrichPartidosWithProfileAvatar(mapped, playerProfile);
     },
     [],
@@ -402,6 +415,33 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       await refreshMatchesInFlight.current;
     },
     [token, buildMisPartidosFromMatches, profile?.id],
+  );
+
+  const refreshCourtReservations = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!token) {
+        setMisReservasPista([]);
+        courtReservationsLoadedAt.current = 0;
+        return;
+      }
+      if (!force && courtReservationsLoadedAt.current > 0) return;
+      const isFirst = courtReservationsLoadedAt.current === 0;
+      if (isFirst) setCourtReservationsLoading(true);
+      try {
+        const res = await fetchMyCourtReservations(token, { phase: 'all', limit: 50 });
+        if (res.ok) {
+          setMisReservasPista(res.reservations);
+          courtReservationsLoadedAt.current = Date.now();
+        } else if (isFirst) {
+          setHasInitialError(true);
+        }
+      } catch {
+        if (isFirst) setHasInitialError(true);
+      } finally {
+        if (isFirst) setCourtReservationsLoading(false);
+      }
+    },
+    [token],
   );
 
   const syncMisPartidoFromMatchId = useCallback(
@@ -584,6 +624,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     await Promise.all([
       refreshProfile({ force: true }),
       refreshMatches({ force: true }),
+      refreshCourtReservations({ force: true }),
       refreshTournaments({ force: true }),
       refreshSeasonPass({ force: true }),
       refreshStats({ force: true }),
@@ -592,6 +633,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   }, [
     refreshProfile,
     refreshMatches,
+    refreshCourtReservations,
     refreshTournaments,
     refreshSeasonPass,
     refreshStats,
@@ -612,6 +654,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     refreshMatchesGen.current = 0;
     profileLoadedAt.current = 0;
     matchesLoadedAt.current = 0;
+    courtReservationsLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
     seasonPassLoadedAt.current = 0;
     statsLoadedAt.current = 0;
@@ -620,6 +663,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setPartidos([]);
     setMisPartidos([]);
+    setMisReservasPista([]);
     setPublicTournamentsCount(null);
     setSeasonPassMe(null);
     setStats(null);
@@ -650,6 +694,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     bootstrappedUserIds.add(userId);
     profileLoadedAt.current = 0;
     matchesLoadedAt.current = 0;
+    courtReservationsLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
     seasonPassLoadedAt.current = 0;
     statsLoadedAt.current = 0;
@@ -657,6 +702,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     setHasInitialError(false);
     void refreshProfile({ force: true });
     void refreshMatches({ force: true });
+    void refreshCourtReservations({ force: true });
     void refreshTournaments({ force: true });
     void refreshSeasonPass({ force: true });
     void refreshStats({ force: true });
@@ -667,6 +713,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const refreshFnsRef = useRef({
     refreshProfile,
     refreshMatches,
+    refreshCourtReservations,
     refreshTournaments,
     refreshSeasonPass,
     refreshStats,
@@ -675,6 +722,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   refreshFnsRef.current = {
     refreshProfile,
     refreshMatches,
+    refreshCourtReservations,
     refreshTournaments,
     refreshSeasonPass,
     refreshStats,
@@ -697,6 +745,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         const fns = refreshFnsRef.current;
         void fns.refreshProfile({ force: true });
         void fns.refreshMatches({ force: true });
+        void fns.refreshCourtReservations({ force: true });
         void fns.refreshTournaments({ force: true });
         void fns.refreshSeasonPass({ force: true });
         void fns.refreshStats({ force: true });
@@ -718,6 +767,9 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       upsertMisPartido,
       removeMisPartido,
       syncMisPartidoFromMatchId,
+      misReservasPista,
+      courtReservationsLoading,
+      refreshCourtReservations,
       publicTournamentsCount,
       tournamentsLoading,
       refreshTournaments,
@@ -744,6 +796,9 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       upsertMisPartido,
       removeMisPartido,
       syncMisPartidoFromMatchId,
+      misReservasPista,
+      courtReservationsLoading,
+      refreshCourtReservations,
       publicTournamentsCount,
       tournamentsLoading,
       refreshTournaments,

@@ -26,13 +26,15 @@ import {
   defaultFriendlyRange,
   FriendlyLevelRangeSection,
 } from './FriendlyLevelRangeSection';
+import { OpenMatchPriceBreakdown } from './OpenMatchPriceBreakdown';
 import { fetchClubAvailabilityForCreate, OPEN_MATCH_DURATION_MIN } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
+import { formatEuroCents, openMatchPlayerShareCents } from '../../lib/openMatchPricing';
 import { theme } from '../../theme';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
 import { resolveSlotStartEndUtc } from '../../lib/bookingSlotTime';
 import { clubLocalDateTimeToUtcIso, setClubTimeZone } from '../../lib/clubTimeZone';
-import { useSlotPrice } from '../../hooks/useSlotPrice';
+import { getSlotPrice, type SlotPriceResult } from '../../api/tariffs';
 import { fetchMyPlayerId } from '../../api/players';
 import { formatLocale, useTranslation, type AppLocale } from '../../i18n';
 
@@ -70,11 +72,6 @@ type GenderOption = 'any' | 'male' | 'female' | 'mixed';
 
 function slotDurationMin(_slot?: SlotForCreate | null): number {
   return OPEN_MATCH_DURATION_MIN;
-}
-
-function slotPriceForDuration(slot: SlotForCreate): string {
-  const totalCents = Math.round(slot.minPriceCents * (slotDurationMin(slot) / 60));
-  return totalCents >= 100 ? `${(totalCents / 100).toFixed(2)}€` : slot.minPriceFormatted;
 }
 
 function buildStartEnd(slot: SlotForCreate): { start_at: string; end_at: string } {
@@ -172,6 +169,8 @@ export function CrearPartidoLocationSheet({
       setCreateError(null);
       setSelectedSlot(null);
       setSelectedClub(null);
+      setSlotPriceData(null);
+      setSlotPriceLoading(false);
       setMatchVisibility('public');
       setCompactModalHeight(null);
     }
@@ -253,22 +252,22 @@ export function CrearPartidoLocationSheet({
 
   const [selectedSlot, setSelectedSlot] = useState<SlotForCreate | null>(null);
   const [selectedClub, setSelectedClub] = useState<ClubDisplay | null>(null);
+  const [slotPriceData, setSlotPriceData] = useState<SlotPriceResult | null>(null);
+  const [slotPriceLoading, setSlotPriceLoading] = useState(false);
 
-  const { priceData, loading: priceLoading } = useSlotPrice({
-    clubId: selectedClub?.clubId,
-    courtId: selectedSlot?.courtId,
-    date: selectedSlot?.dateStr,
-    slot: selectedSlot?.time,
-    durationMinutes: slotDurationMin(selectedSlot),
-    reservationType: 'open_match',
-  });
+  const getPlayerShareCents = () => {
+    if (!slotPriceData || slotPriceData.total_price_cents <= 0) return null;
+    return openMatchPlayerShareCents(slotPriceData.total_price_cents);
+  };
 
-  const getSlotDisplayPrice = () => {
-    if (priceLoading) return t('common.loadingEllipsis');
-    if (priceData && priceData.total_price_cents > 0) {
-      return `${(priceData.total_price_cents / 100).toFixed(2)}€`;
+  const getPayCtaLabel = () => {
+    if (creating) return t('common.saving');
+    if (checkoutDone) return t('common.paymentDone');
+    const shareCents = getPlayerShareCents();
+    if (shareCents) {
+      return t('partidos.createPayYourShare', { amount: formatEuroCents(shareCents, true) });
     }
-    return selectedSlot ? slotPriceForDuration(selectedSlot) : '—';
+    return t('partidos.createNext');
   };
 
   const organizerElo = cachedProfile?.eloRating ?? null;
@@ -317,17 +316,39 @@ export function CrearPartidoLocationSheet({
       if (slot.clubTimezone?.trim()) {
         setClubTimeZone(slot.clubTimezone.trim());
       }
-      setSelectedSlot(slot);
-      setSelectedClub(club);
-      const range = defaultFriendlyRange(cachedProfile?.eloRating ?? null);
-      setRestrictByLevel(false);
-      setEloMin(range.eloMin);
-      setEloMax(range.eloMax);
-      setGender('any');
-      setPendingInvitePlayers([]);
-      checkoutDoneRef.current = false;
-      setCheckoutDone(false);
-      setStep('configurar');
+      setSlotPriceLoading(true);
+      setSlotPriceData(null);
+      try {
+        const price = await getSlotPrice({
+          club_id: club.clubId,
+          court_id: slot.courtId,
+          date: slot.dateStr,
+          slot: slot.time,
+          duration_minutes: slotDurationMin(slot),
+          reservation_type: 'open_match',
+          token: token ?? undefined,
+        });
+        if (!price.ok || price.total_price_cents <= 0) {
+          setCreateError(t('search.clubPriceError'));
+          return;
+        }
+        setSelectedSlot(slot);
+        setSelectedClub(club);
+        setSlotPriceData(price);
+        const range = defaultFriendlyRange(cachedProfile?.eloRating ?? null);
+        setRestrictByLevel(false);
+        setEloMin(range.eloMin);
+        setEloMax(range.eloMax);
+        setGender('any');
+        setPendingInvitePlayers([]);
+        checkoutDoneRef.current = false;
+        setCheckoutDone(false);
+        setStep('configurar');
+      } catch {
+        setCreateError(t('search.clubPriceError'));
+      } finally {
+        setSlotPriceLoading(false);
+      }
     },
     [orgId, session?.access_token, cachedProfile?.id, cachedProfile, onNavigateToCompleteOnboarding, t],
   );
@@ -348,12 +369,7 @@ export function CrearPartidoLocationSheet({
       Alert.alert(t('alerts.error.title'), t('alerts.createMatch.profileNotFound'));
       return;
     }
-    if (priceLoading) {
-      Alert.alert(t('alerts.error.title'), t('alerts.createMatch.calculatingPrice'));
-      return;
-    }
-
-    if (!priceData || priceData.total_price_cents <= 0) {
+    if (!slotPriceData || slotPriceData.total_price_cents <= 0) {
       setCreating(false);
       setCreateError(t('search.clubPriceError'));
       return;
@@ -369,7 +385,7 @@ export function CrearPartidoLocationSheet({
         organizer_player_id: playerId,
         start_at,
         end_at,
-        total_price_cents: priceData.total_price_cents,
+        total_price_cents: slotPriceData.total_price_cents,
         pay_full: false,
         visibility: matchVisibility,
         competitive: false,
@@ -431,7 +447,9 @@ export function CrearPartidoLocationSheet({
     setCheckoutDone(true);
     setCreating(false);
 
-    const currentPriceFormatted = getSlotDisplayPrice();
+    const shareCents = openMatchPlayerShareCents(slotPriceData.total_price_cents);
+    const currentPriceFormatted = formatEuroCents(shareCents, true);
+    const courtPriceFormatted = formatEuroCents(slotPriceData.total_price_cents, true);
 
     const createdMatchId =
       confirmRes.match &&
@@ -454,6 +472,7 @@ export function CrearPartidoLocationSheet({
       ),
       duration: t('common.durationMin', { minutes: slotDurationMin(selectedSlot) }),
       priceFormatted: currentPriceFormatted,
+      courtPriceFormatted,
       matchVisibility,
       clubId: selectedClub.clubId,
       courtId: selectedSlot.courtId,
@@ -486,11 +505,10 @@ export function CrearPartidoLocationSheet({
     onPartidoCreado,
     onClose,
     matchVisibility,
-    priceData,
-    priceLoading,
     pendingInvitePlayers,
     t,
     locale,
+    slotPriceData,
   ]);
 
   const handleSiguiente = () => {
@@ -558,6 +576,7 @@ export function CrearPartidoLocationSheet({
                     setStep('clubs');
                     setSelectedSlot(null);
                     setSelectedClub(null);
+                    setSlotPriceData(null);
                     setCreateError(null);
                     loadClubs();
                   }}
@@ -903,12 +922,14 @@ export function CrearPartidoLocationSheet({
                     <View style={styles.configClubMeta}>
                       <Ionicons name="time-outline" size={12} color={theme.auth.textMuted} />
                       <Text style={styles.configClubMetaText}>
-                        {selectedSlot.dateLabel} • {selectedSlot.time}
+                        {selectedSlot.dateLabel} • {selectedSlot.time} ·{' '}
+                        {t('common.durationMin', { minutes: slotDurationMin(selectedSlot) })}
                       </Text>
                     </View>
-                    <Text style={styles.configClubPrice}>{getSlotDisplayPrice()}</Text>
                   </View>
                 </View>
+
+                <OpenMatchPriceBreakdown totalCents={slotPriceData?.total_price_cents} />
 
                 {createError && (
                   <View style={[styles.createErrorBanner, styles.createErrorBannerDark]}>
@@ -923,9 +944,7 @@ export function CrearPartidoLocationSheet({
                   onPress={handleCheckout}
                   disabled={creating || checkoutDone}
                 >
-                  <Text style={styles.ctaButtonText}>
-                    {creating ? t('common.saving') : checkoutDone ? t('common.paymentDone') : t('partidos.createNext')}
-                  </Text>
+                  <Text style={styles.ctaButtonText}>{getPayCtaLabel()}</Text>
                 </Pressable>
               </View>
             </AppKeyboardAvoidingView>
@@ -955,6 +974,7 @@ export function CrearPartidoLocationSheet({
                 <Text style={styles.clubsFeedbackSub}>{t('partidos.noOpenMatchesHint')}</Text>
               </View>
             ) : (
+              <View style={styles.clubsListWrap}>
               <ScrollView
                 style={styles.pistaScroll}
                 contentContainerStyle={styles.pistaContent}
@@ -1024,7 +1044,7 @@ export function CrearPartidoLocationSheet({
                                   creating && styles.slotDisabled,
                                 ]}
                                 onPress={() => void handleSlotPress(slot, club)}
-                                disabled={creating || onboardingCheckPending}
+                                disabled={creating || onboardingCheckPending || slotPriceLoading}
                               >
                                 <Text style={styles.slotTimeGlass}>{slot.time}</Text>
                                 <Text style={styles.slotDurationGlass}>{slot.duration}</Text>
@@ -1041,6 +1061,12 @@ export function CrearPartidoLocationSheet({
                 ))}
                 <View style={styles.bottomSpacer} />
               </ScrollView>
+              {slotPriceLoading ? (
+                <View style={styles.slotPrefetchOverlay}>
+                  <ActivityIndicator size="large" color={theme.auth.accent} />
+                </View>
+              ) : null}
+              </View>
             )
           ) : step === 'tipo_partido' ? (
             <View style={styles.modalStepBody}>
@@ -1598,6 +1624,18 @@ const styles = StyleSheet.create({
   clubsWrapper: {
     flex: 1,
     minHeight: 0,
+  },
+  clubsListWrap: {
+    flex: 1,
+    minHeight: 0,
+    position: 'relative',
+  },
+  slotPrefetchOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10,10,12,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
   },
   clubsScrollWrap: {
     flex: 1,

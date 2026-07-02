@@ -15,6 +15,7 @@ import {
   rejectReceivedMatchInvite,
   type ReceivedMatchInvite,
 } from '../api/matchInvites';
+import { receivedMatchInviteBannerTitle } from '../lib/matchInviteDisplay';
 import { BackHeader } from '../components/layout/BackHeader';
 import { LoadingButton } from '../components/ui/PrimaryLoadingButton';
 import { useAuth } from '../contexts/AuthContext';
@@ -95,7 +96,7 @@ export function NotificationsScreen({ onBack, onOpenMatch }: Props) {
                 )}
                 <View style={styles.cardBody}>
                   <Text style={styles.cardTitle}>
-                    {t('partidos.matchInviteBannerTitle', { name: invite.inviter_name })}
+                    {receivedMatchInviteBannerTitle(invite, t)}
                   </Text>
                   <Text style={styles.cardSub}>
                     {t('partidos.matchInviteBannerSub', {

@@ -25,6 +25,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import type { PartidoItem } from './PartidosScreen';
+import type { CourtReservation } from '../api/bookings';
 import { IAAfinidadModal, type AffinityCriteria } from '../components/home/IAAfinidadModal';
 import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
 import { searchAiMatch } from '../api/aiMatch';
@@ -79,6 +80,7 @@ type HomeScreenProps = {
   streakRefreshKey?: number;
   onNavigateToTab?: (tab: TabId) => void;
   onPartidoPress?: (partido: PartidoItem) => void;
+  onCourtReservationPress?: (reservation: CourtReservation) => void;
   onDailyLessonPress?: () => void;
   onCoursesPress?: () => void;
   onOpenCompetitiveLeague?: () => void;
@@ -156,6 +158,7 @@ export function HomeScreen({
   streakRefreshKey = 0,
   onNavigateToTab,
   onPartidoPress,
+  onCourtReservationPress,
   onDailyLessonPress,
   onCoursesPress,
   onOpenCompetitiveLeague,
@@ -187,7 +190,9 @@ export function HomeScreen({
     refreshProfile,
     partidos,
     misPartidos,
+    misReservasPista,
     matchesLoading,
+    courtReservationsLoading,
     publicTournamentsCount,
     tournamentsLoading,
     seasonPassMe,
@@ -525,9 +530,11 @@ export function HomeScreen({
         {session?.access_token ? (
           <InicioEnterBlock enterIndex={homeEnterOffset + 1}>
             <ProximosPartidosSection
-              items={misPartidos}
-              loading={matchesLoading}
+              partidos={misPartidos}
+              reservations={misReservasPista}
+              loading={matchesLoading || courtReservationsLoading}
               onPartidoPress={onPartidoPress}
+              onReservationPress={onCourtReservationPress}
             />
           </InicioEnterBlock>
         ) : null}

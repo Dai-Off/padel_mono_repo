@@ -60,6 +60,11 @@ export interface PartidosTranslationKeys {
   createAvailabilityBanner: string;
   createNoSlots: string;
   createNext: string;
+  createPayYourShare: string;
+  createCourtTotalPrice: string;
+  createYourShare: string;
+  createYourPaymentAmount: string;
+  createCourtSplitExplain: string;
   createBack: string;
   detailOpenMatch: string;
   detailPrivateMatch: string;
@@ -111,6 +116,13 @@ export interface PartidosTranslationKeys {
   slotFree: string;
   yourReservation: string;
   courtReservationSub: string;
+  courtReservationConfirmedNote: string;
+  courtReservationTotalPrice: string;
+  courtReservationRefundButton: string;
+  courtReservationCancelBody: string;
+  courtReservationCancelBodyNoRefund: string;
+  courtReservationStatusPending: string;
+  courtReservationStatusConfirmed: string;
   evalLevelAbove: string;
   evalLevelAboveSub: string;
   evalLevelMatch: string;
@@ -160,6 +172,8 @@ export interface PartidosTranslationKeys {
   notificationsTitle: string;
   notificationsEmpty: string;
   matchInviteBannerTitle: string;
+  matchInviteBannerTitlePrivate: string;
+  matchInviteBannerTitleCompetitive: string;
   matchInviteBannerSub: string;
   matchInviteBannerCount: string;
   matchInviteScheduleConflict: string;

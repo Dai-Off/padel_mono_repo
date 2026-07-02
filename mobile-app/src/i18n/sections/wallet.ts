@@ -24,6 +24,7 @@ export interface WalletTranslationKeys {
   walletPendingPayments: string;
   walletRecentMovements: string;
   walletYourShare: string;
+  walletCourtReservationTotal: string;
   walletPendingBookingTitle: string;
   walletLoadFundsSoon: string;
   walletWithdrawSoon: string;

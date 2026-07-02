@@ -39,6 +39,10 @@ import { formatPlayerLabel, formatPlayerSubline } from '../../../lib/playerLabel
 import { formatLevelSelectValue, LEVEL_OPTIONS } from '../utils/openMatchLevel';
 import { willPublicOpenMatchStayOffGrid } from '../utils/reservationListFilters';
 import { isOpenMatchType, normalizeReservationTypeSlug } from '../utils/reservationTypeSlug';
+import {
+    durationOptionsForReservationType,
+    resolveBookingDurationMinutes,
+} from '../utils/bookingDuration';
 import { existingBookingBlocksOverlapEdit, hasBookingScheduleChanged, timeRangesOverlap } from '../utils/bookingOverlap';
 
 const PLAY_MODE_MARKER = '__PLAY_MODE__';
@@ -660,10 +664,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             const start = new Date(bd.start_at);
             const [sh, sm] = formatTimeHHmmInClubTz(start).split(':');
             const dateVal = dayKeyInClubTz(start);
-            const durMin = (new Date(bd.end_at).getTime() - start.getTime()) / 60000;
-            const dur = Math.min(90, Math.max(30, Math.round(durMin / 30) * 30)) || 90;
-            const parsedNotes = extractPlayMode(bd.notes || '');
             const resTypeVal = normalizeReservationTypeSlug(bd.reservation_type || bd.booking_type || 'standard');
+            const dur = resolveBookingDurationMinutes(start, bd.end_at, resTypeVal);
+            const parsedNotes = extractPlayMode(bd.notes || '');
             setStartHour(sh);
             setStartMinute(sm);
             setBookingDate(dateVal);
@@ -711,8 +714,6 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             guests.forEach((g: Player, i: number) => { slots[i] = g; });
             setAdditionalPlayers(slots);
             setPlayMode(isOpenMatchType(resTypeVal) ? 'double' : parsedNotes.mode);
-
-            // Inicializar pagos desde payment_transactions (manual_cash / manual_card)
             const initPayments: SlotPayment[] = [defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()];
             const txByPlayer = new Map<string, { paidAmountCents: number; walletAmountCents: number; paymentMethod: PaymentMethod }>();
             (bd.payment_transactions || [])
@@ -1763,11 +1764,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 <select
                                     className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
                                     value={duration}
+                                    disabled={isOpenMatchType(resType)}
                                     onChange={(e) => { setDuration(Number(e.target.value)); setOverlapError(null); }}
                                 >
-                                    <option value={30}>30</option>
-                                    <option value={60}>60</option>
-                                    <option value={90}>90</option>
+                                    {durationOptionsForReservationType(resType).map((mins) => (
+                                        <option key={mins} value={mins}>{mins}</option>
+                                    ))}
                                 </select>
                             </div>
 
@@ -1777,7 +1779,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 <select
                                     className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
                                     value={resType}
-                                    onChange={(e) => setResType(e.target.value)}
+                                    onChange={(e) => {
+                                        const next = e.target.value;
+                                        setResType(next);
+                                        if (isOpenMatchType(next)) setDuration(90);
+                                    }}
                                 >
                                     {(Object.keys(pricesByType).length > 0
                                         ? Object.entries(pricesByType)

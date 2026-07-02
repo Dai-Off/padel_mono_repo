@@ -26,6 +26,7 @@ export const wallet: WalletTranslationKeys = {
   walletPendingPayments: 'Pagos pendientes',
   walletRecentMovements: 'Últimos movimientos',
   walletYourShare: 'Te corresponde {amount}',
+  walletCourtReservationTotal: 'Total a pagar {amount}',
   walletPendingBookingTitle: 'Reserva {club}',
   walletLoadFundsSoon: 'Próximamente podrás cargar saldo desde la app.',
   walletWithdrawSoon: 'Próximamente podrás retirar saldo desde la app.',

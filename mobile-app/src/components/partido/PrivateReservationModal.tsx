@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
 import { useTranslation } from '../../i18n';
-import { useSlotPrice } from '../../hooks/useSlotPrice';
+import { OpenMatchPriceBreakdown } from './OpenMatchPriceBreakdown';
 
 const ORANGE = '#F18F34';
 const ORANGE_END = '#C46A20';
@@ -68,26 +68,20 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
   const titleLine = `${data.courtName} - ${data.clubName}`;
   const sheetMaxH = Math.round(screenH * 0.9);
   const kind = data.confirmationKind ?? 'match';
+  const isCourtReservation = kind === 'reservation';
   const isPrivateMatch = kind === 'match' && data.matchVisibility === 'private';
+  const isOpenMatch = kind === 'match';
 
-  const { priceData, loading } = useSlotPrice({
-    clubId: data.clubId,
-    courtId: data.courtId,
-    date: data.date,
-    slot: data.slot,
-    durationMinutes: data.durationMinutes,
-    reservationType: 'standard',
-  });
+  const courtTotalCents = (() => {
+    if (!data.courtPriceFormatted) return undefined;
+    const normalized = data.courtPriceFormatted.replace(/[^\d,.-]/g, '').replace(',', '.');
+    const euros = Number.parseFloat(normalized);
+    return Number.isFinite(euros) && euros > 0 ? Math.round(euros * 100) : undefined;
+  })();
 
   const getPriceValue = () => {
-    if (loading) return t('common.loadingEllipsis');
-    if (priceData) {
-      if (priceData.source === 'none') {
-        return t('search.clubPriceError');
-      }
-      return `${(priceData.total_price_cents / 100).toFixed(2)} €`;
-    }
-    return data.priceFormatted;
+    if (data.priceFormatted) return data.priceFormatted;
+    return '—';
   };
 
   return (
@@ -160,22 +154,36 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
                 {data.spotsLine ? (
                   <PrivateInfoRow icon="people-outline" label={t('common.playerCount')} value={data.spotsLine} />
                 ) : null}
-                <PrivateInfoRow icon="cash-outline" label={t('common.sortByPrice')} value={getPriceValue()} />
+                <PrivateInfoRow
+                  icon="cash-outline"
+                  label={
+                    isCourtReservation
+                      ? t('partidos.courtReservationTotalPrice')
+                      : t('partidos.createYourPaymentAmount')
+                  }
+                  value={getPriceValue()}
+                />
               </View>
 
-              {isPrivateMatch ? (
-                <View style={styles.emailBox}>
-                  <Text style={[styles.emailText, androidLabel({})]}>
-                    {t('partidos.privateInviteManageInDetail')}
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.emailBox}>
-                  <Text style={[styles.emailText, androidLabel({})]}>
-                    📧 {t('search.clubBookingConfirmError')}
-                  </Text>
-                </View>
-              )}
+              {isOpenMatch && courtTotalCents ? (
+                <OpenMatchPriceBreakdown totalCents={courtTotalCents} variant="inline" />
+              ) : null}
+
+              {!isCourtReservation ? (
+                isPrivateMatch ? (
+                  <View style={styles.emailBox}>
+                    <Text style={[styles.emailText, androidLabel({})]}>
+                      {t('partidos.privateInviteManageInDetail')}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.emailBox}>
+                    <Text style={[styles.emailText, androidLabel({})]}>
+                      📧 {t('search.clubBookingEmailNote')}
+                    </Text>
+                  </View>
+                )
+              ) : null}
             </View>
           </ScrollView>
 

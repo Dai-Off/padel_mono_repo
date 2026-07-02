@@ -26,6 +26,8 @@ import { CompeticionesScreen } from './CompeticionesScreen';
 import { HomeScreen, markAffinityModalPendingReopen } from './HomeScreen';
 import type { PartidoItem } from './PartidosScreen';
 import { PartidoDetailScreen } from './PartidoDetailScreen';
+import { CourtReservationDetailScreen } from './CourtReservationDetailScreen';
+import type { CourtReservation } from '../api/bookings';
 import { NotificationsScreen } from './NotificationsScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
@@ -113,13 +115,14 @@ export function MainApp() {
   const sidebar = useSidebar(false);
   const { session } = useAuth();
   const { totalCount: cartCount } = useCart();
-  const { profile, refreshMatches, syncMisPartidoFromMatchId, upsertMisPartido } = useHomeData();
+  const { profile, refreshMatches, refreshCourtReservations, syncMisPartidoFromMatchId, upsertMisPartido } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   // Cada incremento pide a ProfileScreen hacer scroll a la Vitrina de Logros.
   const [vitrinaScrollNonce, setVitrinaScrollNonce] = useState(0);
   const [showCart, setShowCart] = useState(false);
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
+  const [selectedCourtReservation, setSelectedCourtReservation] = useState<CourtReservation | null>(null);
   const [showMonedero, setShowMonedero] = useState(false);
   const [showPagosPendientes, setShowPagosPendientes] = useState(false);
   const [showMovimientosMonedero, setShowMovimientosMonedero] = useState(false);
@@ -477,6 +480,7 @@ export function MainApp() {
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
+  const showCourtReservationDetail = selectedCourtReservation != null;
 
   // Abre el detalle de un partido a partir de su id (desde el gráfico de
   // evolución del perfil). Carga el partido y lo normaliza a PartidoItem.
@@ -523,6 +527,7 @@ export function MainApp() {
     showClubReviews ||
     infoScreen != null ||
     showPartidoDetail ||
+    showCourtReservationDetail ||
     showClubDetail ||
     showCompetitiveLeague ||
     showSeasonPass ||
@@ -726,6 +731,10 @@ export function MainApp() {
         return true;
       }
       // Detalle de partido (prioridad sobre flujos padre, p. ej. Tu actividad)
+      if (selectedCourtReservation) {
+        setSelectedCourtReservation(null);
+        return true;
+      }
       if (selectedPartido) {
         setSelectedPartido(null);
         setMatchOpenedFromPublicProfile(false);
@@ -793,6 +802,7 @@ export function MainApp() {
     tuActividadSubView,
     showMonedero,
     selectedPartido,
+    selectedCourtReservation,
     clubDetailCourt,
     activeTab,
   ]);
@@ -917,7 +927,7 @@ export function MainApp() {
                 playerIdsBySlot: [organizerId ?? null, null, null, null],
                 venue: data.clubName,
                 location: '—',
-                price: data.priceFormatted,
+                price: data.courtPriceFormatted ?? data.priceFormatted,
                 pricePerPlayer: data.priceFormatted,
                 duration: data.duration,
                 courtName: data.courtName,
@@ -1131,6 +1141,18 @@ export function MainApp() {
         />
       );
     }
+    if (showCourtReservationDetail && selectedCourtReservation) {
+      return (
+        <CourtReservationDetailScreen
+          reservation={selectedCourtReservation}
+          onBack={() => setSelectedCourtReservation(null)}
+          onCancelled={() => {
+            setSelectedCourtReservation(null);
+            void refreshCourtReservations({ force: true });
+          }}
+        />
+      );
+    }
     if (showPartidoDetail && selectedPartido) {
       return (
         <PartidoDetailScreen
@@ -1200,6 +1222,7 @@ export function MainApp() {
             streakRefreshKey={streakRefreshKey}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onPartidoPress={(p) => setSelectedPartido(p)}
+            onCourtReservationPress={(reservation) => setSelectedCourtReservation(reservation)}
             onDailyLessonPress={() => setShowDailyLesson(true)}
             onCoursesPress={() => setShowCourses(true)}
             onOpenCompetitiveLeague={openCompetitiveLeagueFromHome}
@@ -1372,7 +1395,7 @@ export function MainApp() {
           ? '#0F0F0F'
           : showCompetitiveLeague || showSeasonPass
             ? '#0F0F0F'
-          : showPartidoDetail
+          : showPartidoDetail || showCourtReservationDetail
             ? '#0F0F0F'
             : showClubDetail
             ? '#0F0F0F'

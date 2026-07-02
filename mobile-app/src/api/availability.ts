@@ -36,13 +36,17 @@ export type FetchAvailableSlotsParams = {
   date: string;
   courtId?: string;
   durationMinutes?: number;
+  /** Intervalo entre inicios de turno (p. ej. 30 para listar cada media hora). */
+  slotStepMinutes?: number;
+  /** Reserva de pista completa: solo turnos realmente libres (bloquea partidos en formación). */
+  exclusiveOccupancy?: boolean;
   token: string | null | undefined;
 };
 
 export async function fetchAvailableSlots(
   params: FetchAvailableSlotsParams
 ): Promise<FetchAvailableSlotsResponse> {
-  const { clubId, clubIds, date, courtId, durationMinutes, token } = params;
+  const { clubId, clubIds, date, courtId, durationMinutes, slotStepMinutes, exclusiveOccupancy, token } = params;
   if (!token) {
     return { ok: false, error: 'Token requerido', date, club_id: clubId ?? '', duration_minutes: 0, results: [] };
   }
@@ -56,6 +60,8 @@ export async function fetchAvailableSlots(
   url.searchParams.set('date', date);
   if (courtId) url.searchParams.set('court_id', courtId);
   if (durationMinutes) url.searchParams.set('duration_minutes', String(durationMinutes));
+  if (slotStepMinutes) url.searchParams.set('slot_step_minutes', String(slotStepMinutes));
+  if (exclusiveOccupancy) url.searchParams.set('exclusive_occupancy', '1');
 
   try {
     const res = await fetch(url.toString(), {

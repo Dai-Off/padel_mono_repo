@@ -39,6 +39,8 @@ export type ReceivedMatchInvite = {
   end_at?: string | null;
   has_schedule_conflict?: boolean;
   match_when: string;
+  match_visibility?: 'public' | 'private' | string;
+  match_competitive?: boolean;
 };
 
 export async function fetchMatchInvites(

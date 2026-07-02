@@ -25,6 +25,9 @@ export interface SearchTranslationKeys {
   favoritesAlertBody: string;
   clubDetailDays: [string, string, string, string, string, string, string];
   clubDetailDurationA11y: string;
+  courtReservationDurationTitle: string;
+  courtReservationDurationSub: string;
+  courtReservationDurationOptionA11y: string;
   clubPayChoiceTitle: string;
   clubPayLater: string;
   clubPayNow: string;
@@ -33,6 +36,9 @@ export interface SearchTranslationKeys {
   clubProfileNotFound: string;
   clubPriceError: string;
   clubBookingConfirmError: string;
+  courtBookingPreparing: string;
+  courtBookingConfirming: string;
+  clubBookingEmailNote: string;
   clubBookNoPayError: string;
   clubReviewsLogin: string;
   clubReviewsNotYet: string;

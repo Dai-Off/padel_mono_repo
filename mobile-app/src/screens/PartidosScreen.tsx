@@ -48,6 +48,8 @@ export type PartidoItem = {
   location: string;
   price: string;
   pricePerPlayer: string;
+  /** Precio total de la pista en céntimos (para desglose 1/4). */
+  totalPriceCents?: number;
   duration: string;
   venueImage?: string;
   venueAddress?: string;

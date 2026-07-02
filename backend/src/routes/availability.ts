@@ -1,8 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { bookingBlocksCourtForAvailability } from '../lib/courtContentionService';
+import {
+  bookingBlocksCourtForAvailability,
+  bookingBlocksCourtForExclusiveReservation,
+} from '../lib/courtContentionService';
 import { clubTimezoneOrDefault } from '../lib/clubTimezone';
 import { resolveDayOperatingHours, weekdayCodeForCalendarDate } from '../lib/clubOperatingHours';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
 import { zonedTimeToUtc } from '../routes/learningTimezone';
 
 const router = Router();
@@ -26,6 +30,14 @@ router.get('/slots', async (req: Request, res: Response) => {
     requestedDurationRaw != null && Number.isFinite(Number(requestedDurationRaw)) && Number(requestedDurationRaw) > 0
       ? Number(requestedDurationRaw)
       : null;
+  // Paso entre inicios de turno (p. ej. 30' para listar cada media hora con reservas de 90').
+  const requestedSlotStepRaw = req.query.slot_step_minutes;
+  const requestedSlotStep =
+    requestedSlotStepRaw != null && Number.isFinite(Number(requestedSlotStepRaw)) && Number(requestedSlotStepRaw) > 0
+      ? Number(requestedSlotStepRaw)
+      : null;
+  const exclusiveOccupancy =
+    req.query.exclusive_occupancy === '1' || req.query.exclusive_occupancy === 'true';
 
   const clubIds = club_ids_raw ? club_ids_raw.split(',') : (club_id_raw ? [club_id_raw] : []);
 
@@ -61,26 +73,53 @@ router.get('/slots', async (req: Request, res: Response) => {
 
     const courtIds = courts.map(c => c.id);
 
-    // 2. Fetch everything in parallel to minimize latency
-    const [scheduleRes, bookingsRes, coursesRes, tournamentsRes, clubsTzRes] = await Promise.all([
+    const { data: clubsData, error: clubsTzErr } = await supabase
+      .from('clubs')
+      .select('id, timezone, weekly_schedule, slot_duration_min')
+      .in('id', clubIds);
+    if (clubsTzErr) throw clubsTzErr;
+
+    const clubTzMap = new Map<string, string>(
+      (clubsData ?? []).map((c) => [c.id, clubTimezoneOrDefault(c.timezone as string | null)]),
+    );
+
+    let bookingsRangeStartMs = Infinity;
+    let bookingsRangeEndMs = -Infinity;
+    for (const clubId of clubIds) {
+      const { start, endExclusive } = zonedDayRangeUtcIso(
+        date,
+        clubTzMap.get(clubId) ?? clubTimezoneOrDefault(null),
+      );
+      bookingsRangeStartMs = Math.min(bookingsRangeStartMs, new Date(start).getTime());
+      bookingsRangeEndMs = Math.max(bookingsRangeEndMs, new Date(endExclusive).getTime());
+    }
+    const bookingsRangeStart = new Date(bookingsRangeStartMs).toISOString();
+    const bookingsRangeEnd = new Date(bookingsRangeEndMs).toISOString();
+
+    const bookingBlocksCourt = exclusiveOccupancy
+      ? bookingBlocksCourtForExclusiveReservation
+      : bookingBlocksCourtForAvailability;
+
+    const [scheduleRes, bookingsRes, coursesRes, tournamentsRes] = await Promise.all([
       supabase.from('club_day_schedule').select('court_id, slot').in('court_id', courtIds).eq('date', date),
-      supabase.from('bookings').select('court_id, start_at, end_at, status, reservation_type, court_contention_status').in('court_id', courtIds).neq('status', 'cancelled').is('deleted_at', null).gte('start_at', `${date}T00:00:00Z`).lte('start_at', `${date}T23:59:59Z`),
+      supabase
+        .from('bookings')
+        .select('court_id, start_at, end_at, status, reservation_type, court_contention_status')
+        .in('court_id', courtIds)
+        .neq('status', 'cancelled')
+        .is('deleted_at', null)
+        .lt('start_at', bookingsRangeEnd)
+        .gt('end_at', bookingsRangeStart),
       supabase.from('club_school_courses').select('id, court_id, club_id, starts_on, ends_on').in('club_id', clubIds).eq('is_active', true),
       supabase.from('tournaments').select('id, club_id, start_at, end_at, status, tournament_courts(court_id)').in('club_id', clubIds).neq('status', 'cancelled'),
-      supabase.from('clubs').select('id, timezone, weekly_schedule, slot_duration_min').in('id', clubIds)
     ]);
 
     if (scheduleRes.error) throw scheduleRes.error;
     if (bookingsRes.error) throw bookingsRes.error;
     if (coursesRes.error) throw coursesRes.error;
     if (tournamentsRes.error) throw tournamentsRes.error;
-    if (clubsTzRes.error) throw clubsTzRes.error;
 
-    // Zona horaria por club (derivada del país en el alta). Cada slot local se
-    // convierte a UTC usando la zona del club correspondiente.
-    const clubTzMap = new Map<string, string>(
-      (clubsTzRes.data ?? []).map((c) => [c.id, clubTimezoneOrDefault(c.timezone as string | null)])
-    );
+    const clubsTzRes = { data: clubsData };
 
     // 3. Prepare lookups — horario operativo por club y día civil en su zona horaria.
     const clubHoursMap = new Map(
@@ -137,14 +176,18 @@ router.get('/slots', async (req: Request, res: Response) => {
       courts: new Set((t.tournament_courts as any[]).map(tc => tc.court_id))
     }));
 
-    // Genera turnos uniformes encadenados desde la apertura, con paso = duración
-    // del turno del club (no 30' fijo), para que no "corten" turnos de 90/120 y
-    // respeten el horario. Totalmente dinámico según openMin/closeMin
-    // (weekly_schedule) y la duración. Ej.: 08:00–21:00, 90' → 08:00, 09:30,
-    // 11:00, 12:30, 14:00, 15:30, 17:00, 18:30 (último termina 20:00).
-    const buildSlotsWithinHours = (openMin: number, closeMin: number, slotMin: number): string[] => {
+    // Genera turnos uniformes encadenados desde la apertura. Por defecto el paso
+    // coincide con la duración del turno (no 30' fijo), para que no "corten"
+    // turnos de 90/120. Con slot_step_minutes el cliente puede listar inicios
+    // más frecuentes (p. ej. cada 30' con reservas de 90').
+    const buildSlotsWithinHours = (
+      openMin: number,
+      closeMin: number,
+      slotMin: number,
+      stepMin?: number | null,
+    ): string[] => {
       const out: string[] = [];
-      const step = slotMin > 0 ? slotMin : 90;
+      const step = stepMin && stepMin > 0 ? stepMin : slotMin > 0 ? slotMin : 90;
       for (let min = openMin; min + slotMin <= closeMin; min += step) {
         const h = Math.floor(min / 60);
         const m = min % 60;
@@ -166,10 +209,15 @@ router.get('/slots', async (req: Request, res: Response) => {
       const closeMin = hours?.closeMin ?? 24 * 60;
       const slotMinutes = clubDurationMap.get(court.club_id) ?? requestedDuration ?? 90;
       const candidates = scheduleRes.data?.filter(s => s.court_id === court.id).map(s => s.slot) ?? [];
-      const slots = candidates.length > 0 ? candidates : buildSlotsWithinHours(openMin, closeMin, slotMinutes);
+      const slots =
+        requestedSlotStep != null
+          ? buildSlotsWithinHours(openMin, closeMin, slotMinutes, requestedSlotStep)
+          : candidates.length > 0
+            ? candidates
+            : buildSlotsWithinHours(openMin, closeMin, slotMinutes);
       
       const courtBookings = (bookingsRes.data ?? [])
-        .filter((b) => b.court_id === court.id && bookingBlocksCourtForAvailability(b))
+        .filter((b) => b.court_id === court.id && bookingBlocksCourt(b))
         .map((b) => ({
           s: new Date(b.start_at).getTime(),
           e: new Date(b.end_at).getTime(),

@@ -13,7 +13,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { BookingSuccessRadialBg } from '../components/partido/BookingSuccessRadialBg';
 import { useTranslation } from '../i18n';
-import { useSlotPrice } from '../hooks/useSlotPrice';
 
 const ORANGE = '#F18F34';
 const ORANGE_END = '#C46A20';
@@ -25,8 +24,10 @@ export type BookingConfirmationData = {
   dateTimeFormatted: string;
   duration: string;
   priceFormatted: string;
+  /** Precio total de la pista (4 plazas). */
+  courtPriceFormatted?: string;
   /** Público: pantalla «unirse»; privado: confirmación de reserva (detalle + email). */
-  matchVisibility: 'public' | 'private';
+  matchVisibility?: 'public' | 'private';
   /** Solo público: sustituye la línea bajo el CTA. */
   playersLine?: string;
   /** Modal de club / torneo: badge «Partido» vs «Torneo» vs reserva de pista. */
@@ -114,25 +115,7 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
       ? data.playersLine
       : t('partidos.detailAlreadyInMatch');
 
-  const { priceData, loading } = useSlotPrice({
-    clubId: data.clubId,
-    courtId: data.courtId,
-    date: data.date,
-    slot: data.slot,
-    durationMinutes: data.durationMinutes,
-    reservationType: 'open_match',
-  });
-
-  const renderPrice = () => {
-    if (loading) return ` · ${t('common.loadingEllipsis')}`;
-    if (priceData) {
-      if (priceData.source === 'none') {
-        return ` · ${t('search.clubPriceError')}`;
-      }
-      return ` · ${(priceData.total_price_cents / 100).toFixed(2)} €`;
-    }
-    return data.priceFormatted ? ` · ${data.priceFormatted}` : '';
-  };
+  const renderPrice = () => (data.priceFormatted ? ` · ${data.priceFormatted}` : '');
 
   return (
     <View style={styles.column}>

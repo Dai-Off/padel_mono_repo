@@ -139,6 +139,7 @@ export type PendingBookingPayment = {
   currency: string;
   court_name: string | null;
   club_name: string | null;
+  reservation_type?: string;
 };
 
 export type FetchPendingBookingsResponse = {
@@ -217,6 +218,23 @@ export type ConfirmClientResponse = {
   payment_succeeded?: boolean;
   join?: { slot_index: number; reassigned?: boolean; match_id?: string };
 };
+
+export type CreateIntentForCourtReservationParams = {
+  court_id: string;
+  organizer_player_id: string;
+  start_at: string;
+  end_at: string;
+  total_price_cents: number;
+  timezone?: string;
+};
+
+/** Reserva de pista completa (Pistas → Reservar). Paga el total; no crea partido. */
+export async function createIntentForCourtReservation(
+  params: CreateIntentForCourtReservationParams,
+  token: string | null | undefined,
+): Promise<CreatePaymentIntentResponse> {
+  return createIntentForNewMatch({ ...params, pay_full: true }, token);
+}
 
 export async function createIntentForNewMatch(
   params: CreateIntentForNewMatchParams,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Image,
   Platform,
@@ -13,15 +13,21 @@ import { Ionicons } from "@expo/vector-icons";
 import { AvatarWithFrame } from "../profile/AvatarWithFrame";
 import { useHomeData } from "../../contexts/HomeDataContext";
 import {
+  isPartidoPlayerCurrentViewer,
   resolvePlayerDisplayAvatar,
   resolvePlayerDisplayInitials,
   type ProfileForPartidoEnrich,
 } from "../../lib/partidoPlayerUtils";
 import type { PartidoItem, PartidoPlayer } from "../../screens/PartidosScreen";
 import { useTranslation } from "../../i18n";
-
-import { useAmbientTheme } from "../../hooks/useAmbientTheme";
-import { OPENWEATHER_API_KEY } from "../../config";
+import {
+  HOME_ACTIVITY_CARD_MIN_HEIGHT,
+  HOME_ACTIVITY_COL_GAP,
+  HOME_ACTIVITY_LEFT_COL_HEIGHT,
+  HOME_ACTIVITY_ROW_GAP,
+  HOME_ACTIVITY_SLOTS_HEIGHT,
+  HOME_ACTIVITY_THUMB_SIZE,
+} from "../home/inicio/homeActivityCardLayout";
 
 const PLACEHOLDER_URIS = [
   "https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=400&h=300&fit=crop",
@@ -60,10 +66,6 @@ function durationHuman(raw: string): string {
   const m = n % 60;
   if (m === 0) return h === 1 ? "1 hora" : `${h} horas`;
   return `${h} hora${h > 1 ? "s" : ""} ${m} minutos`;
-}
-
-function countFree(players: PartidoPlayer[]): number {
-  return players.filter((p) => p.isFree).length;
 }
 
 function matchPhaseLabel(item: PartidoItem, t: (key: string) => string): string {
@@ -119,7 +121,6 @@ function PlayerFace({
 /** Tarjeta alineada al listado web (imagen + meta + slots horizontales). */
 export function PartidoOpenCard({ item, onPress, fullWidth, showVisibilityBadge }: Props) {
   const { t } = useTranslation();
-  const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const { profile } = useHomeData();
   const currentProfile: ProfileForPartidoEnrich | null = profile?.id
     ? {
@@ -130,8 +131,6 @@ export function PartidoOpenCard({ item, onPress, fullWidth, showVisibilityBadge 
         avatarUrl: profile.avatarUrl,
       }
     : null;
-  const color1 = `rgb(${theme.orb1Color})`;
-  const color2 = `rgb(${theme.orb2Color})`;
 
   const { datePart, timePart } = splitDateTime(item.dateTime);
   const primaryUri = item.venueImage?.trim() || pickPlaceholderUri(item.id);
@@ -142,10 +141,21 @@ export function PartidoOpenCard({ item, onPress, fullWidth, showVisibilityBadge 
     setThumbUri(item.venueImage?.trim() || pickPlaceholderUri(item.id));
   }, [item.id, item.venueImage]);
 
-  const libres = countFree(item.players);
   const phaseLabel = matchPhaseLabel(item, t);
   const isPast = (item.matchPhase ?? 'upcoming') === 'past';
   const isPrivate = item.visibility === 'private';
+
+  const displayPlayerSlots = useMemo(() => {
+    const slots = item.players.map((player, slotIndex) => ({ player, slotIndex }));
+    if (!showVisibilityBadge || !currentProfile?.id?.trim()) return slots;
+    return slots.filter(
+      ({ player, slotIndex }) =>
+        !isPartidoPlayerCurrentViewer(player, currentProfile, {
+          slotIndex,
+          playerIdsBySlot: item.playerIdsBySlot,
+        }),
+    );
+  }, [item.players, item.playerIdsBySlot, showVisibilityBadge, currentProfile]);
 
   return (
     <Pressable
@@ -165,35 +175,55 @@ export function PartidoOpenCard({ item, onPress, fullWidth, showVisibilityBadge 
       />
       <View style={styles.cardBorder} pointerEvents="none" />
       <View style={styles.inner}>
-        <View style={styles.row}>
-          <View style={styles.thumbWrap}>
-            <Image
-              source={{ uri: thumbUri }}
-              style={styles.thumb}
-              resizeMode="cover"
-              onError={() => {
-                if (thumbUri !== fallbackUri) setThumbUri(fallbackUri);
-              }}
-            />
-            <LinearGradient
-              colors={["rgba(0,0,0,0.42)", "transparent"]}
-              start={{ x: 0, y: 1 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.thumbOverlay}
-            />
-            <View style={[styles.thumbPhasePill, isPast && styles.thumbPhasePillPast]}>
-              <Text style={[styles.thumbPhasePillText, isPast && styles.thumbPhasePillTextPast]}>
-                {phaseLabel}
-              </Text>
-            </View>
-            <View style={styles.priceTag}>
-              <Text style={styles.priceLine}>
-                <Text style={styles.priceMain}>{item.pricePerPlayer}</Text>
-                <Text style={styles.priceSub}>
-                  /{durationHuman(item.duration)}
+        <View style={styles.mainRow}>
+          <View style={styles.leftCol}>
+            <View style={styles.thumbWrap}>
+              <Image
+                source={{ uri: thumbUri }}
+                style={styles.thumb}
+                resizeMode="cover"
+                onError={() => {
+                  if (thumbUri !== fallbackUri) setThumbUri(fallbackUri);
+                }}
+              />
+              <LinearGradient
+                colors={["rgba(0,0,0,0.42)", "transparent"]}
+                start={{ x: 0, y: 1 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.thumbOverlay}
+              />
+              <View style={[styles.thumbPhasePill, isPast && styles.thumbPhasePillPast]}>
+                <Text style={[styles.thumbPhasePillText, isPast && styles.thumbPhasePillTextPast]}>
+                  {phaseLabel}
                 </Text>
-              </Text>
+              </View>
+              <View style={styles.priceTag}>
+                <Text style={styles.priceLine}>
+                  <Text style={styles.priceMain}>{item.pricePerPlayer}</Text>
+                  <Text style={styles.priceSub}>
+                    /{durationHuman(item.duration)}
+                  </Text>
+                </Text>
+              </View>
             </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              nestedScrollEnabled
+              style={styles.slotsScroll}
+              contentContainerStyle={styles.slotsRow}
+            >
+              {displayPlayerSlots.map(({ player, slotIndex }) => (
+                <PlayerFace
+                  key={slotIndex}
+                  player={player}
+                  slotIndex={slotIndex}
+                  playerIdsBySlot={item.playerIdsBySlot}
+                  currentProfile={currentProfile}
+                />
+              ))}
+            </ScrollView>
           </View>
 
           <View style={styles.body}>
@@ -239,25 +269,6 @@ export function PartidoOpenCard({ item, onPress, fullWidth, showVisibilityBadge 
                 </Text>
               </View>
             </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              nestedScrollEnabled
-              contentContainerStyle={styles.slotsRow}
-            >
-              {item.players.map((p, i) => (
-                <PlayerFace
-                  key={i}
-                  player={p}
-                  slotIndex={i}
-                  playerIdsBySlot={item.playerIdsBySlot}
-                  currentProfile={currentProfile}
-                />
-              ))}
-              {libres > 0 ? (
-                <Text style={[styles.libresTxt, { color: color1 }]}>{libres} libres</Text>
-              ) : null}
-            </ScrollView>
           </View>
         </View>
       </View>
@@ -274,6 +285,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
     position: "relative",
+    minHeight: HOME_ACTIVITY_CARD_MIN_HEIGHT,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
@@ -298,15 +310,21 @@ const styles = StyleSheet.create({
     padding: 12,
     position: "relative",
     zIndex: 2,
+    flex: 1,
   },
-  row: {
+  mainRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: HOME_ACTIVITY_ROW_GAP,
     alignItems: "flex-start",
+    flex: 1,
+  },
+  leftCol: {
+    width: HOME_ACTIVITY_THUMB_SIZE,
+    gap: HOME_ACTIVITY_COL_GAP,
   },
   thumbWrap: {
-    width: 112,
-    height: 112,
+    width: HOME_ACTIVITY_THUMB_SIZE,
+    height: HOME_ACTIVITY_THUMB_SIZE,
     borderRadius: 12,
     overflow: "hidden",
     flexShrink: 0,
@@ -364,6 +382,7 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     minWidth: 0,
+    minHeight: HOME_ACTIVITY_LEFT_COL_HEIGHT,
     gap: 4,
   },
   title: {
@@ -435,9 +454,6 @@ const styles = StyleSheet.create({
     flexDirection: "column",
     alignSelf: "stretch",
     gap: 6,
-    marginBottom: 4,
-    /** Dos badges (tipo + nivel). */
-    minHeight: 54,
   },
   badge: {
     paddingHorizontal: 8,
@@ -461,12 +477,17 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
+  slotsScroll: {
+    width: HOME_ACTIVITY_THUMB_SIZE,
+    height: HOME_ACTIVITY_SLOTS_HEIGHT,
+    flexGrow: 0,
+  },
   slotsRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 4,
     paddingVertical: 2,
-    paddingRight: 8,
+    paddingRight: 4,
   },
   slotFill: {
     // Sin tamaño fijo ni overflow:hidden: el marco de AvatarWithFrame sobresale
@@ -500,13 +521,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6b7280",
     fontWeight: "600",
-  },
-  libresTxt: {
-    fontSize: 9,
-    fontWeight: "800",
-    marginLeft: 4,
-    alignSelf: "center",
-    flexShrink: 0,
-    paddingRight: 12,
   },
 });

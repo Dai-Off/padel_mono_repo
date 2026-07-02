@@ -51,6 +51,7 @@ export type MatchBookingExpanded = {
   total_price_cents: number;
   currency: string;
   status?: string;
+  deleted_at?: string | null;
   timezone?: string | null;
   reservation_type?: string | null;
   court_id: string;

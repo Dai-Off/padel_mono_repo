@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Image, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { rejectReceivedMatchInvite, type ReceivedMatchInvite } from '../../api/matchInvites';
+import { receivedMatchInviteBannerTitle } from '../../lib/matchInviteDisplay';
 import { LoadingButton } from '../ui/PrimaryLoadingButton';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTranslation } from '../../i18n';
@@ -64,7 +65,7 @@ export function MatchInviteBanner({ invites, onChanged, onViewMatch }: Props) {
         )}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.title} numberOfLines={2}>
-            {t('partidos.matchInviteBannerTitle', { name: invite.inviter_name })}
+            {receivedMatchInviteBannerTitle(invite, t)}
           </Text>
           <Text style={styles.sub} numberOfLines={2}>
             {t('partidos.matchInviteBannerSub', {
