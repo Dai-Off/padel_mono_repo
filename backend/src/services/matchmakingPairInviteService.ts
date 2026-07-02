@@ -5,7 +5,7 @@
  * El inflado de nivel del débil vive en el ciclo de matchmaking, no aquí.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { PREMADE_MAX_GAP } from './matchmakingShared';
+import { PREMADE_MAX_GAP, parseAvailabilitySlots, type AvailabilitySlot } from './matchmakingShared';
 import { getMatchmakingBlockUntil } from './matchmakingService';
 
 /** Vigencia de una invitación de pareja (es una intención de jugar juntos, no una búsqueda). */
@@ -14,6 +14,9 @@ const PAIR_INVITE_DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const PAIR_INVITE_REINVITE_COOLDOWN_MS = 60 * 60 * 1000;
 
 export type PairInvitePrefs = {
+  /** Franjas de disponibilidad (fuente de verdad del horario). */
+  availability_slots: AvailabilitySlot[];
+  /** Derivados min/max de availability_slots, para las columnas del pool. */
   available_from: string;
   available_until: string;
   club_id: string | null;
@@ -30,10 +33,9 @@ type Ok<T> = { ok: true } & T;
 
 /** Valida y normaliza las prefs de cola (espejo de POST /matchmaking/join). */
 export function normalizePairPrefs(body: Record<string, unknown>): { ok: true; prefs: PairInvitePrefs } | Fail {
-  const available_from = body.available_from;
-  const available_until = body.available_until;
-  if (typeof available_from !== 'string' || typeof available_until !== 'string') {
-    return { ok: false, status: 400, error: 'available_from y available_until son obligatorios' };
+  const slotsParsed = parseAvailabilitySlots(body.availability_slots);
+  if (!slotsParsed.ok) {
+    return { ok: false, status: 400, error: slotsParsed.error };
   }
 
   let preferred_club_ids: string[] = [];
@@ -81,8 +83,9 @@ export function normalizePairPrefs(body: Record<string, unknown>): { ok: true; p
   return {
     ok: true,
     prefs: {
-      available_from,
-      available_until,
+      availability_slots: slotsParsed.slots,
+      available_from: slotsParsed.from,
+      available_until: slotsParsed.until,
       club_id: resolvedClubId,
       preferred_club_ids: poolPreferredClubIds,
       max_distance_km: maxKm != null && Number.isFinite(maxKm) ? maxKm : null,
@@ -176,6 +179,7 @@ function poolRowFromPrefs(playerId: string, partnerId: string, prefs: PairInvite
     gender: prefs.gender,
     available_from: prefs.available_from,
     available_until: prefs.available_until,
+    availability_slots: prefs.availability_slots,
     status: 'searching' as const,
     search_lat: prefs.search_lat,
     search_lng: prefs.search_lng,

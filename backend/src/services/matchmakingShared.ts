@@ -22,6 +22,8 @@ export type PoolRow = {
   gender: string;
   available_from: string;
   available_until: string;
+  /** Franjas de disponibilidad disjuntas (una o varias por día). Fuente de verdad del horario. */
+  availability_slots?: { start_at: string; end_at: string }[] | null;
   expires_at?: string | null;
   search_lat?: number | null;
   search_lng?: number | null;
@@ -227,6 +229,118 @@ export function intersectRange(entries: PoolRow[]): { start: string; end: string
   return { start: new Date(start).toISOString(), end: new Date(end).toISOString() };
 }
 
+/** Duración fija de un partido de matchmaking (90 min). */
+export const MATCH_DURATION_MS = 90 * 60 * 1000;
+/** Los clubs solo abren slots en punto o y media; el motor busca en pasos de 30 min alineados a :00/:30. */
+export const SLOT_STEP_MS = 30 * 60 * 1000;
+
+export type AvailabilitySlot = { start_at: string; end_at: string };
+export type MsInterval = { start: number; end: number };
+
+/** Une intervalos solapados o contiguos y los devuelve ordenados. */
+function mergeIntervals(intervals: MsInterval[]): MsInterval[] {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  const out: MsInterval[] = [];
+  for (const iv of sorted) {
+    const last = out[out.length - 1];
+    if (last && iv.start <= last.end) last.end = Math.max(last.end, iv.end);
+    else out.push({ ...iv });
+  }
+  return out;
+}
+
+/** Franjas de disponibilidad de una fila, en ms. Cae al rango único legado si no hay slots. */
+export function rowSlots(row: Pick<PoolRow, 'availability_slots' | 'available_from' | 'available_until'>): MsInterval[] {
+  const raw = row.availability_slots;
+  if (Array.isArray(raw) && raw.length > 0) {
+    const out: MsInterval[] = [];
+    for (const s of raw) {
+      const start = new Date(s.start_at).getTime();
+      const end = new Date(s.end_at).getTime();
+      if (Number.isFinite(start) && Number.isFinite(end) && start < end) out.push({ start, end });
+    }
+    if (out.length > 0) return mergeIntervals(out);
+  }
+  const f = new Date(row.available_from).getTime();
+  const u = new Date(row.available_until).getTime();
+  if (Number.isFinite(f) && Number.isFinite(u) && f < u) return [{ start: f, end: u }];
+  return [];
+}
+
+/** Intersección de las franjas de todos los jugadores: intervalos comunes a los 4. */
+export function intersectSlots(rows: PoolRow[]): MsInterval[] {
+  if (rows.length === 0) return [];
+  let acc = rowSlots(rows[0]!);
+  for (let i = 1; i < rows.length; i++) {
+    const next = rowSlots(rows[i]!);
+    const merged: MsInterval[] = [];
+    for (const a of acc) {
+      for (const b of next) {
+        const start = Math.max(a.start, b.start);
+        const end = Math.min(a.end, b.end);
+        if (start < end) merged.push({ start, end });
+      }
+    }
+    acc = mergeIntervals(merged);
+    if (acc.length === 0) return [];
+  }
+  return acc;
+}
+
+/** ¿Existe una ventana común a los 4 jugadores que aloje un partido completo (90 min)? */
+export function hasMatchWindow(rows: PoolRow[]): boolean {
+  return intersectSlots(rows).some((iv) => iv.end - iv.start >= MATCH_DURATION_MS);
+}
+
+/** Máximo de franjas que un jugador puede enviar (varios días × varios tramos). */
+const MAX_AVAILABILITY_SLOTS = 30;
+
+/**
+ * Valida y normaliza `availability_slots` del body. Reglas:
+ * - array no vacío de `{ start_at, end_at }` ISO;
+ * - bordes alineados a :00/:30 (rejilla de slots de club);
+ * - cada franja dura ≥ 90 min (si no, no cabe partido);
+ * - al menos una franja futura.
+ * Devuelve las franjas fusionadas (solapes/contiguas) y los derivados `from`/`until` (min/max).
+ */
+export function parseAvailabilitySlots(
+  input: unknown,
+): { ok: true; slots: AvailabilitySlot[]; from: string; until: string } | { ok: false; error: string } {
+  if (!Array.isArray(input) || input.length === 0) {
+    return { ok: false, error: 'availability_slots debe ser un array no vacío de franjas { start_at, end_at }' };
+  }
+  if (input.length > MAX_AVAILABILITY_SLOTS) {
+    return { ok: false, error: `Demasiadas franjas de disponibilidad (máx ${MAX_AVAILABILITY_SLOTS})` };
+  }
+  const intervals: MsInterval[] = [];
+  for (const raw of input) {
+    const s = raw as { start_at?: unknown; end_at?: unknown } | null;
+    const startStr = s && typeof s.start_at === 'string' ? s.start_at : null;
+    const endStr = s && typeof s.end_at === 'string' ? s.end_at : null;
+    if (!startStr || !endStr) return { ok: false, error: 'Cada franja necesita start_at y end_at (ISO)' };
+    const start = new Date(startStr).getTime();
+    const end = new Date(endStr).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return { ok: false, error: 'start_at/end_at inválidos' };
+    if (start % SLOT_STEP_MS !== 0 || end % SLOT_STEP_MS !== 0) {
+      return { ok: false, error: 'Las franjas deben empezar y terminar en punto o y media (:00 / :30)' };
+    }
+    if (end - start < MATCH_DURATION_MS) {
+      return { ok: false, error: 'Cada franja debe durar al menos 90 min (3 slots de media hora)' };
+    }
+    intervals.push({ start, end });
+  }
+  const merged = mergeIntervals(intervals);
+  const maxEnd = Math.max(...merged.map((i) => i.end));
+  if (maxEnd <= Date.now()) return { ok: false, error: 'La disponibilidad debe incluir alguna franja futura' };
+  const slots = merged.map((i) => ({ start_at: new Date(i.start).toISOString(), end_at: new Date(i.end).toISOString() }));
+  return {
+    ok: true,
+    slots,
+    from: new Date(Math.min(...merged.map((i) => i.start))).toISOString(),
+    until: new Date(maxEnd).toISOString(),
+  };
+}
+
 export function resolveClubId(allRows: PoolRow[]): string | null {
   const clubs = new Set<string>();
   for (const r of allRows) {
@@ -375,13 +489,11 @@ export function quartetPreCourtValid(
   if (ids.length !== 4) return null;
   const prefs = flatRows.map((r) => r.gender || 'any');
   if (!genderPrefsPairwiseOk(prefs)) return null;
-  if (!flatRows.every((r) => flatRows.every((o) => overlap(r.available_from, r.available_until, o.available_from, o.available_until))))
-    return null;
+  // Debe existir una ventana común a los 4 que aloje un partido de 90 min (franjas disjuntas soportadas).
+  if (!hasMatchWindow(flatRows)) return null;
   if (!clubPreferenceCompatible(flatRows, clubId)) return null;
   if (!leaguesMatchmakingCompatible(ids, ctx.ligaById)) return null;
   if (!allPlayersWithinMaxDistance(flatRows, clubId, ctx.clubPosById)) return null;
-  const slot = intersectRange(flatRows);
-  if (!slot) return null;
   const elos = ids.map((id) => ctx.eloById.get(id)).filter((x): x is number => x != null);
   if (elos.length !== 4 || exceedsLevelSpread(elos)) return null;
   if (!groupSatisfiesEloWindows(ids, ctx.eloById, ctx.recentById, ctx.premadeIds)) return null;

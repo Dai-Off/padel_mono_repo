@@ -26,8 +26,8 @@ export async function fetchMatchmakingLeagueConfig(): Promise<MatchmakingLeagueC
 }
 
 export type MatchmakingJoinPayload = {
-  available_from: string;
-  available_until: string;
+  /** Franjas de disponibilidad (uno o varios días, uno o varios tramos por día). */
+  availability_slots: { start_at: string; end_at: string }[];
   club_id?: string;
   preferred_club_ids?: string[];
   max_distance_km?: number;

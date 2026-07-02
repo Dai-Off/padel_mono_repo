@@ -1,71 +1,82 @@
-const MADRID_TZ = 'Europe/Madrid';
+import { clubLocalDateTimeToUtcIso, dayKeyInClubTz } from './clubTimeZone';
 
-function madridYmd(base: Date, dayOffset: number): { y: number; m: number; d: number } {
-  const shifted = new Date(base.getTime() + dayOffset * 24 * 60 * 60 * 1000);
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: MADRID_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(shifted);
-  return {
-    y: Number(parts.find((p) => p.type === 'year')!.value),
-    m: Number(parts.find((p) => p.type === 'month')!.value),
-    d: Number(parts.find((p) => p.type === 'day')!.value),
-  };
+/** Un partido de matchmaking dura 90 min (fijo). El "hasta" del tramo = fin del partido. */
+export const MATCH_DURATION_MIN = 90;
+/** Los clubs solo abren slots en punto o y media, así que se elige en pasos de 30 min. */
+export const SLOT_STEP_MIN = 30;
+/** Rango de horas ofrecido en los pickers (el club revalida su horario real al emparejar). */
+export const DAY_START_MIN = 7 * 60; // 07:00
+export const DAY_END_MIN = 23 * 60; // 23:00
+
+/** Tramo horario de un día, en hora local del club ("HH:MM", siempre :00 o :30). */
+export type TimeRange = { from: string; until: string };
+/** Disponibilidad de un día: fecha (clave "YYYY-MM-DD") + uno o varios tramos. */
+export type DaySlots = { dateKey: string; ranges: TimeRange[] };
+/** Franja absoluta enviada al backend. */
+export type AvailabilitySlot = { start_at: string; end_at: string };
+
+export function hhmmToMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
 }
 
-/** Convierte Y-M-D + hora en Europe/Madrid a ISO UTC (misma zona que el seed demo del backend). */
-function madridHourToIso(y: number, m: number, d: number, hour: number): string {
-  const probe = new Date(Date.UTC(y, m - 1, d, hour, 0, 0));
-  const madridHour = Number(
-    new Intl.DateTimeFormat('en-GB', {
-      timeZone: MADRID_TZ,
-      hour: 'numeric',
-      hour12: false,
-    }).format(probe),
-  );
-  const deltaH = hour - madridHour;
-  return new Date(probe.getTime() + deltaH * 60 * 60 * 1000).toISOString();
+export function minutesToHhmm(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-export type MatchSearchTimeSlot = 'manana' | 'tarde' | 'noche';
-export type MatchSearchDay = 'hoy' | 'manana' | 'esta-semana' | 'fin-semana';
+/** Opciones "HH:MM" cada 30 min entre startMin y endMin (ambos inclusive). */
+export function halfHourOptions(startMin: number, endMin: number): string[] {
+  const out: string[] = [];
+  for (let m = startMin; m <= endMin; m += SLOT_STEP_MIN) out.push(minutesToHhmm(m));
+  return out;
+}
 
-export function computeMatchAvailabilityWindow(input: {
-  day: MatchSearchDay;
-  time: MatchSearchTimeSlot;
-}): { availableFrom: string; availableUntil: string } {
-  const now = new Date();
-  let dayOffset = 0;
-  if (input.day === 'manana') dayOffset = 1;
-  else if (input.day === 'esta-semana') dayOffset = 2;
-  else if (input.day === 'fin-semana') {
-    const wdStr = new Intl.DateTimeFormat('en-US', { timeZone: MADRID_TZ, weekday: 'short' }).format(now);
-    const wdMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-    const day = wdMap[wdStr] ?? 0;
-    const daysUntilSaturday = (6 - day + 7) % 7 || 7;
-    dayOffset = daysUntilSaturday;
-  }
+/** Un tramo es válido si aloja al menos un partido completo (>= 90 min). */
+export function isValidRange(r: TimeRange): boolean {
+  return hhmmToMinutes(r.until) - hhmmToMinutes(r.from) >= MATCH_DURATION_MIN;
+}
 
-  let startHour = 15;
-  let endHour = 18;
-  if (input.time === 'manana') {
-    startHour = 9;
-    endHour = 12;
-  } else if (input.time === 'tarde') {
-    startHour = 15;
-    endHour = 18;
-  } else if (input.time === 'noche') {
-    startHour = 19;
-    endHour = 22;
-  }
+/** Tramo por defecto al añadir un día nuevo. */
+export function defaultRange(): TimeRange {
+  return { from: '18:00', until: '22:00' };
+}
 
-  const { y, m, d } = madridYmd(now, dayOffset);
-  const availableFrom = madridHourToIso(y, m, d, startHour);
-  let availableUntil = madridHourToIso(y, m, d, endHour);
-  if (new Date(availableUntil).getTime() <= new Date(availableFrom).getTime()) {
-    availableUntil = new Date(new Date(availableFrom).getTime() + 90 * 60 * 1000).toISOString();
+/** Disponibilidad inicial: hoy con un tramo por defecto. */
+export function defaultDaySlots(): DaySlots[] {
+  return [{ dateKey: dayKeyInClubTz(new Date()), ranges: [defaultRange()] }];
+}
+
+/** Resumen compacto de la disponibilidad para el recuadro de la cola (ej. "sáb 5 18:00–22:00 · dom 6 10:00–14:00"). */
+export function scheduleSummary(daySlots: DaySlots[], localeTag: string): string {
+  const parts: string[] = [];
+  for (const day of daySlots) {
+    const d = new Date(`${day.dateKey}T12:00:00`);
+    const label = d.toLocaleDateString(localeTag, { weekday: 'short', day: 'numeric' }).replace('.', '');
+    for (const r of day.ranges) {
+      if (!isValidRange(r)) continue;
+      parts.push(`${label} ${r.from}–${r.until}`);
+    }
   }
-  return { availableFrom, availableUntil };
+  return parts.join(' · ');
+}
+
+/**
+ * Convierte los tramos por día (hora local del club) a franjas UTC para el backend.
+ * Descarta tramos demasiado cortos (< 90 min) y los que ya han terminado.
+ */
+export function computeAvailabilitySlots(daySlots: DaySlots[]): AvailabilitySlot[] {
+  const nowMs = Date.now();
+  const out: AvailabilitySlot[] = [];
+  for (const day of daySlots) {
+    for (const r of day.ranges) {
+      if (!isValidRange(r)) continue;
+      const start_at = clubLocalDateTimeToUtcIso(day.dateKey, r.from);
+      const end_at = clubLocalDateTimeToUtcIso(day.dateKey, r.until);
+      if (new Date(end_at).getTime() <= nowMs) continue;
+      out.push({ start_at, end_at });
+    }
+  }
+  return out;
 }

@@ -17,7 +17,9 @@ import {
   iterUnitCombos,
   resolveCandidateClubIds,
   quartetPreCourtValid,
-  intersectRange,
+  intersectSlots,
+  MATCH_DURATION_MS,
+  SLOT_STEP_MS,
   exceedsLevelSpread,
   bestTeamSplitSync,
   fixedPairsFromRows,
@@ -162,7 +164,7 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
   const { data: pool } = await supabase
     .from('matchmaking_pool')
     .select(
-      'id, player_id, paired_with_id, club_id, preferred_club_ids, max_distance_km, preferred_side, gender, available_from, available_until, expires_at, search_lat, search_lng',
+      'id, player_id, paired_with_id, club_id, preferred_club_ids, max_distance_km, preferred_side, gender, available_from, available_until, availability_slots, expires_at, search_lat, search_lng',
     )
     .eq('status', 'searching');
 
@@ -333,14 +335,9 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
       if (!q) continue;
       passedPreCourt = true;
 
-      const rawSlot = intersectRange(flatRows);
-      if (!rawSlot) continue;
-      const MM_SLOT_MS = 90 * 60 * 1000;
-      const rangeStartMs = new Date(rawSlot.start).getTime();
-      const rangeEndMs = new Date(rawSlot.end).getTime();
-      if (!Number.isFinite(rangeStartMs) || !Number.isFinite(rangeEndMs) || rangeStartMs + MM_SLOT_MS > rangeEndMs) {
-        continue;
-      }
+      // Ventanas comunes a los 4 jugadores que alojan un partido completo (soporta franjas disjuntas).
+      const windows = intersectSlots(flatRows).filter((w) => w.end - w.start >= MATCH_DURATION_MS);
+      if (windows.length === 0) continue;
 
       const { data: courtList } = await supabase
         .from('courts')
@@ -349,31 +346,40 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
         .eq('is_hidden', false)
         .order('id');
 
-      const stepMs = 15 * 60 * 1000;
+      // Los clubs solo abren slots en punto o y media (:00 / :30), así que el motor busca en pasos
+      // de 30 min alineados a esa rejilla; alinear el primer candidato evita proponer inicios
+      // inexistentes (ej. 9:15). Nota: el offset de Europe/Madrid es de horas enteras, por lo que
+      // la rejilla :00/:30 en local coincide con la rejilla de 30 min en epoch UTC.
+      const stepMs = SLOT_STEP_MS;
       let courtId: string | null = null;
       let slot: { start: string; end: string } | null = null;
 
-      outer: for (let t = rangeStartMs; t + MM_SLOT_MS <= rangeEndMs; t += stepMs) {
-        const startIso = new Date(t).toISOString();
-        const endIso = new Date(t + MM_SLOT_MS).toISOString();
-        for (const c of courtList ?? []) {
-          const cid = (c as { id: string }).id;
-          const conflict = await hasCourtConflict(cid, startIso, endIso);
-          if (!conflict) {
-            const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
-              courtId: cid,
-              startAt: startIso,
-              endAt: endIso,
-              reservationType: 'open_match',
-            });
-            if (!hoursCheck.ok) continue;
-            courtId = cid;
-            slot = { start: startIso, end: endIso };
-            if (wantDiag) firstCourtConflict = null;
-            break outer;
-          }
-          if (wantDiag && firstCourtConflict == null && typeof conflict === 'string') {
-            firstCourtConflict = conflict.length > 200 ? `${conflict.slice(0, 200)}…` : conflict;
+      // No proponer inicios en el pasado: arrancar como muy pronto en el próximo slot :00/:30 desde ahora.
+      const nowFloorMs = Math.ceil(Date.now() / stepMs) * stepMs;
+      outer: for (const w of windows) {
+        const firstT = Math.max(Math.ceil(w.start / stepMs) * stepMs, nowFloorMs);
+        for (let t = firstT; t + MATCH_DURATION_MS <= w.end; t += stepMs) {
+          const startIso = new Date(t).toISOString();
+          const endIso = new Date(t + MATCH_DURATION_MS).toISOString();
+          for (const c of courtList ?? []) {
+            const cid = (c as { id: string }).id;
+            const conflict = await hasCourtConflict(cid, startIso, endIso);
+            if (!conflict) {
+              const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+                courtId: cid,
+                startAt: startIso,
+                endAt: endIso,
+                reservationType: 'open_match',
+              });
+              if (!hoursCheck.ok) continue;
+              courtId = cid;
+              slot = { start: startIso, end: endIso };
+              if (wantDiag) firstCourtConflict = null;
+              break outer;
+            }
+            if (wantDiag && firstCourtConflict == null && typeof conflict === 'string') {
+              firstCourtConflict = conflict.length > 200 ? `${conflict.slice(0, 200)}…` : conflict;
+            }
           }
         }
       }

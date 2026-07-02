@@ -89,6 +89,16 @@ export interface CompetitiveTranslationKeys {
       afternoonHours: string;
       night: string;
       nightHours: string;
+      availabilityTitle: string;
+      availabilityHint: string;
+      availabilityFrom: string;
+      availabilityUntil: string;
+      availabilityAddRange: string;
+      availabilityUntilNote: string;
+      availabilityEmpty: string;
+      yourPreferencesTitle: string;
+      editPreferences: string;
+      editClubs: string;
       demoMode: string;
       searchingInClubsOne: string;
       searchingInClubsMany: string;

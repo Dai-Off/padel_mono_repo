@@ -13,6 +13,7 @@ import {
   runMatchmakingCycle,
 } from '../services/matchmakingService';
 import { closeActiveMatchmakingSeason, getSeasonTransitionForPlayer } from '../services/matchmakingSeasonService';
+import { parseAvailabilitySlots } from '../services/matchmakingShared';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { clearMatchmakingPoolIfPlayerPaid } from '../services/matchmakingPoolCleanup';
 import {
@@ -307,13 +308,13 @@ router.post('/join', async (req: Request, res: Response) => {
     max_distance_km,
     preferred_side,
     gender,
-    available_from,
-    available_until,
+    availability_slots: availabilitySlotsRaw,
     search_lat,
     search_lng,
   } = req.body ?? {};
-  if (!available_from || !available_until) {
-    return res.status(400).json({ ok: false, error: 'available_from y available_until son obligatorios' });
+  const slotsParsed = parseAvailabilitySlots(availabilitySlotsRaw);
+  if (!slotsParsed.ok) {
+    return res.status(400).json({ ok: false, error: slotsParsed.error });
   }
 
   let preferredClubIds: string[] = [];
@@ -408,8 +409,9 @@ router.post('/join', async (req: Request, res: Response) => {
     max_distance_km: maxKm,
     preferred_side: side,
     gender: g,
-    available_from,
-    available_until,
+    available_from: slotsParsed.from,
+    available_until: slotsParsed.until,
+    availability_slots: slotsParsed.slots,
     status: 'searching',
     search_lat: lat,
     search_lng: lng,

@@ -49,7 +49,7 @@ export async function runNearMissTripletScan(): Promise<number> {
   const { data: poolRows, error } = await supabase
     .from('matchmaking_pool')
     .select(
-      'id, player_id, paired_with_id, club_id, preferred_club_ids, max_distance_km, preferred_side, gender, available_from, available_until, expires_at, search_lat, search_lng, created_at, expansion_offer, status',
+      'id, player_id, paired_with_id, club_id, preferred_club_ids, max_distance_km, preferred_side, gender, available_from, available_until, availability_slots, expires_at, search_lat, search_lng, created_at, expansion_offer, status',
     )
     .eq('status', 'searching');
 

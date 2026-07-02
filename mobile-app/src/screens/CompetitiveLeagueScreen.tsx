@@ -28,10 +28,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
 import { PlayerSelectModal } from '../components/matchmaking/PlayerSelectModal';
+import { AvailabilitySelector } from '../components/matchmaking/AvailabilitySelector';
+import { PreferredClubsStrip } from '../components/matchmaking/PreferredClubsStrip';
 import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { useClubCatalog } from '../hooks/useClubCatalog';
 import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
-import { computeMatchAvailabilityWindow } from '../lib/matchAvailabilityWindow';
+import { computeAvailabilitySlots, defaultDaySlots, scheduleSummary, type DaySlots } from '../lib/matchAvailabilityWindow';
 import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import { fetchMatches, fetchMatchById, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
@@ -54,7 +56,7 @@ import {
   type PairInvite,
 } from '../api/matchmaking';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { useTranslation } from '../i18n';
+import { formatLocale, useTranslation } from '../i18n';
 import { getMatchBooking } from '../domain/matchLifecycle';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 
@@ -70,20 +72,25 @@ type Step = 'home' | 'prefs' | 'queue' | 'found';
 type MainTab = 'liga' | 'ranking';
 type SearchArea = 'club' | 'km5' | 'km10' | 'km25';
 type SearchForm = {
-  day: 'hoy' | 'manana' | 'esta-semana' | 'fin-semana';
-  time: 'manana' | 'tarde' | 'noche';
+  daySlots: DaySlots[];
   preferred_side: 'drive' | 'backhand' | 'any';
   gender: 'male' | 'female' | 'mixed' | 'any';
   search_area: SearchArea;
 };
 
 const DEFAULT_FORM: SearchForm = {
-  day: 'hoy',
-  time: 'tarde',
+  daySlots: defaultDaySlots(),
   preferred_side: 'any',
   gender: 'any',
   search_area: 'club',
 };
+
+/** Mapea el lado del perfil (right/left/both) al vocabulario de matchmaking (drive/backhand/any). */
+function sideFromProfile(preferredSide: 'right' | 'left' | 'both' | null | undefined): SearchForm['preferred_side'] {
+  if (preferredSide === 'right') return 'drive';
+  if (preferredSide === 'left') return 'backhand';
+  return 'any';
+}
 const FLOW_TOP_PADDING = 12;
 const RANKING_PAGE_SIZE = 15;
 
@@ -132,7 +139,7 @@ export function CompetitiveLeagueScreen({
   const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(true);
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
   const { profile } = useHomeData();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
   const [rankingRows, setRankingRows] = useState<MatchmakingLeaderboardRow[]>([]);
   const [rankingTotal, setRankingTotal] = useState(0);
@@ -149,6 +156,8 @@ export function CompetitiveLeagueScreen({
   >([]);
   const [preferredClubIds, setPreferredClubIds] = useState<string[]>([]);
   const [clubPickerVisible, setClubPickerVisible] = useState(false);
+  const [prefsSheetVisible, setPrefsSheetVisible] = useState(false);
+  const sidePrefSeedDoneRef = useRef(false);
   const [partnerPickerVisible, setPartnerPickerVisible] = useState(false);
   const [modeSheetVisible, setModeSheetVisible] = useState(false);
   const [searchPartner, setSearchPartner] = useState<PairInvite | null>(null);
@@ -391,6 +400,14 @@ export function CompetitiveLeagueScreen({
     };
   }, [profile?.id, session?.access_token]);
 
+  // Precarga el lado preferido desde el perfil (una sola vez); el usuario puede editarlo luego.
+  useEffect(() => {
+    if (sidePrefSeedDoneRef.current || !profile) return;
+    sidePrefSeedDoneRef.current = true;
+    const side = sideFromProfile(profile.preferences?.preferredSide);
+    if (side !== 'any') setForm((p) => ({ ...p, preferred_side: side }));
+  }, [profile]);
+
   useEffect(() => {
     if (preferredClubsSeedDoneRef.current || clubCatalog.length === 0) return;
 
@@ -416,6 +433,14 @@ export function CompetitiveLeagueScreen({
   const preferredClubLabels = useMemo(() => {
     const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
     return preferredClubIds.map((id) => byId.get(id) ?? t('competitive.screen.fallback.club'));
+  }, [clubCatalog, preferredClubIds]);
+
+  const preferredClubCards = useMemo(() => {
+    const byId = new Map(clubCatalog.map((c) => [c.id, c] as const));
+    return preferredClubIds.map((id) => {
+      const c = byId.get(id);
+      return { id, name: c?.name ?? t('competitive.screen.fallback.club'), imageUrl: c?.imageUrl ?? null };
+    });
   }, [clubCatalog, preferredClubIds]);
 
   const refreshSearchCoords = useCallback(async () => {
@@ -607,10 +632,13 @@ export function CompetitiveLeagueScreen({
     }
     setErrorText(null);
     clearPollTimer();
-    const { availableFrom, availableUntil } = computeMatchAvailabilityWindow(form);
+    const availabilitySlots = computeAvailabilitySlots(form.daySlots);
+    if (availabilitySlots.length === 0) {
+      setErrorText(t('competitive.screen.prefs.availabilityEmpty'));
+      return;
+    }
     const payload: MatchmakingJoinPayload = {
-      available_from: availableFrom,
-      available_until: availableUntil,
+      availability_slots: availabilitySlots,
       preferred_side: form.preferred_side,
       gender: form.gender,
     };
@@ -1302,32 +1330,12 @@ export function CompetitiveLeagueScreen({
             </View>
           ) : null}
 
-          <View style={styles.prefsCard}>
-            <Text style={styles.prefsSectionTitle}>{t('competitive.screen.prefs.formatTitle')}</Text>
-            <View style={styles.fixedModeRow}>
-              <View style={styles.fixedModeIcon}>
-                <Ionicons name="people" size={18} color="#F18F34" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.fixedModeTitle}>{t('competitive.screen.prefs.pairFormatTitle')}</Text>
-                <Text style={styles.fixedModeSub}>{t('competitive.screen.prefs.pairFormatSub')}</Text>
-              </View>
-              <Ionicons name="checkmark-circle" size={20} color="#F18F34" />
-            </View>
+          <View style={styles.optionSection}>
+            <AvailabilitySelector
+              value={form.daySlots}
+              onChange={(daySlots) => setForm((p) => ({ ...p, daySlots }))}
+            />
           </View>
-
-          <OptionRow
-            title={t('competitive.screen.prefs.scheduleTitle')}
-            sectionIcon="time-outline"
-            options={[
-              { id: 'manana', label: t('competitive.screen.prefs.morning'), subtitle: t('competitive.screen.prefs.morningHours'), iconName: 'sunny-outline' },
-              { id: 'tarde', label: t('competitive.screen.prefs.afternoon'), subtitle: t('competitive.screen.prefs.afternoonHours'), iconName: 'sunny' },
-              { id: 'noche', label: t('competitive.screen.prefs.night'), subtitle: t('competitive.screen.prefs.nightHours'), iconName: 'moon-outline' },
-            ]}
-            value={form.time}
-            onChange={(v) => setForm((p) => ({ ...p, time: v as SearchForm['time'] }))}
-            large
-          />
 
           <View style={styles.optionSection}>
             {MATCHMAKING_DEMO ? (
@@ -1411,58 +1419,69 @@ export function CompetitiveLeagueScreen({
             ) : null}
           </View>
 
-          <OptionRow
-            title={t('competitive.screen.prefs.modality')}
-            sectionIcon="shield-outline"
-            options={[
-              { id: 'any', label: t('competitive.screen.prefs.any'), iconName: 'ellipse-outline' },
-              { id: 'male', label: t('competitive.screen.prefs.male'), iconName: 'person-outline' },
-              { id: 'female', label: t('competitive.screen.prefs.female'), iconName: 'woman-outline' },
-              { id: 'mixed', label: t('competitive.screen.prefs.mixed'), iconName: 'people-outline' },
-            ]}
-            value={form.gender}
-            onChange={(v) => setForm((p) => ({ ...p, gender: v as SearchForm['gender'] }))}
-          />
-          <OptionRow
-            title={t('competitive.screen.prefs.preferredSide')}
-            sectionIcon="compass-outline"
-            options={[
-              { id: 'backhand', label: t('competitive.screen.prefs.left'), iconName: 'arrow-back-circle-outline' },
-              { id: 'drive', label: t('competitive.screen.prefs.right'), iconName: 'arrow-forward-circle-outline' },
-              { id: 'any', label: t('competitive.screen.prefs.both'), iconName: 'swap-horizontal-outline' },
-            ]}
-            value={form.preferred_side}
-            onChange={(v) => setForm((p) => ({ ...p, preferred_side: v as SearchForm['preferred_side'] }))}
-          />
-
           <View style={styles.optionSection}>
-            <View style={styles.optionTitleRow}>
-              <Ionicons name="location-outline" size={14} color="#F59E0B" />
-              <Text style={styles.optionTitle}>{t('competitive.screen.prefs.preferredClubsTitle')}</Text>
+            <View style={styles.prefsSummaryHead}>
+              <View style={styles.optionTitleRow}>
+                <Ionicons name="options-outline" size={14} color="#F59E0B" />
+                <Text style={styles.optionTitle}>{t('competitive.screen.prefs.yourPreferencesTitle')}</Text>
+              </View>
+              <Pressable
+                style={styles.editPrefsBtn}
+                onPress={() => setPrefsSheetVisible(true)}
+                accessibilityRole="button"
+              >
+                <Ionicons name="create-outline" size={14} color="#F18F34" />
+                <Text style={styles.editPrefsText}>{t('competitive.screen.prefs.editPreferences')}</Text>
+              </Pressable>
             </View>
-            <Pressable
-              style={styles.clubPickerBtn}
-              onPress={() => setClubPickerVisible(true)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.clubPickerBtnTitle}>
-                  {preferredClubIds.length === 0
-                    ? t('competitive.screen.prefs.choosePreferredClubs')
-                    : t(
-                        preferredClubIds.length === 1
-                          ? 'competitive.screen.prefs.clubsSelectedOne'
-                          : 'competitive.screen.prefs.clubsSelectedMany',
-                        { n: preferredClubIds.length },
-                      )}
-                </Text>
-                <Text style={styles.clubPickerBtnSub} numberOfLines={2}>
-                  {preferredClubIds.length === 0
-                    ? t('competitive.screen.prefs.noClubsHint')
-                    : preferredClubLabels.join(' · ')}
+            <View style={styles.prefsSummaryRow}>
+              <View style={styles.prefsSummaryChip}>
+                <Text style={styles.prefsSummaryChipLabel}>{t('competitive.screen.prefs.preferredSide')}</Text>
+                <Text style={styles.prefsSummaryChipValue}>
+                  {form.preferred_side === 'drive'
+                    ? t('competitive.screen.prefs.right')
+                    : form.preferred_side === 'backhand'
+                      ? t('competitive.screen.prefs.left')
+                      : t('competitive.screen.prefs.both')}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
-            </Pressable>
+              <View style={styles.prefsSummaryChip}>
+                <Text style={styles.prefsSummaryChipLabel}>{t('competitive.screen.prefs.modality')}</Text>
+                <Text style={styles.prefsSummaryChipValue}>
+                  {form.gender === 'male'
+                    ? t('competitive.screen.prefs.male')
+                    : form.gender === 'female'
+                      ? t('competitive.screen.prefs.female')
+                      : form.gender === 'mixed'
+                        ? t('competitive.screen.prefs.mixed')
+                        : t('competitive.screen.prefs.any')}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.optionSection}>
+            <View style={styles.prefsSummaryHead}>
+              <View style={styles.optionTitleRow}>
+                <Ionicons name="location-outline" size={14} color="#F59E0B" />
+                <Text style={styles.optionTitle}>{t('competitive.screen.prefs.preferredClubsTitle')}</Text>
+              </View>
+              {preferredClubIds.length > 0 ? (
+                <Pressable
+                  style={styles.editPrefsBtn}
+                  onPress={() => setClubPickerVisible(true)}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="create-outline" size={14} color="#F18F34" />
+                  <Text style={styles.editPrefsText}>{t('competitive.screen.prefs.editClubs')}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <PreferredClubsStrip
+              clubs={preferredClubCards}
+              onEdit={() => setClubPickerVisible(true)}
+              emptyLabel={t('competitive.screen.prefs.choosePreferredClubs')}
+            />
           </View>
 
           <Pressable style={styles.primaryBtn} onPress={() => void handleJoinQueue()} disabled={loading}>
@@ -1516,7 +1535,7 @@ export function CompetitiveLeagueScreen({
 
           <View style={styles.queueSummaryBox}>
             <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.format')}</Text><Text style={styles.queueVal}>{t('competitive.screen.queue.formatValue')}</Text></View>
-            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.schedule')}</Text><Text style={styles.queueVal}>{form.time === 'manana' ? t('competitive.screen.prefs.morning') : form.time === 'tarde' ? t('competitive.screen.prefs.afternoon') : t('competitive.screen.prefs.night')}</Text></View>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.schedule')}</Text><Text style={styles.queueVal} numberOfLines={2}>{scheduleSummary(form.daySlots, formatLocale(locale))}</Text></View>
             <View style={styles.queueSummaryRow}>
               <Text style={styles.queueKey}>{t('competitive.screen.queue.location')}</Text>
               <Text style={styles.queueVal} numberOfLines={2}>
@@ -1616,6 +1635,38 @@ export function CompetitiveLeagueScreen({
         title={t('competitive.screen.picker.title')}
         subtitle={t('competitive.screen.picker.subtitle')}
       />
+
+      <FilterBottomSheet
+        visible={prefsSheetVisible}
+        title={t('competitive.screen.prefs.yourPreferencesTitle')}
+        onClose={() => setPrefsSheetVisible(false)}
+      >
+        <View style={styles.prefsSheetCol}>
+          <OptionRow
+            title={t('competitive.screen.prefs.preferredSide')}
+            sectionIcon="compass-outline"
+            options={[
+              { id: 'backhand', label: t('competitive.screen.prefs.left'), iconName: 'arrow-back-circle-outline' },
+              { id: 'drive', label: t('competitive.screen.prefs.right'), iconName: 'arrow-forward-circle-outline' },
+              { id: 'any', label: t('competitive.screen.prefs.both'), iconName: 'swap-horizontal-outline' },
+            ]}
+            value={form.preferred_side}
+            onChange={(v) => setForm((p) => ({ ...p, preferred_side: v as SearchForm['preferred_side'] }))}
+          />
+          <OptionRow
+            title={t('competitive.screen.prefs.modality')}
+            sectionIcon="shield-outline"
+            options={[
+              { id: 'any', label: t('competitive.screen.prefs.any'), iconName: 'ellipse-outline' },
+              { id: 'male', label: t('competitive.screen.prefs.male'), iconName: 'person-outline' },
+              { id: 'female', label: t('competitive.screen.prefs.female'), iconName: 'woman-outline' },
+              { id: 'mixed', label: t('competitive.screen.prefs.mixed'), iconName: 'people-outline' },
+            ]}
+            value={form.gender}
+            onChange={(v) => setForm((p) => ({ ...p, gender: v as SearchForm['gender'] }))}
+          />
+        </View>
+      </FilterBottomSheet>
 
       <FilterBottomSheet
         visible={modeSheetVisible}
@@ -2017,6 +2068,22 @@ const styles = StyleSheet.create({
   fixedModeTitle: { color: '#fff', fontSize: 13, fontWeight: '800' },
   fixedModeSub: { color: '#9ca3af', fontSize: 11 },
   optionSection: { gap: 8 },
+  prefsSummaryHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  editPrefsBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 4 },
+  editPrefsText: { color: '#F18F34', fontSize: 13, fontWeight: '700' },
+  prefsSummaryRow: { flexDirection: 'row', gap: 8 },
+  prefsSummaryChip: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  prefsSummaryChipLabel: { color: '#9ca3af', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  prefsSummaryChipValue: { color: '#fff', fontSize: 15, fontWeight: '800', marginTop: 2 },
+  prefsSheetCol: { gap: 16, paddingBottom: 8 },
   optionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   optionTitle: { color: '#f3f4f6', fontSize: 14, fontWeight: '800' },
   optionTitleStrong: { color: '#f3f4f6', fontSize: 14, fontWeight: '800' },
