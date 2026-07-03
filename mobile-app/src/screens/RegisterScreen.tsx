@@ -51,6 +51,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
   useEffect(() => {
     const v = normalizeUsernameInput(username);
     if (!v) {
+      usernameSeq.current++; // invalida respuestas en vuelo (no repintar sobre campo vacío)
       setUsernameStatus({ type: 'idle' });
       return;
     }
@@ -84,6 +85,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
   useEffect(() => {
     const v = email.trim().toLowerCase();
     if (!v) {
+      emailSeq.current++; // invalida respuestas en vuelo (no repintar sobre campo vacío)
       setEmailStatus({ type: 'idle' });
       return;
     }
@@ -99,7 +101,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
       const res = await checkEmailAvailable(v);
       if (seq !== emailSeq.current) return;
       if (!res.ok) {
-        setEmailStatus({ type: 'valid' }); // fallo de red: formato ok, no bloquear
+        setEmailStatus({ type: 'idle' }); // fallo de red: neutro (coherente con username)
         return;
       }
       setEmailStatus(
@@ -285,7 +287,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
       <AuthFormLink
         prompt={t('auth.hasAccountPrompt')}
         action={t('auth.loginLink')}
-        onPress={onGoToLogin}
+        onPress={() => onGoToLogin()}
         disabled={loading}
       />
 

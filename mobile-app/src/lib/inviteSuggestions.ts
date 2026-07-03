@@ -18,6 +18,7 @@ export async function fetchInviteSuggestions(
     last_name: null,
     username: null,
     avatar_url: p.avatarUrl,
-    onboarding_completed: true,
+    // Valor real: en matchmaking se filtran los que no completaron la nivelación; en privado da igual.
+    onboarding_completed: p.onboardingCompleted ?? undefined,
   }));
 }

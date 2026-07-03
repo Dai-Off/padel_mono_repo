@@ -1579,7 +1579,9 @@ router.get('/', async (req: Request, res: Response) => {
 
     // Prefijo '@' = búsqueda SOLO por username (sin la arroba). Sin '@' = búsqueda amplia.
     const isUsernameTerm = (t: string) => t.startsWith('@');
-    const bareTerm = (t: string) => (t.startsWith('@') ? t.slice(1) : t);
+    // Saneado: los caracteres estructurales de PostgREST (coma, paréntesis) romperían el .or()
+    // (p. ej. "a,b" → error de parseo → 500). Se eliminan del término del usuario.
+    const bareTerm = (t: string) => (t.startsWith('@') ? t.slice(1) : t).replace(/[,()]/g, '');
 
     // Excluir al propio usuario de los resultados (invitaciones): opt-in por token.
     let selfId: string | null = null;
@@ -1614,7 +1616,9 @@ router.get('/', async (req: Request, res: Response) => {
           ];
         })
         .join(',');
-      if (orExpr) q = q.or(orExpr);
+      // Todos los términos quedaron vacíos tras sanear (p. ej. solo "@"): no listar a todos.
+      if (!orExpr) return res.json({ ok: true, players: [] });
+      q = q.or(orExpr);
     }
 
     const { data, error } = await q;
@@ -1816,16 +1820,23 @@ router.get('/:id/frequent-partners', async (req: Request, res: Response) => {
 
     const { data: players } = await supabase
       .from('players')
-      .select('id, first_name, last_name, username, avatar_url')
+      .select('id, first_name, last_name, username, avatar_url, onboarding_completed')
       .in('id', ranked.map(([pid]) => pid));
-    type PRow = { id: string; first_name?: string | null; last_name?: string | null; username?: string | null; avatar_url?: string | null };
+    type PRow = { id: string; first_name?: string | null; last_name?: string | null; username?: string | null; avatar_url?: string | null; onboarding_completed?: boolean | null };
     const meta = new Map((players ?? []).map((p) => [(p as PRow).id, p as PRow]));
     const frames = await getEquippedFrames(supabase, ranked.map(([pid]) => pid));
 
     const partners = ranked.map(([pid, count]) => {
       const p = meta.get(pid);
       const name = p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || (p.username ?? 'Jugador') : 'Jugador';
-      return { id: pid, name, avatarUrl: p?.avatar_url ?? null, count, frame: frames.get(pid) ?? null };
+      return {
+        id: pid,
+        name,
+        avatarUrl: p?.avatar_url ?? null,
+        count,
+        frame: frames.get(pid) ?? null,
+        onboarding_completed: p?.onboarding_completed ?? null,
+      };
     });
     return res.json({ ok: true, partners });
   } catch (err) {

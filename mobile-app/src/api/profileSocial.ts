@@ -17,6 +17,8 @@ export interface FrequentPartner {
   count: number;
   /** Marco equipado del compañero (para pintar el pack). */
   frame?: FrameAttrs | null;
+  /** Si completó la nivelación (para no ofrecer invitarle a competitiva). null = desconocido. */
+  onboardingCompleted?: boolean | null;
 }
 
 /** Clubs donde suele jugar un jugador. Público (sin token). */
@@ -50,6 +52,7 @@ export async function fetchFrequentPartners(playerId: string, limit = 8): Promis
       avatarUrl: p.avatarUrl ?? null,
       count: Number(p.count ?? 0),
       frame: p.frame ?? null,
+      onboardingCompleted: p.onboardingCompleted ?? null,
     }));
   } catch {
     return [];

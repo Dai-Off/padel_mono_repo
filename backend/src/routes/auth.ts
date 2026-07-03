@@ -61,6 +61,10 @@ router.post('/register', async (req: Request, res: Response) => {
   const emailStr = String(email).trim().toLowerCase();
   const passwordStr = String(password);
 
+  if (!EMAIL_FORMAT_RE.test(emailStr)) {
+    return res.status(400).json({ ok: false, error: 'El email no es válido' });
+  }
+
   if (passwordStr.length < 6) {
     return res.status(400).json({
       ok: false,

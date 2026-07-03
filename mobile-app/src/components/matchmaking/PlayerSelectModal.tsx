@@ -59,6 +59,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   const token = session?.access_token ?? null;
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
+  const [inviting, setInviting] = useState<Set<string>>(new Set());
   const [suggestions, setSuggestions] = useState<PlayerSearchHit[]>([]);
   const [accepted, setAccepted] = useState<PairInvite[]>([]);
   const [pending, setPending] = useState<PairInvite[]>([]);
@@ -160,7 +161,14 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   };
 
   const handleInvite = async (player: PlayerSearchHit) => {
+    if (inviting.has(player.id)) return; // evita doble invitación por doble tap
+    setInviting((s) => new Set(s).add(player.id));
     const res = await createPairInvite(player.id, token);
+    setInviting((s) => {
+      const n = new Set(s);
+      n.delete(player.id);
+      return n;
+    });
     if (!res.ok) {
       showToast(res.error, 'error');
       return;
@@ -192,12 +200,13 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   // Sin texto → sugerencias; con texto → resultados con las sugerencias que casen arriba.
   const list = useMemo(() => {
     const ok = (p: PlayerSearchHit) => !exclude.has(p.id) && p.onboarding_completed !== false;
-    if (!searching) return focused ? suggestions.filter(ok) : [];
+    // Sugerencias por defecto: ocultar a los ya invitados (ya salen en la cabecera; evita duplicado).
+    if (!searching) return focused ? suggestions.filter(ok).filter((p) => !invitedIds.has(p.id)) : [];
     const filtered = rawPlayers.filter(ok);
     const matched = filtered.filter((p) => suggestionIds.has(p.id));
     const others = filtered.filter((p) => !suggestionIds.has(p.id));
     return [...matched, ...others];
-  }, [searching, focused, suggestions, rawPlayers, exclude, suggestionIds]);
+  }, [searching, focused, suggestions, rawPlayers, exclude, suggestionIds, invitedIds]);
 
   const showReceived = received.length > 0;
   const showAccepted = !!onSelectAccepted && accepted.length > 0;
@@ -318,51 +327,55 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
           </View>
         </View>
 
-        {loading ? (
-          <View style={styles.centered}>
-            <ActivityIndicator color={ACCENT} />
-          </View>
-        ) : (
-          <FlatList
-            data={list}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 16 }}
-            keyboardShouldPersistTaps="handled"
-            ListHeaderComponent={listHeader}
-            ListEmptyComponent={
+        <FlatList
+          data={list}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 16 }}
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={
+            loading ? (
+              <View style={styles.centered}>
+                <ActivityIndicator color={ACCENT} />
+              </View>
+            ) : (
               <Text style={styles.emptyText}>
                 {query.trim().length < MIN_SEARCH_CHARS
                   ? t('competitive.partner.searchHint')
                   : t('competitive.partner.empty')}
               </Text>
-            }
-            renderItem={({ item }) => {
-              const isInvited = invitedIds.has(item.id);
-              const isSuggestion = suggestionIds.has(item.id);
-              return (
-                <Pressable
-                  onPress={isInvited ? undefined : () => void handleInvite(item)}
-                  disabled={isInvited}
-                  style={({ pressed }) => [styles.row, isInvited && styles.rowDisabled, pressed && !isInvited && { opacity: 0.85 }]}
-                >
-                  {renderAvatar(item.avatar_url)}
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.name}>{playerDisplayName(item, t('competitive.screen.fallback.player'))}</Text>
-                    {item.username ? <Text style={styles.meta}>@{item.username}</Text> : null}
-                  </View>
-                  {isInvited ? (
-                    <Text style={styles.invitedBadge}>{t('competitive.partner.alreadyInvited')}</Text>
-                  ) : (
-                    <>
-                      {isSuggestion ? <Ionicons name="star" size={13} color={ACCENT} style={styles.suggestionStar} /> : null}
-                      <Ionicons name="person-add-outline" size={18} color={ACCENT} />
-                    </>
-                  )}
-                </Pressable>
-              );
-            }}
-          />
-        )}
+            )
+          }
+          renderItem={({ item }) => {
+            const isInvited = invitedIds.has(item.id);
+            const busy = inviting.has(item.id);
+            const isSuggestion = suggestionIds.has(item.id);
+            const disabled = isInvited || busy;
+            return (
+              <Pressable
+                onPress={disabled ? undefined : () => void handleInvite(item)}
+                disabled={disabled}
+                style={({ pressed }) => [styles.row, disabled && styles.rowDisabled, pressed && !disabled && { opacity: 0.85 }]}
+              >
+                {renderAvatar(item.avatar_url)}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.name}>{playerDisplayName(item, t('competitive.screen.fallback.player'))}</Text>
+                  {item.username ? <Text style={styles.meta}>@{item.username}</Text> : null}
+                </View>
+                {isInvited ? (
+                  <Text style={styles.invitedBadge}>{t('competitive.partner.alreadyInvited')}</Text>
+                ) : busy ? (
+                  <ActivityIndicator size="small" color={ACCENT} />
+                ) : (
+                  <>
+                    {isSuggestion ? <Ionicons name="star" size={13} color={ACCENT} style={styles.suggestionStar} /> : null}
+                    <Ionicons name="person-add-outline" size={18} color={ACCENT} />
+                  </>
+                )}
+              </Pressable>
+            );
+          }}
+        />
         <Toast message={toastMsg} variant={toastVariant} onHide={() => setToastMsg(null)} />
       </KeyboardAvoidingView>
     </Modal>
