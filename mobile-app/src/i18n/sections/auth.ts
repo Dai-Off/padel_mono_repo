@@ -25,6 +25,15 @@ export interface AuthTranslationKeys {
   confirmEmailBody: string;
   confirmEmailSpam: string;
   goToLogin: string;
+  existingAccountTitle: string;
+  existingAccountBody: string;
+  existingAccountLogin: string;
+  existingAccountUseAnother: string;
+  usernameAvailable: string;
+  usernameTaken: string;
+  emailInvalid: string;
+  emailTaken: string;
+  emailTakenLogin: string;
   forgotTitle: string;
   forgotEmailRequired: string;
   forgotSuccess: string;

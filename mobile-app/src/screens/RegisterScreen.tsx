@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
-import { register } from '../api/auth';
-import { validateUsernameLocal } from '../lib/username';
+import { register, checkUsernameAvailable, checkEmailAvailable } from '../api/auth';
+import { validateUsernameLocal, normalizeUsernameInput } from '../lib/username';
 import {
   AuthLayout,
   AuthBrand,
@@ -12,13 +12,19 @@ import {
   ErrorBanner,
   AuthFormLink,
   AuthFooter,
+  ExistingAccountModal,
 } from '../components/auth';
 import { theme } from '../theme';
 import { useTranslation } from '../i18n';
 
 type RegisterScreenProps = {
-  onGoToLogin: () => void;
+  /** Ir a login; opcionalmente con el email prefijado (editable) en el input. */
+  onGoToLogin: (email?: string) => void;
 };
+
+type FieldStatus = { type: 'idle' | 'checking' | 'valid' | 'invalid'; msg?: string; code?: 'taken' };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const VALIDATION_DEBOUNCE_MS = 700;
 
 export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
   const { t } = useTranslation();
@@ -31,8 +37,77 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showConfirmMessage, setShowConfirmMessage] = useState(false);
+  const [showExistingAccount, setShowExistingAccount] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState<FieldStatus>({ type: 'idle' });
+  const [emailStatus, setEmailStatus] = useState<FieldStatus>({ type: 'idle' });
+  const usernameSeq = useRef(0);
+  const emailSeq = useRef(0);
 
   const clearError = () => setError('');
+
+  // Validación en vivo del username. Mientras escribe se mantiene neutro (idle): el
+  // formato y la disponibilidad solo se evalúan tras la pausa (debounce), para no marcar
+  // "error" al teclear las primeras letras.
+  useEffect(() => {
+    const v = normalizeUsernameInput(username);
+    if (!v) {
+      setUsernameStatus({ type: 'idle' });
+      return;
+    }
+    setUsernameStatus({ type: 'idle' });
+    const seq = ++usernameSeq.current;
+    const timer = setTimeout(async () => {
+      if (seq !== usernameSeq.current) return;
+      const localErr = validateUsernameLocal(username);
+      if (localErr) {
+        setUsernameStatus({ type: 'invalid', msg: localErr });
+        return;
+      }
+      setUsernameStatus({ type: 'checking' });
+      const res = await checkUsernameAvailable(v);
+      if (seq !== usernameSeq.current) return; // respuesta obsoleta
+      if (!res.ok) {
+        setUsernameStatus({ type: 'idle' }); // fallo de red: no bloquear
+        return;
+      }
+      setUsernameStatus(
+        res.available
+          ? { type: 'valid', msg: t('auth.usernameAvailable') }
+          : { type: 'invalid', msg: t('auth.usernameTaken') },
+      );
+    }, VALIDATION_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [username, t]);
+
+  // Validación en vivo del email: mismo criterio (neutro mientras escribe; formato + ya
+  // registrado tras la pausa).
+  useEffect(() => {
+    const v = email.trim().toLowerCase();
+    if (!v) {
+      setEmailStatus({ type: 'idle' });
+      return;
+    }
+    setEmailStatus({ type: 'idle' });
+    const seq = ++emailSeq.current;
+    const timer = setTimeout(async () => {
+      if (seq !== emailSeq.current) return;
+      if (!EMAIL_RE.test(v)) {
+        setEmailStatus({ type: 'invalid', msg: t('auth.emailInvalid') });
+        return;
+      }
+      setEmailStatus({ type: 'checking' });
+      const res = await checkEmailAvailable(v);
+      if (seq !== emailSeq.current) return;
+      if (!res.ok) {
+        setEmailStatus({ type: 'valid' }); // fallo de red: formato ok, no bloquear
+        return;
+      }
+      setEmailStatus(
+        res.available ? { type: 'valid' } : { type: 'invalid', msg: t('auth.emailTaken'), code: 'taken' },
+      );
+    }, VALIDATION_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [email, t]);
 
   const handleSubmit = async () => {
     const e = email.trim();
@@ -83,6 +158,10 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
           clearError();
           setShowConfirmMessage(true);
         }
+      } else if (res.error_code === 'EMAIL_ALREADY_REGISTERED') {
+        // Email ya registrado: en vez de un banner de error, un modal con salida a login.
+        clearError();
+        setShowExistingAccount(true);
       } else {
         setError(res.error ?? t('auth.registerError'));
       }
@@ -150,6 +229,9 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
           clearError();
         }}
         editable={!loading}
+        checking={usernameStatus.type === 'checking'}
+        hintText={usernameStatus.msg}
+        hintType={usernameStatus.type === 'valid' ? 'success' : usernameStatus.type === 'invalid' ? 'error' : undefined}
       />
 
       <AuthInput
@@ -162,6 +244,11 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
         value={email}
         onChangeText={(text) => { setEmail(text); clearError(); }}
         editable={!loading}
+        checking={emailStatus.type === 'checking'}
+        hintText={emailStatus.msg}
+        hintType={emailStatus.type === 'valid' ? 'success' : emailStatus.type === 'invalid' ? 'error' : undefined}
+        hintActionLabel={emailStatus.code === 'taken' ? t('auth.emailTakenLogin') : undefined}
+        onHintActionPress={emailStatus.code === 'taken' ? () => onGoToLogin(email.trim()) : undefined}
       />
 
       <AuthInput
@@ -203,6 +290,15 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
       />
 
       <AuthFooter />
+
+      <ExistingAccountModal
+        visible={showExistingAccount}
+        onLogin={() => {
+          setShowExistingAccount(false);
+          onGoToLogin(email.trim());
+        }}
+        onClose={() => setShowExistingAccount(false)}
+      />
     </AuthLayout>
   );
 }

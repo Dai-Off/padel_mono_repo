@@ -16,6 +16,32 @@ import { cancelPlayerDeletionIfPending } from '../lib/cancelPlayerDeletion';
 
 const router = Router();
 
+const EMAIL_FORMAT_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// GET /auth/check-email?email=...  → { ok, available }. available=false si el email ya está registrado.
+// Usado por la validación en vivo del registro (mismo criterio que el 409 de /register: player con auth vinculado).
+router.get('/check-email', async (req: Request, res: Response) => {
+  const email = String(req.query.email ?? '').trim().toLowerCase();
+  if (!email || !EMAIL_FORMAT_RE.test(email)) {
+    // Formato inválido: la UI ya lo marca aparte; no revelamos nada aquí.
+    return res.json({ ok: true, available: true });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('players')
+      .select('id')
+      .eq('email', email)
+      .neq('status', 'deleted')
+      .not('auth_user_id', 'is', null)
+      .maybeSingle();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, available: !data });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
 // POST /auth/register
 router.post('/register', async (req: Request, res: Response) => {
   const { email, password, name, username, source, is_mobile } = req.body ?? {};
@@ -87,8 +113,9 @@ router.post('/register', async (req: Request, res: Response) => {
 
     if (error) {
       const msg = error.message.toLowerCase();
-      if (msg.includes('already registered') || msg.includes('already exists')) {
-        return res.status(409).json({ ok: false, error: 'El email ya está registrado' });
+      // Supabase varía el texto ("already registered", "has already been registered", "already exists").
+      if (msg.includes('already') && (msg.includes('registered') || msg.includes('exists'))) {
+        return res.status(409).json({ ok: false, error: 'El email ya está registrado', error_code: 'EMAIL_ALREADY_REGISTERED' });
       }
       if (msg.includes('rate limit')) {
         return res.status(429).json({
@@ -120,7 +147,7 @@ router.post('/register', async (req: Request, res: Response) => {
 
     if (existingPlayer) {
       if (existingPlayer.auth_user_id) {
-        return res.status(409).json({ ok: false, error: 'El email ya está registrado' });
+        return res.status(409).json({ ok: false, error: 'El email ya está registrado', error_code: 'EMAIL_ALREADY_REGISTERED' });
       }
       const { error: updateErr } = await supabase
         .from('players')

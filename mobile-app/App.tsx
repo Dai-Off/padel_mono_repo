@@ -40,6 +40,7 @@ type AuthScreen = 'login' | 'register' | 'forgot_password' | 'reset_password';
 function AuthFlowWrapper() {
   const [screen, setScreen] = useState<AuthScreen>('login');
   const [recovery, setRecovery] = useState<RecoveryPayload | null>(null);
+  const [loginEmail, setLoginEmail] = useState('');
 
   const consumeDeepLink = useCallback((url: string | null) => {
     if (!url) return;
@@ -78,6 +79,7 @@ function AuthFlowWrapper() {
 
   const goLogin = () => {
     setRecovery(null);
+    setLoginEmail('');
     setScreen('login');
   };
 
@@ -87,10 +89,16 @@ function AuthFlowWrapper() {
         <LoginScreen
           onGoToRegister={() => setScreen('register')}
           onGoToForgot={() => setScreen('forgot_password')}
+          initialEmail={loginEmail}
         />
       )}
       {screen === 'register' && (
-        <RegisterScreen onGoToLogin={() => setScreen('login')} />
+        <RegisterScreen
+          onGoToLogin={(email) => {
+            setLoginEmail(email ?? '');
+            setScreen('login');
+          }}
+        />
       )}
       {screen === 'forgot_password' && (
         <ForgotPasswordScreen onBackToLogin={goLogin} />

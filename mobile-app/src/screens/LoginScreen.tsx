@@ -30,12 +30,14 @@ import { theme } from '../theme';
 type LoginScreenProps = {
   onGoToRegister: () => void;
   onGoToForgot: () => void;
+  /** Email/usuario prefijado (p. ej. al venir del modal de "cuenta ya existente"); editable. */
+  initialEmail?: string;
 };
 
-export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) {
+export function LoginScreen({ onGoToRegister, onGoToForgot, initialEmail }: LoginScreenProps) {
   const { t } = useTranslation();
   const { setSession } = useAuth();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail ?? '');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
