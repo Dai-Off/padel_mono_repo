@@ -290,6 +290,7 @@ export function PrivateMatchInvitesSection({
             accessToken={session?.access_token}
             excludePlayerIds={excludePlayerIds}
             onSearchFocus={onSearchFocus}
+            currentPlayerId={organizerPlayerId}
           />
           {selected.length > 0 ? (
             <LoadingButton

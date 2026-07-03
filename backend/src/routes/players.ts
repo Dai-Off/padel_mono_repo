@@ -1577,6 +1577,17 @@ router.get('/', async (req: Request, res: Response) => {
       .split(/\s+/)
       .filter(Boolean);
 
+    // Prefijo '@' = búsqueda SOLO por username (sin la arroba). Sin '@' = búsqueda amplia.
+    const isUsernameTerm = (t: string) => t.startsWith('@');
+    const bareTerm = (t: string) => (t.startsWith('@') ? t.slice(1) : t);
+
+    // Excluir al propio usuario de los resultados (invitaciones): opt-in por token.
+    let selfId: string | null = null;
+    if (req.query.exclude_self === 'true') {
+      const { playerId } = await getPlayerIdFromBearer(req);
+      selfId = playerId ?? null;
+    }
+
     const searchFetchLimit = terms.length <= 1 ? 80 : 160;
     let q = supabase
       .from('players')
@@ -1587,16 +1598,23 @@ router.get('/', async (req: Request, res: Response) => {
       .order('created_at', { ascending: false })
       .limit(terms.length ? searchFetchLimit : 50);
 
+    if (selfId) q = q.neq('id', selfId);
+
     if (terms.length) {
       const orExpr = terms
-        .flatMap((t) => [
-          `first_name.ilike.%${t}%`,
-          `last_name.ilike.%${t}%`,
-          `phone.ilike.%${t}%`,
-          `username.ilike.%${t}%`,
-        ])
+        .flatMap((t) => {
+          const bare = bareTerm(t);
+          if (!bare) return [];
+          if (isUsernameTerm(t)) return [`username.ilike.%${bare}%`];
+          return [
+            `first_name.ilike.%${bare}%`,
+            `last_name.ilike.%${bare}%`,
+            `phone.ilike.%${bare}%`,
+            `username.ilike.%${bare}%`,
+          ];
+        })
         .join(',');
-      q = q.or(orExpr);
+      if (orExpr) q = q.or(orExpr);
     }
 
     const { data, error } = await q;
@@ -1613,7 +1631,10 @@ router.get('/', async (req: Request, res: Response) => {
         const uname = String(p.username ?? '').toLowerCase();
         const phoneDigits = phone.replace(/\D/g, '');
         return terms.every((t) => {
-          const term = t.startsWith('@') ? t.slice(1) : t;
+          const term = bareTerm(t);
+          if (!term) return true;
+          // Términos con '@': solo username.
+          if (isUsernameTerm(t)) return uname.includes(term);
           if (full.includes(term)) return true;
           if (uname.includes(term)) return true;
           if (phone.includes(term)) return true;

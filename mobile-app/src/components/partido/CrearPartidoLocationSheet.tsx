@@ -903,6 +903,7 @@ export function CrearPartidoLocationSheet({
                       onSelectedChange={setPendingInvitePlayers}
                       accessToken={session?.access_token}
                       excludePlayerIds={orgId ? [orgId] : []}
+                      currentPlayerId={orgId ?? undefined}
                     />
                   </View>
                 ) : null}
