@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -11,6 +11,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { playerInviteLabel } from '../../api/matchInvites';
 import { searchPlayers, type PlayerSearchHit } from '../../api/players';
+import { useDebouncedSearch } from '../../hooks/useDebouncedSearch';
+import { fetchInviteSuggestions } from '../../lib/inviteSuggestions';
 import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
@@ -24,9 +26,12 @@ type Props = {
   accessToken?: string | null;
   excludePlayerIds?: string[];
   onSearchFocus?: () => void;
+  /** Id del usuario actual, para cargar sugerencias (compañeros frecuentes). */
+  currentPlayerId?: string;
 };
 
 const MIN_SEARCH_CHARS = 2;
+const SUGGESTIONS_LIMIT = 5;
 
 export function PrivateInvitePlayerPicker({
   selected,
@@ -34,60 +39,53 @@ export function PrivateInvitePlayerPicker({
   accessToken,
   excludePlayerIds = [],
   onSearchFocus,
+  currentPlayerId,
 }: Props) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<PlayerSearchHit[]>([]);
-  const [loading, setLoading] = useState(false);
-  const selectedRef = useRef(selected);
-  const excludeRef = useRef(excludePlayerIds);
+  const [focused, setFocused] = useState(false);
+  const [suggestions, setSuggestions] = useState<PlayerSearchHit[]>([]);
 
+  // Búsqueda con debounce (300 ms, 2 chars); el backend excluye al propio usuario.
+  const { items: rawResults, loading } = useDebouncedSearch(
+    query,
+    (q) => searchPlayers(q, accessToken, { excludeSelf: true }).then((r) => (r.ok ? r.players : [])),
+    { delay: 300, minChars: MIN_SEARCH_CHARS },
+  );
+
+  // Sugerencias por defecto (hoy: compañeros frecuentes).
   useEffect(() => {
-    selectedRef.current = selected;
-  }, [selected]);
-
-  useEffect(() => {
-    excludeRef.current = excludePlayerIds;
-  }, [excludePlayerIds]);
-
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length < MIN_SEARCH_CHARS) {
-      setResults([]);
-      setLoading(false);
-      return;
-    }
-
     let cancelled = false;
-    const timer = setTimeout(() => {
-      if (cancelled) return;
-      setLoading(true);
-      void (async () => {
-        const res = await searchPlayers(trimmed, accessToken);
-        if (cancelled) return;
-        setLoading(false);
-        if (res.ok) {
-          const exclude = new Set([...excludeRef.current, ...selectedRef.current.map((p) => p.id)]);
-          setResults(res.players.filter((p) => !exclude.has(p.id)));
-        } else {
-          setResults([]);
-        }
-      })();
-    }, 300);
-
+    void (async () => {
+      const s = await fetchInviteSuggestions(currentPlayerId, SUGGESTIONS_LIMIT);
+      if (!cancelled) setSuggestions(s);
+    })();
     return () => {
       cancelled = true;
-      clearTimeout(timer);
-      setLoading(false);
     };
-  }, [query, accessToken]);
+  }, [currentPlayerId]);
+
+  const excludedIds = useMemo(
+    () => new Set([...excludePlayerIds, ...selected.map((p) => p.id)]),
+    [excludePlayerIds, selected],
+  );
+  const suggestionIds = useMemo(() => new Set(suggestions.map((s) => s.id)), [suggestions]);
+  const searching = query.trim().length >= MIN_SEARCH_CHARS;
+
+  // Sin texto → sugerencias (solo tras tocar el input). Con texto → resultados, con las sugerencias que casen arriba.
+  const results = useMemo(() => {
+    if (!searching) return focused ? suggestions.filter((p) => !excludedIds.has(p.id)) : [];
+    const filtered = rawResults.filter((p) => !excludedIds.has(p.id));
+    const matched = filtered.filter((p) => suggestionIds.has(p.id));
+    const others = filtered.filter((p) => !suggestionIds.has(p.id));
+    return [...matched, ...others];
+  }, [searching, focused, suggestions, rawResults, excludedIds, suggestionIds]);
 
   const addPlayer = (player: PlayerSearchHit) => {
     if (selected.length >= PRIVATE_INVITE_MAX_PLAYERS) return;
     if (selected.some((p) => p.id === player.id)) return;
     onSelectedChange([...selected, player]);
     setQuery('');
-    setResults([]);
   };
 
   const removePlayer = (playerId: string) => {
@@ -125,7 +123,10 @@ export function PrivateInvitePlayerPicker({
               style={[styles.input, loading && styles.inputWithSpinner]}
               value={query}
               onChangeText={setQuery}
-              onFocus={() => onSearchFocus?.()}
+              onFocus={() => {
+                setFocused(true);
+                onSearchFocus?.();
+              }}
               placeholder={t('partidos.privateInviteSearchPlaceholder')}
               placeholderTextColor="#6b7280"
               autoCapitalize="none"
@@ -140,30 +141,41 @@ export function PrivateInvitePlayerPicker({
             ) : null}
           </View>
           {results.length > 0 ? (
-            <View style={styles.results}>
-              {results.map((item) => (
-                <Pressable
-                  key={item.id}
-                  style={({ pressed }) => [styles.resultRow, pressed && styles.pressed]}
-                  onPress={() => addPlayer(item)}
-                >
-                  {item.avatar_url ? (
-                    <Image source={{ uri: item.avatar_url }} style={styles.resultAvatar} />
-                  ) : (
-                    <View style={styles.resultAvatarPlaceholder}>
-                      <Ionicons name="person" size={16} color="#9ca3af" />
-                    </View>
-                  )}
-                  <Text style={styles.resultText}>{playerInviteLabel(item)}</Text>
-                  <Ionicons name="add-circle-outline" size={20} color={theme.auth.accent} />
-                </Pressable>
-              ))}
-            </View>
-          ) : query.trim().length >= MIN_SEARCH_CHARS && !loading ? (
+            <>
+              {!searching ? (
+                <Text style={styles.suggestionsHeader}>{t('partidos.privateInviteSuggestions')}</Text>
+              ) : null}
+              <View style={styles.results}>
+                {results.map((item) => {
+                  const isSuggestion = suggestionIds.has(item.id);
+                  return (
+                    <Pressable
+                      key={item.id}
+                      style={({ pressed }) => [styles.resultRow, pressed && styles.pressed]}
+                      onPress={() => addPlayer(item)}
+                    >
+                      {item.avatar_url ? (
+                        <Image source={{ uri: item.avatar_url }} style={styles.resultAvatar} />
+                      ) : (
+                        <View style={styles.resultAvatarPlaceholder}>
+                          <Ionicons name="person" size={16} color="#9ca3af" />
+                        </View>
+                      )}
+                      <Text style={styles.resultText}>{playerInviteLabel(item)}</Text>
+                      {isSuggestion ? (
+                        <Ionicons name="star" size={13} color={theme.auth.accent} style={styles.suggestionStar} />
+                      ) : null}
+                      <Ionicons name="add-circle-outline" size={20} color={theme.auth.accent} />
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          ) : searching && !loading ? (
             <Text style={styles.hint}>{t('partidos.privateInviteSearchEmpty')}</Text>
-          ) : (
+          ) : !searching ? (
             <Text style={styles.hint}>{t('partidos.privateInviteSearchHint')}</Text>
-          )}
+          ) : null}
         </>
       ) : (
         <Text style={styles.hint}>{t('partidos.privateInviteAllSlots')}</Text>
@@ -243,6 +255,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   resultText: { flex: 1, color: theme.auth.text, fontSize: 14 },
+  suggestionStar: { marginRight: 4 },
+  suggestionsHeader: {
+    marginTop: 10,
+    marginBottom: 2,
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.auth.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   hint: { marginTop: 8, fontSize: 12, color: theme.auth.textMuted, lineHeight: 18 },
   pressed: { opacity: 0.88 },
 });

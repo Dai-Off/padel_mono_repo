@@ -55,9 +55,6 @@ export interface ProfileTranslationKeys {
   sectionPlayerPrefs: string;
   editPrefsTitle: string;
   editPrefsSub: string;
-  sectionInterests: string;
-  editInterestsTitle: string;
-  editInterestsSub: string;
   sectionPassword: string;
   changePasswordA11y: string;
   unsavedChangesTitle: string;

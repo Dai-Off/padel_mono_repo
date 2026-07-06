@@ -13,8 +13,6 @@ export interface NavTranslationKeys {
   userProfileA11y: string;
   inviteFriends: string;
   sectionYourAccount: string;
-  editProfile: string;
-  editProfileSub: string;
   yourActivity: string;
   yourActivitySub: string;
   wallet: string;

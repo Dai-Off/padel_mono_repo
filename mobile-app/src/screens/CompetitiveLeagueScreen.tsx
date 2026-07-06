@@ -1673,6 +1673,7 @@ export function CompetitiveLeagueScreen({
           setStep('prefs');
         }}
         excludeIds={profile?.id ? [profile.id] : undefined}
+        currentPlayerId={profile?.id}
       />
     </View>
   );

@@ -109,8 +109,8 @@ export const Login: React.FC = () => {
                     navigate(safeNext ?? '/grilla?menu=resumen');
                 }
             } else {
-                setError(t(response.error === 'Email o contraseña incorrectos' ? 'invalid_credentials' : 'login_error'));
-                toast.error(t('invalid_credentials'));
+                setError(t('login_error'));
+                toast.error(t('login_error'));
             }
         } catch (err: any) {
             if (err instanceof HttpError) {

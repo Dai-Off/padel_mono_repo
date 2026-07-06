@@ -45,6 +45,7 @@ export const competitive: CompetitiveTranslationKeys = {
       invitedYou: '邀請你一起玩',
       leavePair: '解除搭檔',
       leavePairMsg: '確定不再和 {name} 一起玩嗎？',
+      alreadyInvited: '已邀請',
     },
     banner: {
       invitesYou: '{name} 邀請你打競技賽',

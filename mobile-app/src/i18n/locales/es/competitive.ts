@@ -46,6 +46,7 @@ export const competitive: CompetitiveTranslationKeys = {
       invitedYou: 'Te ha invitado a jugar',
       leavePair: 'Dejar pareja',
       leavePairMsg: '¿Quieres dejar de jugar con {name}?',
+      alreadyInvited: 'Invitado',
     },
     banner: {
       invitesYou: '{name} te invita a un partido competitivo',

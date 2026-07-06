@@ -16,7 +16,7 @@ export const common: CommonTranslationKeys = {
   saving: 'Guardando…',
   error: 'Error',
   connectionError: 'Error de conexión',
-  connectionErrorBackend: 'Error de conexión. ¿Está el backend corriendo?',
+  connectionErrorBackend: 'No hay conexión. Comprueba tu red e inténtalo de nuevo.',
   connectionErrorServer: 'Error de conexión con el servidor',
   sessionRequired: 'Sesión requerida',
   sessionExpired: 'Sesión expirada. Vuelve a iniciar sesión.',

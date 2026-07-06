@@ -15,8 +15,6 @@ export const nav: NavTranslationKeys = {
   userProfileA11y: '用戶個人檔案',
   inviteFriends: '邀請朋友',
   sectionYourAccount: '你的帳戶',
-  editProfile: '編輯個人檔案',
-  editProfileSub: '編輯姓名、電郵、電話、位置…',
   yourActivity: '你的活動',
   yourActivitySub: '球局、課程、競賽、球會',
   wallet: '錢包',

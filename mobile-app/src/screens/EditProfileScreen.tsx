@@ -404,7 +404,7 @@ export function EditProfileScreen({
     if (usernameChanged) {
       const usernameErr = validateUsernameLocal(username);
       if (usernameErr) {
-        Alert.alert(t('profile.fieldUsername'), usernameErr);
+        Alert.alert(t('profile.fieldUsername'), t(usernameErr));
         return false;
       }
       const normalized = username.trim().toLowerCase();
@@ -676,16 +676,6 @@ export function EditProfileScreen({
           title={t('profile.editPrefsTitle')}
           subtitle={t('profile.editPrefsSub')}
           onPress={onPreferencesPress}
-        />
-
-        <SectionHeader title={t('profile.sectionInterests')} />
-        <MenuLinkRow
-          icon="people-outline"
-          iconColors={['rgba(168,85,247,0.2)', 'rgba(147,51,234,0.1)']}
-          iconColor="#c084fc"
-          title={t('profile.editInterestsTitle')}
-          subtitle={t('profile.editInterestsSub')}
-          onPress={() => Alert.alert(t('common.comingSoon'), t('common.comingSoonSection'))}
         />
 
         <SectionHeader title={t('profile.sectionPassword')} />

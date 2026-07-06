@@ -80,7 +80,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments, onPre
           </View>
           <View style={styles.textInfo}>
             <Text style={styles.username}>
-              {formatPlayerLabel(post.player)}
+              {formatPlayerLabel(post.player, t('common.playerFallback'))}
             </Text>
             {post.location && (
               <Text style={styles.location}>{post.location}</Text>

@@ -159,6 +159,7 @@ export interface PartidosTranslationKeys {
   privateInviteRegisteredOnly: string;
   privateInviteSearchPlaceholder: string;
   privateInviteSearchHint: string;
+  privateInviteSuggestions: string;
   privateInviteSearchEmpty: string;
   privateInviteScreenSubInApp: string;
   privateInviteSlot: string;

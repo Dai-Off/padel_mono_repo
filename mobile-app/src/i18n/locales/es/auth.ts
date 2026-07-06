@@ -23,11 +23,27 @@ export const auth: AuthTranslationKeys = {
   hasAccountPrompt: '¿Ya tienes cuenta?',
   loginLink: 'Inicia sesión',
   registerError: 'Error al registrarse',
+  invalidCredentials: 'Credenciales incorrectas',
+  loginFailed: 'No se pudo iniciar sesión. Inténtalo de nuevo.',
+  emailNotConfirmed:
+    'Confirma tu email antes de iniciar sesión. Revisa tu bandeja de entrada y la carpeta de spam.',
+  accountDeleted: 'Esta cuenta fue eliminada.',
+  emailRateLimit:
+    'Has solicitado demasiados correos en poco tiempo. Espera unos minutos e inténtalo de nuevo.',
   confirmEmailTitle: '¡Revisa tu email!',
   confirmEmailBody:
     'Te hemos enviado un enlace para confirmar tu cuenta. Haz clic en el enlace del correo y vuelve aquí para iniciar sesión.',
   confirmEmailSpam: '¿No lo ves? Revisa la carpeta de spam.',
   goToLogin: 'Ir a iniciar sesión',
+  existingAccountTitle: 'Ya tienes una cuenta',
+  existingAccountBody: 'Ya existe una cuenta asociada a este correo. Inicia sesión para continuar.',
+  existingAccountLogin: 'Iniciar sesión',
+  existingAccountUseAnother: 'Usar otro correo',
+  usernameAvailable: 'Usuario disponible',
+  usernameTaken: 'Este usuario ya está en uso',
+  emailInvalid: 'Introduce un email válido',
+  emailTaken: 'Ya existe una cuenta con este correo.',
+  emailTakenLogin: 'Inicia sesión con él',
   forgotTitle: 'Enviar enlace',
   forgotEmailRequired: 'Por favor ingresa tu correo electrónico',
   forgotSuccess:
