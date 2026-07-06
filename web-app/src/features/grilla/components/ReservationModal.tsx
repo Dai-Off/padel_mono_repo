@@ -38,6 +38,10 @@ import { resolveJoinedPlayer } from '../utils/bookingDisplay';
 import { formatPlayerLabel, formatPlayerSubline } from '../../../lib/playerLabel';
 import { formatLevelSelectValue, LEVEL_OPTIONS } from '../utils/openMatchLevel';
 import { willPublicOpenMatchStayOffGrid } from '../utils/reservationListFilters';
+import { PaymentSlot, defaultSlotPayment, type SlotPayment } from './PaymentSlot';
+import { countBookingPlayers, shareCentsPerPlayer } from '../utils/moneyInput';
+import { MaintenanceCancelScopeModal, type MaintenanceCancelScope } from './MaintenanceCancelScopeModal';
+import { findRelatedMaintenanceBookings, isMaintenanceReservation } from '../utils/gridSelectUtils';
 import { isOpenMatchType, normalizeReservationTypeSlug } from '../utils/reservationTypeSlug';
 import {
     durationOptionsForReservationType,
@@ -110,6 +114,9 @@ interface ReservationModalProps {
     /** Fecha visible en la grilla (YYYY-MM-DD), para reservas múltiples y etiqueta en alta. */
     gridDate?: string;
     weeklySchedule?: unknown;
+    /** Reservas visibles en la grilla (para cancelar mantenimientos en bloque). */
+    gridReservations?: Reservation[];
+    onCancelMaintenance?: (bookingIds: string[]) => Promise<void>;
 }
 
 // Helper: Player Search Component
@@ -366,154 +373,8 @@ export const PlayerSearch: React.FC<{
 };
 
 // ─── Tipos de pago por slot ───────────────────────────────────────────────────
-interface SlotPayment {
-    paidAmountCents: number;
-    paymentMethod: PaymentMethod;
-    walletAmountCents: number;
-    walletBalanceCents: number | null;
-    walletLoading: boolean;
-}
-const defaultSlot = (): SlotPayment => ({
-    paidAmountCents: 0, paymentMethod: null,
-    walletAmountCents: 0, walletBalanceCents: null, walletLoading: false,
-});
-
-// ─── PaymentSlot: fila de cobro con selector de método ──────────────────────
-const PaymentSlot: React.FC<{
-    slot: SlotPayment;
-    shareAmountCents: number;
-    maxPayableCents: number;
-    onUpdate: (patch: Partial<SlotPayment>) => void;
-    isFullyPaid: boolean;
-    t: (key: string, opts?: Record<string, string | number>) => string;
-}> = ({ slot, shareAmountCents, maxPayableCents, onUpdate, isFullyPaid, t }) => {
-    const { walletBalanceCents, walletLoading, walletAmountCents, paidAmountCents, paymentMethod } = slot;
-
-    const [rawInput, setRawInput] = React.useState('');
-
-    // The "effective" amount is whichever bucket is active
-    const effectiveAmountCents = paymentMethod === 'wallet' ? walletAmountCents : paidAmountCents;
-    const thisSlotHasPaid = effectiveAmountCents > 0;
-
-    // When reservation is fully paid and THIS slot didn't contribute, lock it
-    const isLocked = isFullyPaid && !thisSlotHasPaid;
-
-    // Sync local text when external value changes (e.g. method switch, slot reset)
-    React.useEffect(() => {
-        setRawInput(effectiveAmountCents > 0 ? String(Math.round(effectiveAmountCents / 100)) : '');
-    }, [effectiveAmountCents]);
-
-    const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (isLocked) return;
-        const raw = e.target.value.replace(/[^0-9]/g, ''); // only digits
-        setRawInput(raw);
-        const euros = parseInt(raw || '0', 10);
-        const clamped = Math.min(euros * 100, maxPayableCents);
-        if (paymentMethod === 'wallet') {
-            onUpdate({ walletAmountCents: clamped, paidAmountCents: 0 });
-        } else {
-            onUpdate({ paidAmountCents: clamped });
-        }
-    };
-
-    return (
-        <div className="mt-2 space-y-2">
-            {/* Payment amount + method */}
-            <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-gray-500 font-medium shrink-0">
-                    {t('reservation.shareAmount', { amount: Math.round(shareAmountCents / 100) })}
-                </span>
-                <input
-                    type="text"
-                    inputMode="numeric"
-                    value={rawInput}
-                    onChange={handleAmountChange}
-                    disabled={isLocked}
-                    placeholder="0 €"
-                    className={`w-20 p-1.5 border border-gray-300 rounded-md text-xs bg-white outline-none focus:ring-2 focus:ring-[#006A6A] ${isLocked ? 'opacity-50 cursor-not-allowed bg-gray-100' : ''}`}
-                />
-                <div className="flex gap-1">
-                    <button
-                        type="button"
-                        disabled={isLocked}
-                        onClick={() => {
-                            if (paymentMethod === 'wallet') {
-                                onUpdate({ paymentMethod: 'cash', paidAmountCents: walletAmountCents || paidAmountCents, walletAmountCents: 0 });
-                            } else {
-                                onUpdate({ paymentMethod: paymentMethod === 'cash' ? null : 'cash' });
-                            }
-                        }}
-                        className={`px-2 py-1 text-xs font-bold rounded-md border transition-colors ${
-                            paymentMethod === 'cash'
-                                ? 'bg-[#006A6A] text-white border-[#006A6A]'
-                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                        }`}
-                    >
-                        {t('reservation.paymentCash')}
-                    </button>
-                    <button
-                        type="button"
-                        disabled={isLocked}
-                        onClick={() => {
-                            if (paymentMethod === 'wallet') {
-                                onUpdate({ paymentMethod: 'card', paidAmountCents: walletAmountCents || paidAmountCents, walletAmountCents: 0 });
-                            } else {
-                                onUpdate({ paymentMethod: paymentMethod === 'card' ? null : 'card' });
-                            }
-                        }}
-                        className={`px-2 py-1 text-xs font-bold rounded-md border transition-colors ${
-                            paymentMethod === 'card'
-                                ? 'bg-[#006A6A] text-white border-[#006A6A]'
-                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                        }`}
-                    >
-                        {t('reservation.paymentCard')}
-                    </button>
-                    {(() => {
-                        const bal = walletBalanceCents ?? 0;
-                        const hasBalance = bal > 0;
-                        const isActive = paymentMethod === 'wallet';
-                        const isDisabled = !hasBalance && !isActive;
-                        return (
-                            <button
-                                type="button"
-                                disabled={isDisabled || isLocked}
-                                onClick={() => {
-                                    if (isActive) {
-                                        onUpdate({ paymentMethod: null, paidAmountCents: walletAmountCents, walletAmountCents: 0 });
-                                    } else {
-                                        onUpdate({ paymentMethod: 'wallet', walletAmountCents: paidAmountCents, paidAmountCents: 0 });
-                                    }
-                                }}
-                                className={`px-2 py-1 text-xs font-bold rounded-md border transition-colors flex items-center gap-1 ${
-                                    isActive
-                                        ? 'bg-[#006A6A] text-white border-[#006A6A]'
-                                        : isDisabled
-                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
-                                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                                }`}
-                                title={isDisabled ? 'Sin saldo disponible' : `Saldo: ${(bal / 100).toFixed(2)} €`}
-                            >
-                                <Wallet size={11} />
-                                {walletLoading
-                                    ? 'Wallet ...'
-                                    : `Wallet (${(bal / 100).toFixed(2)} €)`
-                                }
-                            </button>
-                        );
-                    })()}
-                </div>
-            </div>
-            {isLocked && (
-                <p className="text-[10px] text-emerald-600 font-bold">✓ Reserva pagada en su totalidad</p>
-            )}
-        </div>
-    );
-};
-// ─────────────────────────────────────────────────────────────────────────────
-
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule,
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance,
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const { t, i18n } = useGrillaTranslation();
@@ -543,6 +404,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [sendDeleteEmail, setSendDeleteEmail] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [cashRefundOpen, setCashRefundOpen] = useState(false);
+    const [maintenanceCancelScopeOpen, setMaintenanceCancelScopeOpen] = useState(false);
     const [overlapError, setOverlapError] = useState<string | null>(null);
     const [hoursError, setHoursError] = useState<string | null>(null);
     const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -551,7 +413,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [playMode, setPlayMode] = useState<'single' | 'double'>('double');
     const [isMovingToHidden, setIsMovingToHidden] = useState(false);
     const [moveToHiddenError, setMoveToHiddenError] = useState<string | null>(null);
-    const [slotPayments, setSlotPayments] = useState<SlotPayment[]>([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
+    const [slotPayments, setSlotPayments] = useState<SlotPayment[]>([defaultSlotPayment(), defaultSlotPayment(), defaultSlotPayment(), defaultSlotPayment()]);
     const [isMultipleReservation, setIsMultipleReservation] = useState(false);
     const [multipleStartDate, setMultipleStartDate] = useState('');
     const [multipleEndDate, setMultipleEndDate] = useState('');
@@ -562,6 +424,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [multiCourtPickMode, setMultiCourtPickMode] = useState<'manual' | 'auto'>('manual');
     const [batchResult, setBatchResult] = useState<CreateBookingBatchResult | null>(null);
     const [availableCourtsForSlot, setAvailableCourtsForSlot] = useState<Array<{ id: string; name: string }>>([]);
+    const [multiCourtTotalCents, setMultiCourtTotalCents] = useState<number | null>(null);
     const navigate = useNavigate();
     const [courtToAdd, setCourtToAdd] = useState('');
 
@@ -714,7 +577,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             guests.forEach((g: Player, i: number) => { slots[i] = g; });
             setAdditionalPlayers(slots);
             setPlayMode(isOpenMatchType(resTypeVal) ? 'double' : parsedNotes.mode);
-            const initPayments: SlotPayment[] = [defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()];
+            const initPayments: SlotPayment[] = [defaultSlotPayment(), defaultSlotPayment(), defaultSlotPayment(), defaultSlotPayment()];
             const txByPlayer = new Map<string, { paidAmountCents: number; walletAmountCents: number; paymentMethod: PaymentMethod }>();
             (bd.payment_transactions || [])
                 .filter((t: any) => t.status === 'succeeded')
@@ -732,16 +595,20 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             const orgTx = txByPlayer.get(bd.organizer_player_id);
             const orgBp = (bd.booking_participants || []).find((p: any) => p.player_id === bd.organizer_player_id);
             if (orgTx) {
-                initPayments[0] = { ...defaultSlot(), ...orgTx };
+                initPayments[0] = { ...defaultSlotPayment(), ...orgTx };
             } else if (orgBp && (orgBp.paid_amount_cents > 0 || orgBp.wallet_amount_cents > 0)) {
-                initPayments[0] = { ...defaultSlot(), paidAmountCents: orgBp.paid_amount_cents ?? 0, walletAmountCents: orgBp.wallet_amount_cents ?? 0, paymentMethod: orgBp.payment_method ?? 'cash' };
+                initPayments[0] = { ...defaultSlotPayment(), paidAmountCents: orgBp.paid_amount_cents ?? 0, walletAmountCents: orgBp.wallet_amount_cents ?? 0, paymentMethod: orgBp.payment_method ?? 'cash' };
+            } else if (orgBp?.payment_status === 'paid' && (orgBp.share_amount_cents ?? 0) > 0) {
+                initPayments[0] = { ...defaultSlotPayment(), paidAmountCents: orgBp.share_amount_cents ?? 0, paymentMethod: orgBp.payment_method ?? 'card' };
             }
             (bd.booking_participants || []).filter((p: any) => p.role === 'guest').slice(0, 3).forEach((p: any, i: number) => {
                 const tx = txByPlayer.get(p.player_id);
                 if (tx) {
-                    initPayments[i + 1] = { ...defaultSlot(), ...tx };
+                    initPayments[i + 1] = { ...defaultSlotPayment(), ...tx };
                 } else if (p.paid_amount_cents > 0 || p.wallet_amount_cents > 0) {
-                    initPayments[i + 1] = { ...defaultSlot(), paidAmountCents: p.paid_amount_cents ?? 0, walletAmountCents: p.wallet_amount_cents ?? 0, paymentMethod: p.payment_method ?? 'cash' };
+                    initPayments[i + 1] = { ...defaultSlotPayment(), paidAmountCents: p.paid_amount_cents ?? 0, walletAmountCents: p.wallet_amount_cents ?? 0, paymentMethod: p.payment_method ?? 'cash' };
+                } else if (p.payment_status === 'paid' && (p.share_amount_cents ?? 0) > 0) {
+                    initPayments[i + 1] = { ...defaultSlotPayment(), paidAmountCents: p.share_amount_cents ?? 0, paymentMethod: p.payment_method ?? 'card' };
                 }
             });
             setSlotPayments(initPayments);
@@ -756,7 +623,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             if (bd.organizer_player_id) fetchWalletBalance(bd.organizer_player_id, 0);
             guests.forEach((g: Player, i: number) => { fetchWalletBalance(g.id, i + 1); });
         } else {
-            setSlotPayments([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
+            setSlotPayments([defaultSlotPayment(), defaultSlotPayment(), defaultSlotPayment(), defaultSlotPayment()]);
             // Create mode: reset everything
             setOrganizer(null);
             setAdditionalPlayers([null, null, null]);
@@ -787,23 +654,33 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
     useEffect(() => {
         if (!isOpen || !clubId || !reservation || isEditMode) return;
-        const dateBase = bookingDate || new Date().toISOString().split('T')[0];
+        const dateBase = gridDate || bookingDate || new Date().toISOString().split('T')[0];
         const start = clubSlotToUtcIso(dateBase, startHour, startMinute);
         const end = new Date(new Date(start).getTime() + duration * 60000).toISOString();
         let cancelled = false;
         (async () => {
             try {
                 const res = await apiFetchWithAuth<any>(`/courts/available?club_id=${clubId}&start_at=${encodeURIComponent(start)}&end_at=${encodeURIComponent(end)}`);
-                const rows = Array.isArray(res?.courts) ? res.courts : [];
                 if (!cancelled) {
-                    setAvailableCourtsForSlot(rows.map((c: any) => ({ id: c.id, name: c.name })));
+                    const rows = Array.isArray(res?.courts) ? res.courts : [];
+                    const mapped: Array<{ id: string; name: string }> = rows.map((c: { id: string; name: string }) => ({
+                        id: c.id,
+                        name: c.name,
+                    }));
+                    if (reservation?.courtId && !mapped.some((c) => c.id === reservation.courtId)) {
+                        mapped.unshift({
+                            id: reservation.courtId,
+                            name: reservation.courtName || reservation.courtId,
+                        });
+                    }
+                    setAvailableCourtsForSlot(mapped);
                 }
             } catch {
                 if (!cancelled) setAvailableCourtsForSlot([]);
             }
         })();
         return () => { cancelled = true; };
-    }, [isOpen, isEditMode, clubId, reservation?.id, bookingDate, startHour, startMinute, duration]);
+    }, [isOpen, isEditMode, clubId, reservation?.id, gridDate, bookingDate, startHour, startMinute, duration]);
 
     // Fetch prices on open (both create and edit mode)
     useEffect(() => {
@@ -811,7 +688,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         reservationTypePricesService.getByClub(clubId).then(setPricesByType).catch(() => setPricesByType({}));
     }, [isOpen, clubId]);
 
-    const totalPriceCents = useMemo(() => {
+    const singleCourtPriceCents = useMemo(() => {
         const storedCents = editingBookingData?.total_price_cents ?? 0;
         if (isEditMode && storedCents > 0) {
             return storedCents;
@@ -823,14 +700,81 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         return storedCents;
     }, [isEditMode, pricesByType, resType, duration, editingBookingData?.total_price_cents]);
 
+    useEffect(() => {
+        if (!isOpen || isEditMode || !clubId || !isMultipleReservation || selectedCourtIds.length <= 1) {
+            setMultiCourtTotalCents(null);
+            return;
+        }
+
+        let cancelled = false;
+        const dateBase = multipleStartDate || gridDate || bookingDate || new Date().toISOString().split('T')[0];
+
+        (async () => {
+            const uniqueCourtIds = Array.from(new Set(selectedCourtIds));
+            const baseCourtId = reservation?.courtId;
+            const totals = await Promise.all(uniqueCourtIds.map(async (courtId) => {
+                try {
+                    const slotPrice = await apiFetchWithAuth<any>(
+                        `/tariffs/slot-price?club_id=${clubId}&court_id=${courtId}&date=${dateBase}&slot=${startHour}:${startMinute}&duration_minutes=${duration}&reservation_type=${resType || 'standard'}`,
+                    );
+                    return typeof slotPrice.total_price_cents === 'number'
+                        ? slotPrice.total_price_cents
+                        : singleCourtPriceCents;
+                } catch {
+                    // Avoid inflating total when one court price cannot be resolved.
+                    return courtId === baseCourtId ? singleCourtPriceCents : 0;
+                }
+            }));
+            if (!cancelled) {
+                setMultiCourtTotalCents(totals.reduce((sum, cents) => sum + cents, 0));
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [
+        isOpen,
+        isEditMode,
+        clubId,
+        isMultipleReservation,
+        selectedCourtIds,
+        multipleStartDate,
+        gridDate,
+        bookingDate,
+        startHour,
+        startMinute,
+        duration,
+        resType,
+        singleCourtPriceCents,
+    ]);
+
+    const totalPriceCents = useMemo(() => {
+        if (!isEditMode && isMultipleReservation && selectedCourtIds.length > 1 && multiCourtTotalCents != null) {
+            return multiCourtTotalCents;
+        }
+        return singleCourtPriceCents;
+    }, [isEditMode, isMultipleReservation, selectedCourtIds.length, multiCourtTotalCents, singleCourtPriceCents]);
+
     const formattedPrice = totalPriceCents != null && totalPriceCents >= 0
         ? (totalPriceCents / 100).toFixed(2).replace('.', ',') + ' €'
         : null;
 
     // ─── Cálculos de pago ────────────────────────────────────────────────────
-    const nActivePlayers = useMemo(() =>
+    const uiPlayerCount = useMemo(() =>
         (organizer ? 1 : 0) + additionalPlayers.filter(Boolean).length,
     [organizer, additionalPlayers]);
+
+    const nActivePlayers = useMemo(() => {
+        const uiCount = uiPlayerCount;
+        if (isEditMode && editingBookingData) {
+            const dbCount = countBookingPlayers(
+                editingBookingData.booking_participants,
+                editingBookingData.organizer_player_id,
+                0,
+            );
+            return uiCount > 0 ? uiCount : dbCount;
+        }
+        return uiCount;
+    }, [isEditMode, editingBookingData, uiPlayerCount]);
 
     const assignedElos = useMemo(
         () => collectAssignedElos(organizer, additionalPlayers),
@@ -858,7 +802,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         : {};
 
     const sharePerSlotCents = useMemo(() =>
-        nActivePlayers > 0 && totalPriceCents ? Math.ceil(totalPriceCents / nActivePlayers) : 0,
+        shareCentsPerPlayer(totalPriceCents ?? 0, nActivePlayers),
     [totalPriceCents, nActivePlayers]);
 
     const totalCollectedCents = useMemo(() => {
@@ -897,6 +841,27 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setIsDeleting(false);
         }
     }, [onDelete, editingBookingData, sendDeleteEmail, onClose, t]);
+
+    const relatedMaintenanceBookings = useMemo(() => {
+        if (!reservation || !isMaintenanceReservation(reservation)) return [];
+        return findRelatedMaintenanceBookings(reservation, gridReservations);
+    }, [reservation, gridReservations]);
+
+    const handleMaintenanceCancelConfirm = useCallback(async (scope: MaintenanceCancelScope) => {
+        if (!onCancelMaintenance || !editingBookingData || !reservation) return;
+        setIsDeleting(true);
+        try {
+            const ids = scope === 'all'
+                ? [reservation.id, ...relatedMaintenanceBookings.map((r) => r.id)]
+                : [String(editingBookingData.id)];
+            await onCancelMaintenance(ids);
+            setMaintenanceCancelScopeOpen(false);
+            setShowDeleteConfirm(false);
+            onClose();
+        } finally {
+            setIsDeleting(false);
+        }
+    }, [onCancelMaintenance, editingBookingData, reservation, relatedMaintenanceBookings, onClose]);
     // ─────────────────────────────────────────────────────────────────────────
 
     if (!isOpen) return null;
@@ -1070,16 +1035,27 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         }
 
         if (!isEditMode && isMultipleReservation) {
+            const isMultiCourt = selectedCourtIds.length >= 2;
+            const isRecurrence = multipleStartDate !== multipleEndDate;
+
+            if (!isMultiCourt && !isRecurrence) {
+                toast.error('Añade al menos otra pista o amplía el rango de fechas para la reserva múltiple.');
+                return;
+            }
+            if (isMultiCourt && selectedCourtIds.length < 2) {
+                toast.error('Selecciona al menos 2 pistas para reservar en varias pistas a la vez.');
+                return;
+            }
             if (!multipleStartDate || !multipleEndDate) {
-                toast.error('Indica fecha de inicio y fecha de fin para la reserva múltiple.');
+                toast.error('Indica fecha de inicio y fecha de fin.');
                 return;
             }
             if (multipleEndDate < multipleStartDate) {
                 toast.error('La fecha de fin no puede ser anterior a la de inicio.');
                 return;
             }
-            if (!multipleWeekdays.length) {
-                toast.error('Selecciona al menos un día de la semana.');
+            if (isRecurrence && !multipleWeekdays.length) {
+                toast.error('Selecciona al menos un día de la semana para la repetición.');
                 return;
             }
         }
@@ -1164,7 +1140,20 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
     const handleMultipleReservationToggle = (checked: boolean) => {
         setIsMultipleReservation(checked);
-        if (!checked && reservation?.courtId) {
+        if (checked) {
+            const baseYmd = gridDate || new Date().toISOString().split('T')[0];
+            setMultipleStartDate((prev) => prev || baseYmd);
+            setMultipleEndDate((prev) => prev || baseYmd);
+            setMultipleWeekdays((prev) => {
+                if (prev.length > 0) return prev;
+                return [new Date(`${baseYmd}T12:00:00`).getDay()];
+            });
+            if (reservation?.courtId) {
+                setSelectedCourtIds((prev) =>
+                    prev.includes(reservation.courtId) ? prev : [reservation.courtId, ...prev],
+                );
+            }
+        } else if (reservation?.courtId) {
             setSelectedCourtIds([reservation.courtId]);
             setMultiCourtPickMode('manual');
         }
@@ -1194,7 +1183,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     };
 
     const handleDelete = () => {
-        if (!onDelete || !editingBookingData) return;
+        if (!editingBookingData) return;
+        if (reservation && isMaintenanceReservation(reservation) && onCancelMaintenance) {
+            setMaintenanceCancelScopeOpen(true);
+            return;
+        }
+        if (!onDelete) return;
         setCashRefundOpen(true);
     };
 
@@ -1608,7 +1602,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                             fetchWalletBalance(p.id, 0);
                                             updateSlotPayment(0, { paidAmountCents: 0 });
                                         } else {
-                                            updateSlotPayment(0, defaultSlot());
+                                            updateSlotPayment(0, defaultSlotPayment());
                                         }
                                     }}
                                     required
@@ -1944,7 +1938,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                                 fetchWalletBalance(player.id, index + 1);
                                                 updateSlotPayment(index + 1, { paidAmountCents: 0 });
                                             } else {
-                                                updateSlotPayment(index + 1, defaultSlot());
+                                                updateSlotPayment(index + 1, defaultSlotPayment());
                                             }
                                         }}
                                         placeholder={t('reservation.playerSearchPlaceholder', { n: index + 2 })}
@@ -2047,6 +2041,14 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
             </div>
         </div>
+            {maintenanceCancelScopeOpen && reservation && (
+                <MaintenanceCancelScopeModal
+                    target={reservation}
+                    related={relatedMaintenanceBookings}
+                    onClose={() => !isDeleting && setMaintenanceCancelScopeOpen(false)}
+                    onConfirm={handleMaintenanceCancelConfirm}
+                />
+            )}
             {cashRefundOpen && editingBookingData?.id && (
                 <CashRefundModal
                     isOpen={cashRefundOpen}
