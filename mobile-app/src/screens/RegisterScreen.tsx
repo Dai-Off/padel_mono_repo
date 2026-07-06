@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { register, checkUsernameAvailable, checkEmailAvailable } from '../api/auth';
+import { authErrorMessage } from '../lib/authErrors';
 import { validateUsernameLocal, normalizeUsernameInput } from '../lib/username';
 import {
   AuthLayout,
@@ -61,7 +62,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
       if (seq !== usernameSeq.current) return;
       const localErr = validateUsernameLocal(username);
       if (localErr) {
-        setUsernameStatus({ type: 'invalid', msg: localErr });
+        setUsernameStatus({ type: 'invalid', msg: t(localErr) });
         return;
       }
       setUsernameStatus({ type: 'checking' });
@@ -118,7 +119,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
 
     const usernameErr = validateUsernameLocal(username);
     if (usernameErr) {
-      setError(usernameErr);
+      setError(t(usernameErr));
       return;
     }
 
@@ -165,7 +166,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
         clearError();
         setShowExistingAccount(true);
       } else {
-        setError(res.error ?? t('auth.registerError'));
+        setError(authErrorMessage(t, res, 'auth.registerError'));
       }
     } catch {
       setError(t('common.connectionErrorBackend'));

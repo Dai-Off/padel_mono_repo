@@ -1455,10 +1455,6 @@ export function MainApp() {
           resetSidebarOverlays();
           setInfoScreen(screenId);
         }}
-        onNavigateToEditProfile={() => {
-          resetSidebarOverlays();
-          setShowEditProfile(true);
-        }}
         onProfilePress={() => {
           resetSidebarOverlays();
           setActiveTab('perfil');

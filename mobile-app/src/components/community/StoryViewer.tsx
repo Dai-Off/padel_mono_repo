@@ -279,7 +279,7 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
               </View>
               <View>
                 <Text style={styles.username}>
-                  {formatPlayerLabel(group.player)}
+                  {formatPlayerLabel(group.player, t('common.playerFallback'))}
                 </Text>
                 <Text style={styles.timeAgo}>
                   {formatTimeAgo(currentStory.created_at, t)}

@@ -280,7 +280,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                 keyboardShouldPersistTaps="handled"
                 style={styles.modalList}
                 renderItem={({ item }) => {
-                  const dn = formatPlayerLabel(item);
+                  const dn = formatPlayerLabel(item, t('common.playerFallback'));
                   const fullName = `${item.first_name ?? ''} ${item.last_name ?? ''}`.trim();
                   const hasUsername = !!item.username?.trim();
                   return (

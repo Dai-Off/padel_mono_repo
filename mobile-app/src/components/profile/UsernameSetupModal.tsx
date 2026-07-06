@@ -15,13 +15,6 @@ import { validateUsernameLocal } from '../../lib/username';
 import { theme } from '../../theme';
 import { useTranslation } from '../../i18n';
 
-function mapUsernameError(err: string, t: (key: string) => string): string {
-  if (err === 'El usuario es obligatorio') return t('common.usernameRequired');
-  if (err === 'No puede contener @') return t('common.usernameNoAt');
-  if (err.startsWith('3–30')) return t('common.usernameFormat');
-  return err;
-}
-
 type UsernameSetupModalProps = {
   visible: boolean;
   onComplete: () => void;
@@ -38,7 +31,7 @@ export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalPr
   const handleSubmit = async () => {
     const err = validateUsernameLocal(username);
     if (err) {
-      setError(mapUsernameError(err, t));
+      setError(t(err));
       return;
     }
     const normalized = username.trim().toLowerCase();

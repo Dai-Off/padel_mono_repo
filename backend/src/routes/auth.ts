@@ -55,20 +55,21 @@ router.post('/register', async (req: Request, res: Response) => {
 
   const usernameNorm = normalizeUsername(username);
   if (!usernameNorm.ok) {
-    return res.status(400).json({ ok: false, error: usernameNorm.error });
+    return res.status(400).json({ ok: false, error: usernameNorm.error, error_code: 'USERNAME_INVALID' });
   }
 
   const emailStr = String(email).trim().toLowerCase();
   const passwordStr = String(password);
 
   if (!EMAIL_FORMAT_RE.test(emailStr)) {
-    return res.status(400).json({ ok: false, error: 'El email no es válido' });
+    return res.status(400).json({ ok: false, error: 'El email no es válido', error_code: 'EMAIL_INVALID' });
   }
 
   if (passwordStr.length < 6) {
     return res.status(400).json({
       ok: false,
       error: 'La contraseña debe tener al menos 6 caracteres',
+      error_code: 'PASSWORD_TOO_SHORT',
     });
   }
 
@@ -77,7 +78,11 @@ router.post('/register', async (req: Request, res: Response) => {
 
     const avail = await assertUsernameAvailable(supabase, usernameNorm.value);
     if (!avail.ok) {
-      return res.status(avail.status).json({ ok: false, error: avail.error });
+      return res.status(avail.status).json({
+        ok: false,
+        error: avail.error,
+        ...(avail.status === 409 ? { error_code: 'USERNAME_TAKEN' } : {}),
+      });
     }
     const baseUrl = getFrontendUrl();
     const redirectTo = `${baseUrl}/email-confirmed`;
@@ -217,7 +222,7 @@ router.post('/register', async (req: Request, res: Response) => {
 async function resolveLoginEmail(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
   identifier: string,
-): Promise<{ ok: true; email: string } | { ok: false; error: string; status: number }> {
+): Promise<{ ok: true; email: string } | { ok: false; error: string; status: number; error_code?: string }> {
   const raw = identifier.trim();
   if (!raw) {
     return { ok: false, error: 'email o usuario y password son obligatorios', status: 400 };
@@ -227,7 +232,7 @@ async function resolveLoginEmail(
   }
   const un = normalizeUsername(raw);
   if (!un.ok) {
-    return { ok: false, error: 'Credenciales incorrectas', status: 401 };
+    return { ok: false, error: 'Credenciales incorrectas', status: 401, error_code: 'INVALID_CREDENTIALS' };
   }
   const { data: player, error } = await supabase
     .from('players')
@@ -238,7 +243,7 @@ async function resolveLoginEmail(
   if (error) return { ok: false, error: error.message, status: 500 };
   const playerEmail = (player as { email?: string | null } | null)?.email;
   if (!playerEmail) {
-    return { ok: false, error: 'Credenciales incorrectas', status: 401 };
+    return { ok: false, error: 'Credenciales incorrectas', status: 401, error_code: 'INVALID_CREDENTIALS' };
   }
   return { ok: true, email: String(playerEmail).trim().toLowerCase() };
 }
@@ -260,7 +265,11 @@ router.post('/login', async (req: Request, res: Response) => {
 
     const resolved = await resolveLoginEmail(supabase, String(loginId));
     if (!resolved.ok) {
-      return res.status(resolved.status).json({ ok: false, error: resolved.error });
+      return res.status(resolved.status).json({
+        ok: false,
+        error: resolved.error,
+        ...(resolved.error_code ? { error_code: resolved.error_code } : {}),
+      });
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -271,7 +280,7 @@ router.post('/login', async (req: Request, res: Response) => {
     if (error) {
       const msg = error.message.toLowerCase();
       if (msg.includes('invalid login') || msg.includes('invalid_credentials')) {
-        return res.status(401).json({ ok: false, error: 'Credenciales incorrectas' });
+        return res.status(401).json({ ok: false, error: 'Credenciales incorrectas', error_code: 'INVALID_CREDENTIALS' });
       }
       if (msg.includes('email not confirmed')) {
         return res.status(403).json({
@@ -284,7 +293,7 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     if (!data.session) {
-      return res.status(401).json({ ok: false, error: 'No se pudo iniciar sesión' });
+      return res.status(401).json({ ok: false, error: 'No se pudo iniciar sesión', error_code: 'LOGIN_FAILED' });
     }
 
     // Fallback: si el usuario no tiene fila en players (registro fuera del flujo normal), crearla.

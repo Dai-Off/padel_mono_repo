@@ -7,6 +7,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { login } from '../api/auth';
+import { authErrorMessage } from '../lib/authErrors';
 import {
   AuthLayout,
   AuthBrand,
@@ -72,7 +73,7 @@ export function LoginScreen({ onGoToRegister, onGoToForgot, initialEmail }: Logi
           user: res.user,
         });
       } else {
-        setError(res.error ?? t('auth.loginError'));
+        setError(authErrorMessage(t, res, 'auth.loginError'));
         setErrorCode(res.error_code);
       }
     } catch {

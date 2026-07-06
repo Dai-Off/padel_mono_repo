@@ -21,6 +21,11 @@ export interface AuthTranslationKeys {
   hasAccountPrompt: string;
   loginLink: string;
   registerError: string;
+  invalidCredentials: string;
+  loginFailed: string;
+  emailNotConfirmed: string;
+  accountDeleted: string;
+  emailRateLimit: string;
   confirmEmailTitle: string;
   confirmEmailBody: string;
   confirmEmailSpam: string;

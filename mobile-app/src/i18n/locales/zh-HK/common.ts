@@ -16,7 +16,7 @@ export const common: CommonTranslationKeys = {
   saving: '儲存中…',
   error: '錯誤',
   connectionError: '連線錯誤',
-  connectionErrorBackend: '連線錯誤。後端是否正在運行？',
+  connectionErrorBackend: '無法連線。請檢查網路後再試。',
   connectionErrorServer: '與伺服器連線失敗',
   sessionRequired: '需要登入',
   sessionExpired: '工作階段已過期。請重新登入。',

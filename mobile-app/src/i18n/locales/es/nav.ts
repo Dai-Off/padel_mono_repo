@@ -15,8 +15,6 @@ export const nav: NavTranslationKeys = {
   userProfileA11y: 'Perfil de usuario',
   inviteFriends: 'Invitar amigos',
   sectionYourAccount: 'Tu cuenta',
-  editProfile: 'Editar perfil',
-  editProfileSub: 'Edita nombre, correo, teléfono, ubicación, ...',
   yourActivity: 'Tu actividad',
   yourActivitySub: 'Partidos, clases, competiciones, clubes',
   wallet: 'Monedero',

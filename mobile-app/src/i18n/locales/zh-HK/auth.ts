@@ -23,6 +23,11 @@ export const auth: AuthTranslationKeys = {
   hasAccountPrompt: '已有帳戶？',
   loginLink: '登入',
   registerError: '註冊失敗',
+  invalidCredentials: '帳號或密碼錯誤',
+  loginFailed: '無法登入，請再試一次。',
+  emailNotConfirmed: '登入前請先確認你的電郵。請檢查收件匣及垃圾郵件資料夾。',
+  accountDeleted: '此帳戶已被刪除。',
+  emailRateLimit: '你在短時間內要求了太多電郵。請稍等幾分鐘後再試。',
   confirmEmailTitle: '請查收電郵！',
   confirmEmailBody:
     '我們已發送確認連結到你的電郵。請點擊連結後返回此處登入。',
