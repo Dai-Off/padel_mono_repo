@@ -1,8 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
-import { evaluateAndGrant, getCompletedCourses } from '../services/unlockablesEngine';
 import { getEquippedFrames } from '../services/equippedFramesService';
+import {
+  getPlayerAchievements,
+  getPlayerUnlockablesCatalog,
+  getPlayerCustomization,
+} from '../services/profileBundleService';
 
 const router = Router();
 
@@ -36,53 +40,9 @@ router.get('/me/achievements', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
 
   try {
-    // Otorga lo recién conseguido antes de leer.
-    await evaluateAndGrant(supabase, playerId!);
-
-    const { data: owned, error: e1 } = await supabase
-      .from('player_unlockables')
-      .select('unlocked_at, is_public, progress, unlockables!inner(id, kind, title, description, rarity, icon, sport)')
-      .eq('player_id', playerId)
-      .in('unlockables.kind', ['trophy', 'badge'])
-      .order('unlocked_at', { ascending: false });
-    if (e1) return res.status(500).json({ ok: false, error: e1.message });
-
-    const achievements = (owned ?? [])
-      .map((row) => {
-        const r = row as { unlocked_at: string; is_public: boolean; progress: number | null; unlockables: unknown };
-        const u = pickEmbed(r.unlockables);
-        if (!u) return null;
-        return {
-          id: u.id,
-          type: u.kind,
-          title: u.title,
-          description: u.description ?? '',
-          icon: u.icon ?? 'trophy-outline',
-          rarity: u.rarity,
-          sport: u.sport ?? null,
-          date: r.unlocked_at,
-          isPublic: r.is_public,
-          progress: r.progress ?? undefined,
-        };
-      })
-      .filter(Boolean);
-
-    // Cursos completados (derivados de learning), presentados como type 'course'.
-    const courses = await getCompletedCourses(supabase, playerId!);
-    const courseAchievements = courses.map((c) => ({
-      id: `course_${c.courseId}`,
-      type: 'course' as const,
-      title: c.title,
-      description: c.description ?? '',
-      icon: 'book-outline',
-      rarity: 'common' as const,
-      sport: null,
-      date: c.completedAt,
-      isPublic: true,
-      progress: undefined,
-    }));
-
-    return res.json({ ok: true, achievements: [...achievements, ...courseAchievements] });
+    // Lectura pura: los logros se otorgan por EVENTO (ver evaluateAndGrant), no aquí.
+    const achievements = await getPlayerAchievements(supabase, playerId!);
+    return res.json({ ok: true, achievements });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
   }
@@ -99,12 +59,14 @@ router.get('/:id/public-achievements', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
   const playerId = req.params.id;
   try {
+    // Lectura pura: trofeos/insignias/cursos públicos ya otorgados (cursos
+    // materializados como unlockables kind='course', no derivados on-read).
     const { data: owned, error: e1 } = await supabase
       .from('player_unlockables')
       .select('unlocked_at, is_public, progress, unlockables!inner(id, kind, title, description, rarity, icon, sport)')
       .eq('player_id', playerId)
       .eq('is_public', true)
-      .in('unlockables.kind', ['trophy', 'badge'])
+      .in('unlockables.kind', ['trophy', 'badge', 'course'])
       .order('unlocked_at', { ascending: false });
     if (e1) return res.status(500).json({ ok: false, error: e1.message });
 
@@ -128,22 +90,7 @@ router.get('/:id/public-achievements', async (req: Request, res: Response) => {
       })
       .filter(Boolean);
 
-    // Cursos completados (derivados de learning): públicos por defecto.
-    const courses = await getCompletedCourses(supabase, playerId);
-    const courseAchievements = courses.map((c) => ({
-      id: `course_${c.courseId}`,
-      type: 'course' as const,
-      title: c.title,
-      description: c.description ?? '',
-      icon: 'book-outline',
-      rarity: 'common' as const,
-      sport: null,
-      date: c.completedAt,
-      isPublic: true,
-      progress: undefined,
-    }));
-
-    return res.json({ ok: true, achievements: [...achievements, ...courseAchievements] });
+    return res.json({ ok: true, achievements });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
   }
@@ -195,9 +142,8 @@ router.get('/me/unlocks/pending', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
 
   try {
-    // Evalúa primero, así un poll desde cualquier pantalla detecta lo nuevo.
-    await evaluateAndGrant(supabase, playerId!);
-
+    // Lectura pura: los eventos ya otorgaron (notified_at=null = pendiente de
+    // mostrar). El poll solo lee; no re-evalúa (grant por evento, no on-read).
     const { data, error } = await supabase
       .from('player_unlockables')
       .select('unlocked_at, unlockables!inner(id, kind, title, description, rarity, icon, animation_type, style)')
@@ -274,44 +220,8 @@ router.get('/me/unlockables', async (req: Request, res: Response) => {
     .filter(Boolean);
 
   try {
-    await evaluateAndGrant(supabase, playerId!);
-
-    let query = supabase
-      .from('unlockables')
-      .select('id, kind, title, description, rarity, icon, animation_type, style, colors, unlock_type, unlock_value, sort_order')
-      .eq('is_active', true);
-    if (kinds.length) query = query.in('kind', kinds);
-    const { data: catalog, error } = await query.order('sort_order', { ascending: true });
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-
-    const { data: owned } = await supabase
-      .from('player_unlockables')
-      .select('unlockable_id')
-      .eq('player_id', playerId);
-    const ownedSet = new Set((owned ?? []).map((o) => (o as { unlockable_id: string }).unlockable_id));
-
-    const items = (catalog ?? []).map((row) => {
-      const u = row as {
-        id: string; kind: string; title: string; description: string | null; rarity: string;
-        icon: string | null; animation_type: string | null; style: string | null; colors: unknown;
-        unlock_type: string; unlock_value: string | null;
-      };
-      return {
-        id: u.id,
-        kind: u.kind,
-        title: u.title,
-        description: u.description ?? '',
-        rarity: u.rarity,
-        icon: u.icon ?? null,
-        animationType: u.animation_type ?? null,
-        style: u.style ?? null,
-        colors: u.colors ?? null,
-        unlockType: u.unlock_type,
-        unlockValue: u.unlock_value ?? null,
-        unlocked: ownedSet.has(u.id) || u.unlock_type === 'default',
-      };
-    });
-
+    // Lectura pura: catálogo + estado ya otorgado (grant por evento, no on-read).
+    const items = await getPlayerUnlockablesCatalog(supabase, playerId!, kinds);
     return res.json({ ok: true, items });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
@@ -330,22 +240,12 @@ router.get('/me/profile-customization', async (req: Request, res: Response) => {
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
   const supabase = getSupabaseServiceRoleClient();
 
-  const { data, error } = await supabase
-    .from('player_profile_customization')
-    .select('title_id, frame_id, pinned_badge_ids')
-    .eq('player_id', playerId)
-    .maybeSingle();
-  if (error) return res.status(500).json({ ok: false, error: error.message });
-
-  const row = data as { title_id: string | null; frame_id: string | null; pinned_badge_ids: string[] } | null;
-  return res.json({
-    ok: true,
-    customization: {
-      titleId: row?.title_id ?? null,
-      frameId: row?.frame_id ?? null,
-      pinnedBadgeIds: row?.pinned_badge_ids ?? [],
-    },
-  });
+  try {
+    const customization = await getPlayerCustomization(supabase, playerId!);
+    return res.json({ ok: true, customization });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+  }
 });
 
 /**

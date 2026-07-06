@@ -3,15 +3,16 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTranslation } from '../../i18n';
 import { AchievementCard } from './AchievementCard';
 import type { Achievement, AchievementType } from '../../design/achievements';
 import { fetchAchievements, fetchPlayerPublicAchievements, toggleAchievementVisibility } from '../../api/unlockables';
 
 type TabKey = 'trophy' | 'badge' | 'course';
-const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'trophy', label: 'Trofeos', icon: 'trophy-outline' },
-  { key: 'badge', label: 'Insignias', icon: 'medal-outline' },
-  { key: 'course', label: 'Cursos', icon: 'school-outline' },
+const TABS: { key: TabKey; labelKey: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: 'trophy', labelKey: 'profile.logrosTabTrophies', icon: 'trophy-outline' },
+  { key: 'badge', labelKey: 'profile.logrosTabBadges', icon: 'medal-outline' },
+  { key: 'course', labelKey: 'profile.logrosTabCourses', icon: 'school-outline' },
 ];
 
 const PREVIEW_COUNT = 4;
@@ -19,21 +20,40 @@ const PREVIEW_COUNT = 4;
 interface TrophyShowcaseSectionProps {
   /** Si se pasa, es el perfil AJENO: carga los logros visibles de ese jugador (público), sin ojo ni edición. */
   playerId?: string;
+  /**
+   * Perfil propio: logros ya cargados por la pantalla (dedupe). Si se pasan, la
+   * Vitrina NO hace su propio fetch y los reutiliza. Si es undefined, carga sola
+   * (perfil público por `playerId`, o fallback con el token).
+   */
+  achievements?: Achievement[];
+  /** Estado de carga cuando los logros los inyecta el padre. */
+  loading?: boolean;
 }
 
-export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ playerId }) => {
+export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({
+  playerId,
+  achievements: achievementsProp,
+  loading: loadingProp,
+}) => {
   const { session } = useAuth();
+  const { t } = useTranslation();
   const token = session?.access_token ?? null;
   const own = !playerId; // perfil propio si no hay playerId
 
-  const [achievements, setAchievements] = useState<Achievement[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [achievements, setAchievements] = useState<Achievement[]>(achievementsProp ?? []);
+  const [loading, setLoading] = useState(achievementsProp == null);
   const [activeTab, setActiveTab] = useState<TabKey>('trophy');
   const [expanded, setExpanded] = useState(false);
   // Botón-ojo (solo perfil propio): si está activo, solo muestra los visibles.
   const [onlyVisible, setOnlyVisible] = useState(false);
 
   useEffect(() => {
+    // Dedupe: si el padre inyecta los logros (perfil propio), se reutilizan sin fetch.
+    if (achievementsProp != null) {
+      setAchievements(achievementsProp);
+      setLoading(loadingProp ?? false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     const load = playerId
@@ -51,7 +71,7 @@ export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ pl
     return () => {
       cancelled = true;
     };
-  }, [token, playerId]);
+  }, [token, playerId, achievementsProp, loadingProp]);
 
   const counts = useMemo(() => {
     const by = (t: AchievementType) => achievements.filter((a) => a.type === t).length;
@@ -88,8 +108,12 @@ export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ pl
               <Ionicons name="trophy-outline" size={16} color="#fff" />
             </LinearGradient>
             <View>
-              <Text style={styles.title}>Vitrina de Logros</Text>
-              <Text style={styles.count}>{achievements.length} {own ? 'logros conseguidos' : 'logros visibles'}</Text>
+              <Text style={styles.title}>{t('profile.achievementsTitle')}</Text>
+              <Text style={styles.count}>
+                {own
+                  ? t('profile.logrosCountOwn', { count: achievements.length })
+                  : t('profile.logrosCountOther', { count: achievements.length })}
+              </Text>
             </View>
           </View>
           {own && achievements.length > 0 ? (
@@ -99,7 +123,7 @@ export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ pl
                 setExpanded(false);
               }}
               style={[styles.eyeBtn, onlyVisible && styles.eyeBtnActive]}
-              accessibilityLabel="Mostrar solo los logros visibles"
+              accessibilityLabel={t('profile.logrosOnlyVisibleA11y')}
               accessibilityState={{ selected: onlyVisible }}
             >
               <Ionicons name={onlyVisible ? 'eye' : 'eye-outline'} size={16} color={onlyVisible ? '#F18F34' : '#6B7280'} />
@@ -110,9 +134,9 @@ export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ pl
         {/* Resumen por categoría */}
         <View style={styles.grid}>
           {[
-            { emoji: '🏆', val: counts.trophy, lab: 'Trofeos' },
-            { emoji: '🎖️', val: counts.badge, lab: 'Insignias' },
-            { emoji: '📚', val: counts.course, lab: 'Cursos' },
+            { emoji: '🏆', val: counts.trophy, lab: t('profile.logrosTabTrophies') },
+            { emoji: '🎖️', val: counts.badge, lab: t('profile.logrosTabBadges') },
+            { emoji: '📚', val: counts.course, lab: t('profile.logrosTabCourses') },
           ].map((g) => (
             <View key={g.lab} style={styles.gridItem}>
               <Text style={styles.gridEmoji}>{g.emoji}</Text>
@@ -136,7 +160,7 @@ export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ pl
                 style={[styles.tabBtn, active && styles.tabBtnActive]}
               >
                 <Ionicons name={tab.icon} size={14} color={active ? '#F18F34' : '#6B7280'} />
-                <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>{tab.label}</Text>
+                <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>{t(tab.labelKey)}</Text>
               </Pressable>
             );
           })}
@@ -151,7 +175,7 @@ export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ pl
           <View style={styles.centered}>
             <Ionicons name="trophy-outline" size={24} color="#6B7280" />
             <Text style={styles.emptyText}>
-              {own ? 'Aún no has conseguido logros. ¡Juega partidos y completa lecciones!' : 'Este jugador no tiene logros visibles.'}
+              {own ? t('profile.logrosEmptyOwn') : t('profile.logrosEmptyOther')}
             </Text>
           </View>
         ) : (
@@ -168,7 +192,7 @@ export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ pl
             </View>
             {filtered.length > PREVIEW_COUNT ? (
               <Pressable style={styles.viewAllBtn} onPress={() => setExpanded((v) => !v)}>
-                <Text style={styles.viewAllText}>{expanded ? 'Ver menos' : `Ver todos (${filtered.length})`}</Text>
+                <Text style={styles.viewAllText}>{expanded ? t('profile.logrosShowLess') : t('profile.logrosShowAll', { count: filtered.length })}</Text>
                 <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color="#9CA3AF" />
               </Pressable>
             ) : null}
@@ -178,9 +202,7 @@ export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ pl
         {own ? (
           <View style={styles.disclaimer}>
             <Ionicons name="lock-closed" size={12} color="#4B5563" />
-            <Text style={styles.disclaimerText}>
-              Los logros marcados como <Text style={styles.disclaimerBold}>públicos</Text> serán visibles para otros jugadores.
-            </Text>
+            <Text style={styles.disclaimerText}>{t('profile.logrosDisclaimer')}</Text>
           </View>
         ) : null}
       </View>

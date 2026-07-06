@@ -8,7 +8,8 @@ import {
   calculateAssessment,
   saveAssessment,
   getPlayerAssessment,
-  recomputeAndGetAssessment,
+  getRadarAssessment,
+  getCoachAssessmentStats,
   CoachAnswer,
 } from '../services/coachAssessmentService';
 
@@ -28,6 +29,10 @@ function resolveLocale(req: Request): string {
  *     tags: [CoachAssessment]
  *     summary: Obtener la evaluación del Coach IA del jugador actual
  *     description: |
+ *       Devuelve SOLO el radar (skills, nivel, fortalezas, mejoras, recomendación).
+ *       Las stats (contadores) van en `GET /coach-assessment/me/stats` para no
+ *       bloquear el pintado del radar. Sirve la fila cacheada (1 query) y solo
+ *       recomputa (ELO + learning) si falta o está marcada como obsoleta.
  *       Idioma opcional: query `lang` (ej. `es`, `en`, `zh-HK`) o cabecera `Accept-Language`; por defecto `es`.
  *       Los textos (`level_name`, fortalezas, mejoras, recomendación) se devuelven traducidos; los datos numéricos no cambian.
  *     parameters:
@@ -45,15 +50,39 @@ router.get('/me', async (req: Request, res: Response) => {
   const locale = resolveLocale(req);
 
   try {
-    // Recalcula el radar desde señales reales (ELO + learning) y lo persiste,
-    // de modo que se mantiene fresco y se crea si no existía; luego se localiza.
-    const assessment = await recomputeAndGetAssessment(playerId!);
+    // Radar cacheado (A2): 1 query si está fresco; recompute solo si falta/obsoleto.
+    const assessment = await getRadarAssessment(playerId!);
     if (!assessment) return res.json({ ok: true, assessment: null, locale });
     return res.json({
       ok: true,
       assessment: localizeCoachAssessmentText(assessment, locale),
       locale,
     });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ ok: false, error: message });
+  }
+});
+
+/**
+ * @openapi
+ * /coach-assessment/me/stats:
+ *   get:
+ *     tags: [CoachAssessment]
+ *     summary: Stats del Coach IA del jugador actual (contadores en vivo)
+ *     description: |
+ *       Separado del radar (A1) para que la tarjeta del Coach pinte el radar de
+ *       inmediato y las cifras (partidos, objetivos, lecciones, torneos, cursos)
+ *       rellenen aparte. No se cachea: son contadores en tiempo real.
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/me/stats', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  try {
+    const stats = await getCoachAssessmentStats(playerId!);
+    return res.json({ ok: true, stats });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(500).json({ ok: false, error: message });

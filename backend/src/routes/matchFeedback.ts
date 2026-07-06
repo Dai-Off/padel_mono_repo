@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { FEEDBACK_WINDOW_HOURS } from '../lib/levelingConstants';
+import { refreshCachedPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 
 const router = Router();
 
@@ -172,6 +173,12 @@ router.post('/:id/feedback', async (req: Request, res: Response) => {
     { onConflict: 'match_id,reviewer_id' }
   );
   if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
+
+  // Feedback nuevo -> regenera la cache del peer-insight de los valorados, fuera
+  // de la respuesta. Así OpenAI nunca corre en la ruta de apertura del perfil.
+  for (const ratedId of rated) {
+    void refreshCachedPeerFeedbackInsightForPlayer(supabase, ratedId);
+  }
 
   return res.json({ ok: true });
 });

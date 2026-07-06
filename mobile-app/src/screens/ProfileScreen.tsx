@@ -15,42 +15,29 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../i18n';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { formatPlayerLabel } from '../lib/username';
 import { useHomeData } from '../contexts/HomeDataContext';
+import { useProfileData } from '../contexts/ProfileDataContext';
 import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
 import { AnimatedTitle } from '../components/profile/AnimatedTitle';
 import { ProfileCustomizationModal } from '../components/profile/ProfileCustomizationModal';
 import { RARITY_CONFIG } from '../design/rarity';
 import { LigaChip } from '../components/profile/LigaChip';
 import type { Achievement } from '../design/achievements';
-import {
-  fetchCustomization,
-  fetchUnlockables,
-  type ProfileCustomization,
-  type CatalogItem,
-} from '../api/profileCustomization';
-import { fetchAchievements } from '../api/unlockables';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
+import { SkillRadarCard } from '../components/profile/SkillRadarCard';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
 import { LevelEvolutionCard } from '../components/profile/LevelEvolutionCard';
 import { StatsCard } from '../components/profile/StatsCard';
 import { PlayerPreferencesCard } from '../components/profile/PlayerPreferencesCard';
 import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
 import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
-import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { CoachSkeleton } from '../components/profile/CoachSkeleton';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
-import { fetchMyCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
-import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
-import {
-  fetchLevelHistory,
-  fetchPlayerStats,
-  type LevelHistory,
-  type LevelHistoryLimit,
-  type PlayerStats,
-} from '../api/profileStats';
+import { type CoachAssessment } from '../api/coachAssessment';
 import {
   uploadPlayerCoverToStorage,
   type PickedImage,
@@ -116,25 +103,42 @@ export function ProfileScreen({
     }
   }, []);
   const { session } = useAuth();
-  const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
+  const { t } = useTranslation();
+  // Cache global del perfil (HomeData): siembra el perfil base para reentrada
+  // instantánea e invalida al resto de pantallas tras editar/onboarding.
+  const { profile: homeProfile, refreshProfile: refreshGlobalProfile } = useHomeData();
+  // Datos del perfil (warm start): sobreviven al cambiar de pestaña. loadedAt
+  // guards + SWR + invalidación por force viven en el ProfileDataProvider.
+  const {
+    customization,
+    framesCatalog,
+    allAchievements,
+    assessment,
+    peerInsight,
+    coachStats,
+    levelHistory,
+    levelLimit,
+    setLevelLimit,
+    playerStats: stats,
+    frequentClubs,
+    frequentPartners,
+    bundleReady: customizationReady,
+    assessmentLoaded,
+    levelLoading,
+    socialLoading,
+    ensureLoaded,
+    refresh: refreshProfileData,
+    reloadCoach,
+    setCustomization,
+  } = useProfileData();
+  // Perfil base local: sembrado del cache global para que reentrar sea
+  // instantáneo; loadProfile revalida en segundo plano.
+  const [profile, setProfile] = useState<MyPlayerProfile | null>(homeProfile ?? null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
-  // Evolución del nivel + estadísticas
-  const [levelHistory, setLevelHistory] = useState<LevelHistory | null>(null);
-  const [levelLoading, setLevelLoading] = useState(true);
-  const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
-  const [stats, setStats] = useState<PlayerStats | null>(null);
-  const [frequentClubs, setFrequentClubs] = useState<FrequentClub[]>([]);
-  const [frequentPartners, setFrequentPartners] = useState<FrequentPartner[]>([]);
-  const [socialLoading, setSocialLoading] = useState(true);
-  // Personalización (título/marco/insignias equipados) + catálogos para resolverlos
-  const [customization, setCustomization] = useState<ProfileCustomization | null>(null);
-  const [framesCatalog, setFramesCatalog] = useState<CatalogItem[]>([]);
-  const [heroBadges, setHeroBadges] = useState<Achievement[]>([]);
   const [showCustomize, setShowCustomize] = useState(false);
-  const [customizationReady, setCustomizationReady] = useState(false);
-  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverUrl, setCoverUrl] = useState<string | null>(homeProfile?.coverUrl ?? null);
   const [uploadingCover, setUploadingCover] = useState(false);
 
   // Auto-abrir el modal del cuestionario de nivelación cuando el padre lo pide
@@ -147,14 +151,6 @@ export function ProfileScreen({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenOnboarding]);
-  const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
-  // Distingue "cargando" de "cargado pero vacío" para no quedarse en el spinner.
-  const [assessmentLoaded, setAssessmentLoaded] = useState(false);
-  const [peerInsight, setPeerInsight] = useState<PeerFeedbackInsight | null>(null);
-  // Invalidar el cache global del HomeDataContext tras completar onboarding /
-  // editar el profile, para que el resto de pantallas (DailyLessonCard,
-  // CompetitiveLeague, etc.) vean el dato fresco sin re-fetch local.
-  const { refreshProfile: refreshGlobalProfile } = useHomeData();
 
   const loadProfile = React.useCallback(async (token: string, attempt = 0) => {
     setProfileLoading(true);
@@ -164,7 +160,6 @@ export function ProfileScreen({
       if (p) {
         setProfile(p);
         setCoverUrl(p.coverUrl);
-        fetchMyPeerFeedbackInsight(token, p.id).then(setPeerInsight).catch(() => {});
         setProfileLoading(false);
         return;
       }
@@ -172,108 +167,45 @@ export function ProfileScreen({
         await new Promise((r) => setTimeout(r, 1500));
         return loadProfile(token, attempt + 1);
       }
-      setProfileError('No se pudo cargar tu perfil. Comprueba la conexión e inténtalo de nuevo.');
+      setProfileError(t('profile.profileLoadError'));
     } catch {
       if (attempt < 2) {
         await new Promise((r) => setTimeout(r, 1500));
         return loadProfile(token, attempt + 1);
       }
-      setProfileError('Error al cargar el perfil.');
+      setProfileError(t('profile.profileLoadFail'));
     } finally {
       setProfileLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const token = session?.access_token;
     if (!token) {
       setProfileLoading(false);
-      setProfileError('Inicia sesión para ver tu perfil.');
+      setProfileError(t('profile.loginToSeeProfile'));
       return;
     }
     void loadProfile(token);
-    fetchMyCoachAssessment(token)
-      .then(setAssessment)
-      .catch(() => {})
-      .finally(() => setAssessmentLoaded(true));
+    // Bootstrap perezoso del cache de datos del perfil (1ª apertura). En
+    // reentradas sirve lo cacheado al instante (no re-fetch salvo force).
+    // ensureLoaded se auto-protege (guard interno) y corre en cada mount, por eso
+    // se omite de las deps (evita re-ejecutar loadProfile al cambiar su identidad).
+    ensureLoaded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token, loadProfile]);
 
-  // Evolución del nivel (refetch al cambiar el filtro 5/10/Todos)
+  // Reflejar los cambios del cache global (HomeData) en el perfil local: al editar
+  // preferencias / perfil se hace refreshGlobalProfile, y así el hero y la card de
+  // preferencias se actualizan sin tener que remontar la pantalla (antes se
+  // quedaban con la copia vieja sembrada al montar).
   useEffect(() => {
-    const token = session?.access_token;
-    if (!token) return;
-    let cancelled = false;
-    setLevelLoading(true);
-    fetchLevelHistory(token, levelLimit)
-      .then((h) => {
-        if (!cancelled) setLevelHistory(h);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLevelLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token, levelLimit]);
+    if (homeProfile) {
+      setProfile(homeProfile);
+      setCoverUrl(homeProfile.coverUrl);
+    }
+  }, [homeProfile]);
 
-  // Estadísticas (depende del id del jugador)
-  useEffect(() => {
-    const token = session?.access_token;
-    const playerId = profile?.id;
-    if (!token || !playerId) return;
-    let cancelled = false;
-    fetchPlayerStats(token, playerId)
-      .then((s) => {
-        if (!cancelled) setStats(s);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token, profile?.id]);
-
-  // Clubs y compañeros frecuentes (depende del id del jugador)
-  useEffect(() => {
-    const playerId = profile?.id;
-    if (!playerId) return;
-    let cancelled = false;
-    setSocialLoading(true);
-    Promise.all([fetchFrequentClubs(playerId), fetchFrequentPartners(playerId)])
-      .then(([c, p]) => {
-        if (cancelled) return;
-        setFrequentClubs(c);
-        setFrequentPartners(p);
-      })
-      .finally(() => {
-        if (!cancelled) setSocialLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.id]);
-
-  // Personalización equipada + catálogos para el hero. En paralelo con el perfil
-  // (endpoints /me, solo necesitan token) para que todo aparezca a la vez.
-  useEffect(() => {
-    const token = session?.access_token;
-    if (!token) return;
-    let cancelled = false;
-    Promise.all([fetchCustomization(token), fetchUnlockables(token, ['frame']), fetchAchievements(token)])
-      .then(([c, frames, achievements]) => {
-        if (cancelled) return;
-        setCustomization(c ?? { titleId: null, frameId: null, pinnedBadgeIds: [] });
-        setFramesCatalog(frames);
-        setHeroBadges(achievements.filter((a) => a.type !== 'course'));
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setCustomizationReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token]);
 
   const equippedFrame = useMemo<FrameAttrs | null>(() => {
     const fid = customization?.frameId;
@@ -282,12 +214,25 @@ export function ProfileScreen({
     return f ? { rarity: f.rarity, style: f.style, animationType: f.animationType, colors: f.colors } : null;
   }, [customization?.frameId, framesCatalog]);
 
+  // Insignias del hero (no-cursos) derivadas de la lista completa compartida.
+  const heroBadges = useMemo<Achievement[]>(
+    () => allAchievements.filter((a) => a.type !== 'course'),
+    [allAchievements],
+  );
+
   const pinnedBadges = useMemo<Achievement[]>(() => {
     const ids = customization?.pinnedBadgeIds ?? [];
     return ids
       .map((id) => heroBadges.find((b) => b.id === id))
       .filter((b): b is Achievement => b != null);
   }, [customization?.pinnedBadgeIds, heroBadges]);
+
+  // Radar + stats fusionados (A1): el Coach recibe el radar en cuanto llega y las
+  // cifras se completan cuando resuelven las stats, sin bloquear el pintado.
+  const coachAssessment = useMemo<CoachAssessment | null>(
+    () => (assessment ? { ...assessment, stats: coachStats ?? assessment.stats } : null),
+    [assessment, coachStats],
+  );
 
   // Scroll a la Vitrina cuando el modal de desbloqueo pide "Ir a mi vitrina".
   // Arma el objetivo y reintenta; el onLayout de la Vitrina y el efecto de carga
@@ -318,8 +263,8 @@ export function ProfileScreen({
     ? `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() ||
       formatPlayerLabel(profile)
     : profileLoading
-      ? 'Cargando...'
-      : '—';
+      ? t('profile.loadingLabel')
+      : t('profile.publicProfileFallback');
   const usernameLine = profile?.username ? `@${profile.username}` : null;
 
   const needsLevelOnboarding = profile != null && profile.onboardingCompleted === false;
@@ -327,11 +272,7 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    setAssessmentLoaded(false);
-    fetchMyCoachAssessment(session.access_token)
-      .then(setAssessment)
-      .catch(() => {})
-      .finally(() => setAssessmentLoaded(true));
+    refreshProfileData({ force: true });
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).
@@ -340,7 +281,7 @@ export function ProfileScreen({
 
   const applyCoverImage = async (image: PickedImage) => {
     if (!session?.user?.id || !session.access_token || !session.refresh_token) {
-      Alert.alert('Sesión', 'Inicia sesión para cambiar la portada.');
+      Alert.alert(t('profile.sessionAlertTitle'), t('profile.coverLoginRequired'));
       return;
     }
     setCoverUrl(image.uri);
@@ -357,7 +298,7 @@ export function ProfileScreen({
       void refreshGlobalProfile({ force: true });
     } catch (err) {
       setCoverUrl(profile?.coverUrl ?? null);
-      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo subir la portada');
+      Alert.alert(t('profile.errorAlertTitle'), err instanceof Error ? err.message : t('profile.coverUploadFail'));
     } finally {
       setUploadingCover(false);
     }
@@ -367,7 +308,7 @@ export function ProfileScreen({
     if (source === 'library') {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería.');
+        Alert.alert(t('profile.permissionDeniedTitle'), t('profile.galleryPermissionBody'));
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -386,7 +327,7 @@ export function ProfileScreen({
     }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso denegado', 'Necesitamos acceso a la cámara.');
+      Alert.alert(t('profile.permissionDeniedTitle'), t('profile.cameraPermissionBody'));
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -405,14 +346,18 @@ export function ProfileScreen({
 
   const handleChangeCover = () => {
     if (uploadingCover) return;
-    Alert.alert('Foto de portada', 'Elige una opción', [
-      { text: 'Galería', onPress: () => void pickCoverImage('library') },
-      { text: 'Cámara', onPress: () => void pickCoverImage('camera') },
-      { text: 'Cancelar', style: 'cancel' },
+    Alert.alert(t('profile.coverPhotoAlert'), t('profile.coverPhotoAlertChoose'), [
+      { text: t('profile.galleryBtn'), onPress: () => void pickCoverImage('library') },
+      { text: t('profile.cameraBtn'), onPress: () => void pickCoverImage('camera') },
+      { text: t('profile.cancelBtn'), style: 'cancel' },
     ]);
   };
 
-  if ((profileLoading && !profile) || (!customizationReady && !profileError)) {
+  // Gate del hero: espera perfil + personalización (bundle) para aparecer
+  // COMPLETO (marco/título/insignias juntos), sin el salto de la personalización.
+  // El radar, peer, stats, evolución y social NO bloquean: entran con skeleton
+  // debajo. En reentrada todo está cacheado → instantáneo.
+  if ((profileLoading && !profile) || !customizationReady) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#F18F34" />
@@ -430,11 +375,11 @@ export function ProfileScreen({
             style={[styles.editBtn, { marginTop: 20, paddingHorizontal: 24 }]}
             onPress={() => void loadProfile(session.access_token!)}
           >
-            <Text style={styles.editBtnText}>Reintentar</Text>
+            <Text style={styles.editBtnText}>{t('profile.retryBtn')}</Text>
           </Pressable>
         ) : null}
         <Pressable style={{ marginTop: 16 }} onPress={onBack}>
-          <Text style={{ color: '#9CA3AF' }}>Volver</Text>
+          <Text style={{ color: '#9CA3AF' }}>{t('profile.back')}</Text>
         </Pressable>
       </View>
     );
@@ -446,10 +391,10 @@ export function ProfileScreen({
       <View style={styles.header}>
         <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.headerContent}>
-          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel="Volver">
+          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel={t('profile.back')}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
-          <Text style={styles.headerTitle}>Perfil</Text>
+          <Text style={styles.headerTitle}>{t('profile.title')}</Text>
           <View style={styles.headerActions}>
             <Pressable style={styles.headerIconBtn}>
               <Ionicons name="chatbubble-outline" size={20} color="#fff" />
@@ -498,7 +443,7 @@ export function ProfileScreen({
             style={styles.cameraBtn}
             onPress={handleChangeCover}
             disabled={uploadingCover}
-            accessibilityLabel="Cambiar foto de portada"
+            accessibilityLabel={t('profile.coverChangeA11y')}
           >
             <Ionicons name="camera-outline" size={14} color="rgba(255,255,255,0.8)" />
           </Pressable>
@@ -554,32 +499,37 @@ export function ProfileScreen({
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{profile?.matchesPlayedTotal ?? 0}</Text>
-                <Text style={styles.statLabel}>PARTIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>SEGUIDORES</Text>
+                <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>SEGUIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
               </View>
             </View>
 
             {/* Action Buttons */}
             <View style={styles.actionButtonsRow}>
               <Pressable style={styles.editBtn} onPress={() => onEditProfilePress?.()}>
-                <Text style={styles.editBtnText}>Editar perfil</Text>
+                <Text style={styles.editBtnText}>{t('profile.editProfileBtn')}</Text>
               </Pressable>
               <Pressable style={styles.personalizeBtn} onPress={() => setShowCustomize(true)}>
                 <Ionicons name="sparkles-outline" size={14} color="#F18F34" />
-                <Text style={styles.personalizeBtnText}>Personalizar</Text>
+                <Text style={styles.personalizeBtnText}>{t('profile.personalizeBtn')}</Text>
               </Pressable>
             </View>
           </View>
         </View>
+
+        {/* Radar de nivel (primero): identidad del jugador, antes del Coach IA */}
+        {!needsLevelOnboarding && coachAssessment ? (
+          <SkillRadarCard skills={coachAssessment.skills} levelName={coachAssessment.level_name} />
+        ) : null}
 
         {/* Virtual Coach Card / Analysis */}
         {needsLevelOnboarding ? (
@@ -596,22 +546,22 @@ export function ProfileScreen({
                   </LinearGradient>
                 </View>
                 <Text style={styles.coachTitle}>
-                  {needsLevelOnboarding ? 'Nivelación inicial' : 'Coach Virtual IA'}
+                  {needsLevelOnboarding ? t('profile.onboardingInitialTitle') : t('profile.coachVirtualIa')}
                 </Text>
                 <Text style={styles.coachDesc}>
                   {needsLevelOnboarding
-                    ? 'Responde al cuestionario oficial para calcular tu nivel inicial (0–7) y desbloquear matchmaking y el resto de funciones.'
-                    : 'Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA'}
+                    ? t('profile.onboardingInitialDesc')
+                    : t('profile.coachMeasureDesc')}
                 </Text>
                 <Pressable style={styles.coachCtaBtn} onPress={() => setShowOnboardingModal(true)}>
                   <Ionicons name="locate-outline" size={16} color="#fff" />
-                  <Text style={styles.coachCtaText}>Comenzar nivelación</Text>
+                  <Text style={styles.coachCtaText}>{t('profile.onboardingStartBtn')}</Text>
                 </Pressable>
               </View>
             </View>
           </View>
-        ) : assessment ? (
-          <AICoachSection assessment={assessment} peerInsight={peerInsight} />
+        ) : coachAssessment ? (
+          <AICoachSection assessment={coachAssessment} peerInsight={peerInsight} />
         ) : assessmentLoaded ? (
           <View style={styles.coachCardContainer}>
             <View style={styles.coachCard}>
@@ -619,21 +569,17 @@ export function ProfileScreen({
               <View style={styles.coachContent}>
                 <Ionicons name="cloud-offline-outline" size={28} color="#6B7280" />
                 <Text style={[styles.coachDesc, { marginTop: 12 }]}>
-                  No se pudo cargar el análisis del Coach IA.
+                  {t('profile.coachLoadFail')}
                 </Text>
                 <Pressable
                   style={styles.coachCtaBtn}
                   onPress={() => {
                     if (!session?.access_token) return;
-                    setAssessmentLoaded(false);
-                    fetchMyCoachAssessment(session.access_token)
-                      .then(setAssessment)
-                      .catch(() => {})
-                      .finally(() => setAssessmentLoaded(true));
+                    reloadCoach();
                   }}
                 >
                   <Ionicons name="refresh-outline" size={16} color="#fff" />
-                  <Text style={styles.coachCtaText}>Reintentar</Text>
+                  <Text style={styles.coachCtaText}>{t('profile.retryBtn')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -665,7 +611,7 @@ export function ProfileScreen({
               scrollToVitrina();
             }}
           >
-            <TrophyShowcaseSection />
+            <TrophyShowcaseSection achievements={allAchievements} loading={!customizationReady} />
           </View>
         ) : null}
 
@@ -680,14 +626,14 @@ export function ProfileScreen({
 
         {/* Personas con las que juegas */}
         <FrequentPartnersCard
-          title="Con quién juegas"
+          title={t('profile.partnersTitleOwn')}
           partners={frequentPartners}
           loading={socialLoading}
           onOpenPlayer={onOpenPublicProfile}
         />
 
         {/* Clubs donde sueles jugar (al final) */}
-        <FrequentClubsCard title="Clubs donde sueles jugar" clubs={frequentClubs} loading={socialLoading} />
+        <FrequentClubsCard title={t('profile.clubsTitleOwn')} clubs={frequentClubs} loading={socialLoading} />
 
       </ScrollView>
 
