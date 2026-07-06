@@ -9,7 +9,8 @@ import { computeFreshAssessment } from '../services/coachAssessmentService';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
 import { localizeCoachAssessmentText } from '../lib/coachAssessmentLanguage';
-import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
+import { getCachedPeerFeedbackInsight } from '../services/postMatchPeerFeedbackInsightService';
+import { assembleProfileBundle } from '../services/profileBundleService';
 import { syncPlayerVector } from '../lib/mailer';
 import { pickClubImageSource, resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import {
@@ -1450,6 +1451,30 @@ router.get('/:id/feedback-summary', async (req: Request, res: Response) => {
  *         description: Locale BCP-47 para la tarjeta (default `es`)
  *     security: [{ bearerAuth: [] }]
  */
+/**
+ * @openapi
+ * /players/me/profile-bundle:
+ *   get:
+ *     tags: [Players]
+ *     summary: Bundle above-the-fold del perfil en 1 round-trip
+ *     description: |
+ *       Junta las lecturas baratas que el hero y el Coach necesitan
+ *       SOLO lo que bloquea el hero (personalización, marcos, logros). El radar,
+ *       el peer-insight, las stats, la evolución y el social van aparte y
+ *       rellenan su card con skeleton, para que el hero no espere a nada más.
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/me/profile-bundle', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  try {
+    const bundle = await assembleProfileBundle(playerId!);
+    return res.json({ ok: true, ...bundle });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
 router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
@@ -1467,7 +1492,9 @@ router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response
     req.query.lang as string | string[] | undefined,
     req.headers['accept-language'] as string | undefined
   );
-  const insight = await getLastPeerFeedbackInsightForPlayer(supabase, id, { locale });
+  // Sirve la cache (sin OpenAI en la ruta crítica); la genera al vuelo solo la
+  // primera vez que se ve a este jugador en este idioma.
+  const insight = await getCachedPeerFeedbackInsight(supabase, id, { locale });
   return res.json(insight);
 });
 

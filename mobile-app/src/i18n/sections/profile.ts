@@ -16,7 +16,9 @@ export interface ProfileTranslationKeys {
   coachTabPlan: string;
   coachTodaySummary: string;
   coachAnalysisTitle: string;
+  skillRadarTitle: string;
   coachRecommendation: string;
+  coachRecommendationSelf: string;
   coachPeerPerception: string;
   coachLastTrend: string;
   coachDistHigh: string;
@@ -91,4 +93,50 @@ export interface ProfileTranslationKeys {
   coachSkillAreaMental: string;
   coachSkillAreaTactical: string;
   publicProfileFallback: string;
+  // Vitrina de logros (TrophyShowcaseSection)
+  logrosTabTrophies: string;
+  logrosTabBadges: string;
+  logrosTabCourses: string;
+  logrosCountOwn: string;
+  logrosCountOther: string;
+  logrosOnlyVisibleA11y: string;
+  logrosEmptyOwn: string;
+  logrosEmptyOther: string;
+  logrosShowLess: string;
+  logrosShowAll: string;
+  logrosDisclaimer: string;
+  // Comunes
+  back: string;
+  retryBtn: string;
+  cancelBtn: string;
+  galleryBtn: string;
+  cameraBtn: string;
+  errorAlertTitle: string;
+  permissionDeniedTitle: string;
+  // Perfil público (PublicProfileScreen)
+  playerFallback: string;
+  publicProfileLoadFail: string;
+  publicProfileHeaderTitle: string;
+  followBtn: string;
+  messageBtn: string;
+  publicPartnersTitle: string;
+  publicClubsTitle: string;
+  // Perfil propio (ProfileScreen)
+  loginToSeeProfile: string;
+  loadingLabel: string;
+  sessionAlertTitle: string;
+  coverLoginRequired: string;
+  coverUploadFail: string;
+  galleryPermissionBody: string;
+  cameraPermissionBody: string;
+  coverPhotoAlertChoose: string;
+  coverChangeA11y: string;
+  personalizeBtn: string;
+  onboardingInitialTitle: string;
+  onboardingInitialDesc: string;
+  coachMeasureDesc: string;
+  onboardingStartBtn: string;
+  coachLoadFail: string;
+  partnersTitleOwn: string;
+  clubsTitleOwn: string;
 }

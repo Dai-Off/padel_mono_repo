@@ -67,7 +67,12 @@ import {
   GRILLA_COMPACT_LAYOUT_MAX_PX,
 } from './utils/timeGrid';
 import { GridBoundsProvider, gridContentHeightPx, parseTimeStrInBounds } from './context/GridBoundsContext';
-import { enumerateDatesInRange, eachCalendarDateInRange } from './utils/recurrenceDates';
+import { eachCalendarDateInRange } from './utils/recurrenceDates';
+import {
+  participantPaymentsTotalCents,
+  resolveMultiBookingDates,
+  splitParticipantPaymentsForBooking,
+} from './utils/multiCourtBooking';
 import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
@@ -1196,6 +1201,30 @@ function GrillaViewInner() {
       }
   };
 
+  const handleCancelMaintenance = useCallback(async (bookingIds: string[]) => {
+      const ids = bookingIds.filter(Boolean);
+      if (ids.length === 0) return;
+      let ok = 0;
+      for (const id of ids) {
+          try {
+              const res = await apiFetchWithAuth<any>(`/bookings/${id}`, {
+                  method: 'PUT',
+                  body: JSON.stringify({ status: 'cancelled' }),
+              });
+              if (res.ok !== false) ok += 1;
+          } catch {
+              // continue
+          }
+      }
+      if (ok === 0) {
+          throw new Error('No se pudo anular el mantenimiento');
+      }
+      removeBookingsFromCache(ids);
+      setSelectedModalReservationId(null);
+      setEditingBookingData(null);
+      toast.success(ok === 1 ? 'Bloqueo anulado' : `Se anularon ${ok} bloqueos de mantenimiento`);
+  }, [removeBookingsFromCache]);
+
   const handleDeleteBookings = useCallback(async (bookingIds: string[]) => {
       const deletable = bookingIds.filter(
           (id) => !id.startsWith('school-slot-') && !id.startsWith('school-private-slot-'),
@@ -1469,14 +1498,13 @@ function resolveManualBookingTotalCents(
           const failedAttempts: Array<{ date: string; court_id: string; reason: string }> = [];
 
           let datesToBook: string[];
-          if (bookingData.is_multiple && bookingData.recurrence_start_date && bookingData.recurrence_end_date) {
-              const weekdays = Array.isArray(bookingData.recurrence_weekdays)
-                  ? bookingData.recurrence_weekdays.map((x: unknown) => Number(x)).filter((n: number) => !Number.isNaN(n))
-                  : [];
-              datesToBook = enumerateDatesInRange(
-                  String(bookingData.recurrence_start_date),
-                  String(bookingData.recurrence_end_date),
-                  weekdays,
+          if (bookingData.is_multiple) {
+              datesToBook = resolveMultiBookingDates(
+                  true,
+                  bookingData.recurrence_start_date,
+                  bookingData.recurrence_end_date,
+                  bookingData.recurrence_weekdays,
+                  formatDateForInput(selectedDate),
               );
               if (datesToBook.length === 0) {
                   throw new Error('No hay fechas en el rango seleccionado para los días indicados.');
@@ -1484,6 +1512,8 @@ function resolveManualBookingTotalCents(
           } else {
               datesToBook = [formatDateForInput(selectedDate)];
           }
+
+          const planInputs: Array<{ dateText: string; courtId: string; startAt: string; endAt: string }> = [];
 
           for (const dateText of datesToBook) {
               if (!includeHolidays && clubId) {
@@ -1503,21 +1533,50 @@ function resolveManualBookingTotalCents(
                       `${dateText}T${String(slotHour ?? '00').padStart(2, '0')}:${String(slotMinute ?? '00').padStart(2, '0')}:00`,
                   ).toISOString();
                   const endAt = new Date(new Date(startAt).getTime() + bookingData.duration_minutes * 60000).toISOString();
-                  let totalPriceCents = bookingData.total_price_cents;
-                  let tariffCents: number | null = null;
-                  if (clubId && courtId) {
-                      try {
-                          const slotPrice = await apiFetchWithAuth<any>(
-                              `/tariffs/slot-price?club_id=${clubId}&court_id=${courtId}&date=${dateText}&slot=${bookingData.start_at}&duration_minutes=${bookingData.duration_minutes}&reservation_type=${bookingData.booking_type || 'standard'}`
-                          );
-                          if (typeof slotPrice.total_price_cents === 'number') {
-                              tariffCents = slotPrice.total_price_cents;
-                          }
-                      } catch {
-                          // Keep current total_price_cents as fallback
+                  planInputs.push({ dateText, courtId, startAt, endAt });
+              }
+          }
+
+          const isMultiBatch = planInputs.length > 1;
+          const fallbackPlanTotal = isMultiBatch
+              ? Math.round((Number(bookingData.total_price_cents) || 0) / Math.max(1, planInputs.length))
+              : Number(bookingData.total_price_cents) || 0;
+
+          const bookingPlans = await Promise.all(planInputs.map(async (plan) => {
+              let totalPriceCents = fallbackPlanTotal;
+              let tariffCents: number | null = null;
+              if (clubId && plan.courtId) {
+                  try {
+                      const slotPrice = await apiFetchWithAuth<any>(
+                          `/tariffs/slot-price?club_id=${clubId}&court_id=${plan.courtId}&date=${plan.dateText}&slot=${bookingData.start_at}&duration_minutes=${bookingData.duration_minutes}&reservation_type=${bookingData.booking_type || 'standard'}`
+                      );
+                      if (typeof slotPrice.total_price_cents === 'number') {
+                          tariffCents = slotPrice.total_price_cents;
                       }
+                  } catch {
+                      // Keep fallback total
                   }
-                  totalPriceCents = resolveManualBookingTotalCents(bookingData, tariffCents);
+              }
+              totalPriceCents = isMultiBatch
+                  ? (tariffCents ?? fallbackPlanTotal)
+                  : resolveManualBookingTotalCents(bookingData, tariffCents);
+
+              return { ...plan, totalPriceCents };
+          }));
+
+          const batchTotalCents = bookingPlans.reduce((sum, plan) => sum + plan.totalPriceCents, 0);
+
+          for (const plan of bookingPlans) {
+                  const { dateText, courtId, startAt, endAt, totalPriceCents } = plan;
+
+                  const participantsForBooking = isMultiBatch
+                      ? splitParticipantPaymentsForBooking(bookingData.participants, totalPriceCents, batchTotalCents)
+                      : bookingData.participants;
+                  const paidForBooking = participantPaymentsTotalCents(participantsForBooking);
+                  const statusForBooking =
+                      paidForBooking >= totalPriceCents && totalPriceCents > 0
+                          ? 'confirmed'
+                          : 'pending_payment';
 
                   const payload = {
                       ...bookingData,
@@ -1526,6 +1585,8 @@ function resolveManualBookingTotalCents(
                       end_at: endAt,
                       timezone: clubIanaTimeZone(),
                       total_price_cents: totalPriceCents,
+                      participants: participantsForBooking,
+                      status: isMultiBatch ? statusForBooking : bookingData.status,
                   };
                   delete payload.court_ids;
                   delete payload.is_multiple;
@@ -1547,7 +1608,6 @@ function resolveManualBookingTotalCents(
                       continue;
                   }
                   if (res.booking) createdBookings.push(res.booking);
-              }
           }
 
           if (createdBookings.length > 0) {
@@ -1581,6 +1641,14 @@ function resolveManualBookingTotalCents(
           };
           if (createdBookings.length > 0) {
               toast.success(`${createdBookings.length} reserva(s) creada(s)`);
+              if (isMultiBatch && createdBookings.length > 1) {
+                  const pendingCount = createdBookings.filter((b) => b.status === 'pending_payment').length;
+                  if (pendingCount > 0) {
+                      toast.message(`${pendingCount} pista(s) pendiente(s) de cobro`, {
+                          description: 'Abre cada turno en la grilla para registrar el pago.',
+                      });
+                  }
+              }
           }
           if (skippedHolidayDates.length > 0) {
               toast.message(`Festivos omitidos (${skippedHolidayDates.length})`, {
@@ -3134,6 +3202,8 @@ function resolveManualBookingTotalCents(
           clubId={clubId}
           gridDate={formatDateForInput(selectedDate)}
           weeklySchedule={weeklySchedule}
+          gridReservations={reservations}
+          onCancelMaintenance={handleCancelMaintenance}
           isOpen={selectedModalReservationId !== null}
           onGridRefresh={refresh}
           onClose={() => {

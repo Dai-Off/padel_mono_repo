@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SkillPolarChart } from './SkillPolarChart';
 
 import { CoachAssessment } from '../../api/coachAssessment';
 import { PeerFeedbackInsight } from '../../api/peerFeedbackInsight';
@@ -89,46 +88,16 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
 
   return (
     <View style={styles.container}>
-      {/* Resumen Card */}
-      <View style={styles.card}>
+      {/* Cabecera del bloque Coach IA (las stats se movieron a la tab Plan) */}
+      <View style={[styles.card, styles.headerCard]}>
         <View style={styles.glow} />
-        <View style={styles.cardHeader}>
+        <View style={styles.cardHeaderSlim}>
           <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.iconContainer}>
             <Ionicons name="bulb-outline" size={20} color="#fff" />
           </LinearGradient>
           <View style={styles.titleContainer}>
             <Text style={styles.title}>{t('profile.coachVirtualIa')}</Text>
             <Text style={styles.subtitle}>{t('profile.coachSubtitle')}</Text>
-          </View>
-        </View>
-
-        <View style={styles.statsGrid}>
-          <View style={styles.statBox}>
-            <View style={styles.statIconWrapper}>
-              <Ionicons name="trending-up-outline" size={16} color="#F18F34" />
-            </View>
-            <Text style={styles.statValue}>
-              +{assessment.stats?.improvementPercentage ?? 0}%
-            </Text>
-            <Text style={styles.statLabel}>{t('profile.coachImprove')}</Text>
-          </View>
-          <View style={styles.statBox}>
-            <View style={styles.statIconWrapper}>
-              <Ionicons name="locate-outline" size={16} color="#F18F34" />
-            </View>
-            <Text style={styles.statValue}>
-              {assessment.stats?.completedObjectives ?? 0}/{assessment.stats?.totalObjectives ?? 10}
-            </Text>
-            <Text style={styles.statLabel}>{t('profile.coachGoals')}</Text>
-          </View>
-          <View style={styles.statBox}>
-            <View style={styles.statIconWrapper}>
-              <Ionicons name="flame-outline" size={16} color="#F18F34" />
-            </View>
-            <Text style={styles.statValue}>
-              {assessment.stats?.matchCount ?? 0}
-            </Text>
-            <Text style={styles.statLabel}>{t('profile.coachMatches')}</Text>
           </View>
         </View>
       </View>
@@ -160,47 +129,22 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
       {/* TAB RESUMEN DE HOY */}
       {activeTab === 'today' && (
         <>
-          {/* Análisis Level Card */}
+          {/* Recomendación (el radar se movió a SkillRadarCard, arriba del Coach) */}
           <View style={styles.analysisCard}>
-            <View style={styles.analysisHeader}>
-              <View style={styles.analysisIconBox}>
-                <Ionicons name="analytics-outline" size={14} color="#F18F34" />
-              </View>
-              <Text style={styles.analysisTitle}>{t('profile.coachAnalysisTitle')}</Text>
-            </View>
-            
-            <SkillPolarChart
-              max={70}
-              skills={{
-                technical: assessment.skills.technical,
-                physical: assessment.skills.physical,
-                mental: assessment.skills.mental,
-                tactical: assessment.skills.tactical
-              }}
-            />
-
             {/* Recomendación IA */}
             <View style={styles.recommendationBox}>
               <View style={styles.recIconContainer}>
-                <Ionicons name={showPeerData ? "chatbubbles-outline" : "sparkles-outline"} size={12} color="#fff" />
+                <Ionicons name="sparkles-outline" size={12} color="#fff" />
               </View>
               <View style={styles.recContent}>
+                {/* Título siempre "Recomendación" — NO se expone que la info venga
+                    del feedback de compañeros (fuente/fecha/conteo fuera). */}
                 <View style={styles.recHeaderRow}>
-                  <Text style={styles.recTitle}>{t('profile.coachRecommendation', { source: sourceLabel })}</Text>
-                  {showPeerData && peerInsight.feedback_created_at && (
-                    <Text style={styles.recDate}>
-                      {new Date(peerInsight.feedback_created_at).toLocaleDateString(dateLocale)}
-                    </Text>
-                  )}
+                  <Text style={styles.recTitle}>{t('profile.coachRecommendationSelf')}</Text>
                 </View>
                 <Text style={styles.recText}>
                   {recommendation || t('profile.coachNoData')}
                 </Text>
-                {showPeerData && (
-                  <Text style={styles.peerCountText}>
-                    {t('profile.coachPeerPerception')} ({peerInsight.peer_count})
-                  </Text>
-                )}
                 {!showPeerData && activeTab === 'today' && (
                     <Text style={styles.emptyText}>
                       {t('profile.coachNoData')}
@@ -339,6 +283,39 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
       {/* TAB PLAN CON ALTA FIDELIDAD FIGMA */}
       {activeTab === 'plan' && (
         <View style={styles.planFigmaContainer}>
+          {/* Stats de progreso (movidas desde la cabecera): mejora / objetivos / partidos */}
+          <View style={styles.card}>
+            <View style={styles.statsGrid}>
+              <View style={styles.statBox}>
+                <View style={styles.statIconWrapper}>
+                  <Ionicons name="trending-up-outline" size={16} color="#F18F34" />
+                </View>
+                <Text style={styles.statValue}>
+                  +{assessment.stats?.improvementPercentage ?? 0}%
+                </Text>
+                <Text style={styles.statLabel}>{t('profile.coachImprove')}</Text>
+              </View>
+              <View style={styles.statBox}>
+                <View style={styles.statIconWrapper}>
+                  <Ionicons name="locate-outline" size={16} color="#F18F34" />
+                </View>
+                <Text style={styles.statValue}>
+                  {assessment.stats?.completedObjectives ?? 0}/{assessment.stats?.totalObjectives ?? 10}
+                </Text>
+                <Text style={styles.statLabel}>{t('profile.coachGoals')}</Text>
+              </View>
+              <View style={styles.statBox}>
+                <View style={styles.statIconWrapper}>
+                  <Ionicons name="flame-outline" size={16} color="#F18F34" />
+                </View>
+                <Text style={styles.statValue}>
+                  {assessment.stats?.matchCount ?? 0}
+                </Text>
+                <Text style={styles.statLabel}>{t('profile.coachMatches')}</Text>
+              </View>
+            </View>
+          </View>
+
           {/* Plan de Esta Semana */}
           <View style={styles.analysisCard}>
             <View style={styles.glow} />
@@ -507,6 +484,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     marginBottom: 16,
+  },
+  // Cabecera Coach IA compacta (sin stats debajo): menos padding y sin el margen
+  // inferior que antes separaba de las stats.
+  headerCard: {
+    paddingVertical: 12,
+  },
+  cardHeaderSlim: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   iconContainer: {
     width: 44,

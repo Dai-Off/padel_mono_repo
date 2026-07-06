@@ -31,9 +31,17 @@ export type CoachAssessment = {
   created_at: string;
 };
 
+export type CoachStats = NonNullable<CoachAssessment['stats']>;
+
 type AssessmentResponse = {
   ok: boolean;
   assessment?: CoachAssessment;
+  error?: string;
+};
+
+type CoachStatsResponse = {
+  ok: boolean;
+  stats?: CoachStats;
   error?: string;
 };
 
@@ -54,6 +62,27 @@ export async function fetchMyCoachAssessment(
     return null;
   } catch (err) {
     console.error('[fetchMyCoachAssessment]', err);
+    return null;
+  }
+}
+
+/**
+ * Obtiene las stats del Coach (contadores en vivo) por separado del radar (A1),
+ * para que la tarjeta pinte el radar de inmediato y las cifras rellenen aparte.
+ */
+export async function fetchMyCoachStats(
+  token: string | null | undefined,
+): Promise<CoachStats | null> {
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_URL}/coach-assessment/me/stats`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = (await res.json()) as CoachStatsResponse;
+    if (json.ok && json.stats) return json.stats;
+    return null;
+  } catch (err) {
+    console.error('[fetchMyCoachStats]', err);
     return null;
   }
 }

@@ -123,6 +123,16 @@ export const GridMarqueeLayer: React.FC<Props> = ({
         [containerRef, getColumnRects, gridEndMin, gridStartMin, headerPx, onSelectionChange, ppm],
     );
 
+    const clearSelection = useCallback(() => {
+        setAnchorRect(null);
+        setMenuPos(null);
+        setSelectedSlots([]);
+        setSelectedCourtCount(0);
+        onSelectionChange(new Set(), []);
+    }, [onSelectionChange]);
+
+    const closeMenu = clearSelection;
+
     useEffect(() => {
         const root = listenRef.current;
         if (!root || disabled) return;
@@ -158,9 +168,18 @@ export const GridMarqueeLayer: React.FC<Props> = ({
 
             axisDragRef.current = false;
             const card = target.closest('[data-reservation-card]');
-            if (card && !card.hasAttribute('data-maintenance-block')) return;
-            if (target.closest('[data-court-header]')) return;
-            if (metrics && e.clientY < metrics.bodyTop) return;
+            if (card && !card.hasAttribute('data-maintenance-block')) {
+                if (selectedKeys.size > 0) clearSelection();
+                return;
+            }
+            if (target.closest('[data-court-header]')) {
+                if (selectedKeys.size > 0) clearSelection();
+                return;
+            }
+            if (metrics && e.clientY < metrics.bodyTop) {
+                if (selectedKeys.size > 0) clearSelection();
+                return;
+            }
 
             setAnchorRect(null);
             setMenuPos(null);
@@ -247,6 +266,8 @@ export const GridMarqueeLayer: React.FC<Props> = ({
         getGridBodyMetrics,
         buildMarqueeRect,
         gridStartMin,
+        selectedKeys.size,
+        clearSelection,
     ]);
 
     useLayoutEffect(() => {
@@ -257,13 +278,6 @@ export const GridMarqueeLayer: React.FC<Props> = ({
         const menuH = menuRef.current?.offsetHeight ?? 220;
         setMenuPos(computeMarqueeMenuPosition(anchorRect, MENU_WIDTH, menuH));
     }, [anchorRect, selectedKeys.size, selectedCourtCount]);
-
-    const closeMenu = useCallback(() => {
-        setAnchorRect(null);
-        setMenuPos(null);
-        setSelectedSlots([]);
-        onSelectionChange(new Set(), []);
-    }, [onSelectionChange]);
 
     useEffect(() => {
         if (!anchorRect) return;
@@ -282,6 +296,20 @@ export const GridMarqueeLayer: React.FC<Props> = ({
             window.removeEventListener('keydown', onKey);
         };
     }, [anchorRect, closeMenu]);
+
+    useEffect(() => {
+        if (selectedKeys.size === 0) return;
+        const onDown = (e: PointerEvent) => {
+            const target = e.target as HTMLElement;
+            if (target.closest('[data-marquee-menu]')) return;
+            const root = listenRef.current;
+            if (root && !root.contains(target)) {
+                clearSelection();
+            }
+        };
+        window.addEventListener('pointerdown', onDown);
+        return () => window.removeEventListener('pointerdown', onDown);
+    }, [selectedKeys.size, clearSelection, listenRef]);
 
     useEffect(() => {
         if (disabled || selectedKeys.size === 0) {

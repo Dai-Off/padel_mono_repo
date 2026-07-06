@@ -4,6 +4,8 @@ import { syncPlayerVector } from '../lib/mailer';
 import { computeMatchmakingLeagueUpdates, type MmLeagueRow } from './matchmakingLeagueEconomy';
 import { getActiveMatchmakingSeasonId } from './matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from './matchmakingLeagueConfigService';
+import { recomputeRadarForPlayers } from './coachAssessmentService';
+import { evaluateAndGrantForPlayers } from './unlockablesEngine';
 
 export const COMEBACK_BONUS = 1.1;
 export const WINDOW_SIZE = 20;
@@ -377,6 +379,14 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
   });
 
   if (rpcErr) throw new Error(rpcErr.message);
+
+  // El ELO cambió -> recalculamos y persistimos ya el radar de los 4 jugadores
+  // (write-through), para que su próxima apertura de perfil sea 1 query.
+  void recomputeRadarForPlayers(Object.keys(playerUpdates));
+
+  // Cambian señales de logros (matches/wins/win_streak/level) -> otorgar por
+  // evento (no on-read). Fire-and-forget: no bloquea el cierre del partido.
+  void evaluateAndGrantForPlayers(supabase, Object.keys(playerUpdates));
 
   for (const pid of Object.keys(playerUpdates)) {
     syncPlayerVector(pid).catch((e) => console.error('[levelingPipeline] sync-player-vector failed:', pid, e));

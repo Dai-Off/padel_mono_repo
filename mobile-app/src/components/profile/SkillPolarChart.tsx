@@ -1,9 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
-import Svg, { 
-  Polygon, 
-  Line, 
-  Circle, 
+import Svg, {
+  Polygon,
+  Line,
+  Circle,
   Text as SvgText,
 } from 'react-native-svg';
 import { useTranslation } from '../../i18n';
@@ -66,21 +66,26 @@ export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({
     outputRange: [getPoints(0), getPoints(1)],
   });
 
-  const renderSkillBar = (label: string, value: number, color: string) => (
-    <View style={styles.skillBarRow}>
-      <View style={[styles.skillDot, { backgroundColor: color }]} />
-      <Text style={[styles.skillLabel, { color }]}>{label}</Text>
-      <View style={styles.barTrack}>
-        <View style={[styles.barFill, { width: `${Math.max(0, Math.min(100, (value / max) * 100))}%`, backgroundColor: color }]} />
-      </View>
-      <Text style={[styles.skillValueText, { color }]}>{value}</Text>
-    </View>
-  );
+  // ── Barras de habilidades (valor por área) — COMENTADAS ──
+  // Los números ahora salen en el propio gráfico (junto a cada etiqueta). Se dejan
+  // por si se quieren volver a poner debajo del radar.
+  // const renderSkillBar = (label: string, value: number, color: string) => (
+  //   <View style={styles.skillBarRow}>
+  //     <View style={[styles.skillDot, { backgroundColor: color }]} />
+  //     <Text style={[styles.skillLabel, { color }]}>{label}</Text>
+  //     <View style={styles.barTrack}>
+  //       <View style={[styles.barFill, { width: `${Math.max(0, Math.min(100, (value / max) * 100))}%`, backgroundColor: color }]} />
+  //     </View>
+  //     <Text style={[styles.skillValueText, { color }]}>{value}</Text>
+  //   </View>
+  // );
 
   return (
     <View style={styles.container}>
       <View style={styles.chartWrapper}>
-        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {/* viewBox recortado en vertical para compactar (el gráfico r=90 vivía en
+            un lienzo de 300); deja sitio para las etiquetas apiladas arriba/abajo. */}
+        <Svg width={size} height={252} viewBox="0 24 300 252">
           {[1, 0.75, 0.5, 0.25].map((scale, idx) => (
             <Polygon
               key={idx}
@@ -105,21 +110,33 @@ export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({
             strokeLinejoin="round"
           />
 
-          <SvgText x={center} y={center - maxRadius - 15} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#F18F34">{skillLabels.technical}</SvgText>
-          <SvgText x={center + maxRadius + 10} y={center + 4} textAnchor="start" fontSize="11" fontWeight="bold" fill="#34D399">{skillLabels.physical}</SvgText>
-          <SvgText x={center} y={center + maxRadius + 22} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#F472B6">{skillLabels.mental}</SvgText>
-          <SvgText x={center - maxRadius - 10} y={center + 4} textAnchor="end" fontSize="11" fontWeight="bold" fill="#818CF8">{skillLabels.tactical}</SvgText>
+          {/* Etiquetas apiladas: nombre pequeño arriba + valor grande justo
+              debajo, CENTRADO en el eje de cada área (queda cuadrado). */}
+          {/* Técnico (arriba) */}
+          <SvgText x={center} y={center - maxRadius - 24} textAnchor="middle" fontSize="10" fontWeight="600" fill="#F18F34">{skillLabels.technical}</SvgText>
+          <SvgText x={center} y={center - maxRadius - 9} textAnchor="middle" fontSize="15" fontWeight="900" fill="#F18F34">{skills.technical}</SvgText>
+          {/* Físico (derecha) */}
+          <SvgText x={center + maxRadius + 12} y={center - 3} textAnchor="start" fontSize="10" fontWeight="600" fill="#34D399">{skillLabels.physical}</SvgText>
+          <SvgText x={center + maxRadius + 12} y={center + 13} textAnchor="start" fontSize="15" fontWeight="900" fill="#34D399">{skills.physical}</SvgText>
+          {/* Mental (abajo) */}
+          <SvgText x={center} y={center + maxRadius + 17} textAnchor="middle" fontSize="10" fontWeight="600" fill="#F472B6">{skillLabels.mental}</SvgText>
+          <SvgText x={center} y={center + maxRadius + 32} textAnchor="middle" fontSize="15" fontWeight="900" fill="#F472B6">{skills.mental}</SvgText>
+          {/* Táctico (izquierda) */}
+          <SvgText x={center - maxRadius - 12} y={center - 3} textAnchor="end" fontSize="10" fontWeight="600" fill="#818CF8">{skillLabels.tactical}</SvgText>
+          <SvgText x={center - maxRadius - 12} y={center + 13} textAnchor="end" fontSize="15" fontWeight="900" fill="#818CF8">{skills.tactical}</SvgText>
 
           <Circle cx={center} cy={center} r="4" fill="#F18F34" />
         </Svg>
       </View>
 
+      {/* Barras de valores — COMENTADAS (los números ahora salen en el gráfico).
       <View style={styles.skillsContainer}>
         {renderSkillBar(skillLabels.technical, skills.technical, '#F18F34')}
         {renderSkillBar(skillLabels.physical, skills.physical, '#34D399')}
         {renderSkillBar(skillLabels.mental, skills.mental, '#F472B6')}
         {renderSkillBar(skillLabels.tactical, skills.tactical, '#818CF8')}
       </View>
+      */}
     </View>
   );
 };
@@ -128,10 +145,9 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 2,
   },
   chartWrapper: {
-    marginBottom: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },

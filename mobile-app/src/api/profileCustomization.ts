@@ -33,6 +33,27 @@ function asRarity(raw: string): AchievementRarity {
   return raw === 'rare' || raw === 'epic' || raw === 'legendary' ? raw : 'common';
 }
 
+/** Mapea los `items` crudos del backend (catálogo de desbloqueables) a CatalogItem[]. */
+export function mapUnlockables(items: Record<string, unknown>[]): CatalogItem[] {
+  return (items ?? []).map((raw) => {
+    const i = raw as Omit<CatalogItem, 'rarity' | 'colors'> & { rarity: string; colors: unknown };
+    return {
+      id: i.id,
+      kind: i.kind as UnlockableKind,
+      title: i.title,
+      description: i.description ?? '',
+      rarity: asRarity(i.rarity),
+      icon: i.icon ?? null,
+      animationType: i.animationType ?? null,
+      style: i.style ?? null,
+      colors: Array.isArray(i.colors) ? (i.colors as string[]) : null,
+      unlockType: i.unlockType,
+      unlockValue: i.unlockValue ?? null,
+      unlocked: Boolean(i.unlocked),
+    };
+  });
+}
+
 /** Catálogo de desbloqueables filtrado por kind (p.ej. ['title','frame']). */
 export async function fetchUnlockables(
   token: string | null | undefined,
@@ -46,23 +67,7 @@ export async function fetchUnlockables(
     });
     const json = (await res.json()) as { ok?: boolean; items?: Record<string, unknown>[] };
     if (!res.ok || !json.ok) return [];
-    return (json.items ?? []).map((raw) => {
-      const i = raw as Omit<CatalogItem, 'rarity' | 'colors'> & { rarity: string; colors: unknown };
-      return {
-        id: i.id,
-        kind: i.kind as UnlockableKind,
-        title: i.title,
-        description: i.description ?? '',
-        rarity: asRarity(i.rarity),
-        icon: i.icon ?? null,
-        animationType: i.animationType ?? null,
-        style: i.style ?? null,
-        colors: Array.isArray(i.colors) ? (i.colors as string[]) : null,
-        unlockType: i.unlockType,
-        unlockValue: i.unlockValue ?? null,
-        unlocked: Boolean(i.unlocked),
-      };
-    });
+    return mapUnlockables(json.items ?? []);
   } catch {
     return [];
   }

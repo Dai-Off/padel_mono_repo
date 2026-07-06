@@ -19,3 +19,18 @@ export function reservationCheckboxLabel(r: Reservation): string {
     if (r.booking_type === 'tournament') return r.playerName || 'Torneo';
     return r.playerName || r.matchType || 'Turno';
 }
+
+/** Mantenimientos creados en bloque: mismo horario en otras pistas del mismo día. */
+export function findRelatedMaintenanceBookings(
+    target: Reservation,
+    all: Reservation[],
+): Reservation[] {
+    if (!isMaintenanceReservation(target)) return [];
+    return all.filter((r) =>
+        r.id !== target.id &&
+        isMaintenanceReservation(r) &&
+        r.status !== 'cancelled' &&
+        r.startTime === target.startTime &&
+        r.durationMinutes === target.durationMinutes,
+    );
+}
