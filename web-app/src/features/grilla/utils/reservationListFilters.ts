@@ -186,8 +186,11 @@ export function shouldShowRawBookingInGrid(
     const type = rawBookingType(b);
     const isMatchType = MATCH_GRID_FILL_TYPES.has(type);
 
-    // Mostrador: bloqueos, torneos, escuela, etc. Siempre visibles. Los partidos siguen las reglas de abajo.
-    if (b.source_channel === 'manual' && !isMatchType) return true;
+    // Mostrador: pista privada, pozo, bloqueos, escuela, etc. siempre visibles (también pendientes de cobro).
+    // Partidos abiertos públicos/privados desde mostrador siguen las reglas de visibilidad de abajo.
+    if (b.source_channel === 'manual' && !isPublicOpenMatchBooking(b) && !isPrivateMatchBooking(b)) {
+        return true;
+    }
 
     if (b.court_contention_status === 'competing' && !isPrivateMatchBooking(b)) {
         if (rawBookingFullyPaid(b) && (b.status === 'confirmed' || b.status === 'flat_rate')) return true;
@@ -216,7 +219,7 @@ export function shouldShowReservationInGrid(res: Reservation): boolean {
     const type = normalizeReservationTypeSlug(res.booking_type ?? res.reservation_type ?? 'standard');
     const isMatchType = MATCH_GRID_FILL_TYPES.has(type);
 
-    if (res.source_channel === 'manual' && !isMatchType) return true;
+    if (res.source_channel === 'manual' && type !== 'open_match') return true;
 
     if (type === 'open_match') {
         if (playerCount(res) >= PUBLIC_OPEN_MATCH_MIN_PLAYERS) return true;
