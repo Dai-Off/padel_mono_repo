@@ -20,6 +20,7 @@ import { theme } from '../theme';
 import { formatPlayerLabel } from '../lib/username';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 import { useTranslation } from '../i18n';
+import { fetchFollowing } from '../api/playerFollows';
 
 const ACCENT = '#F18F34';
 const BG = '#0A0A0A';
@@ -65,7 +66,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchHits, setSearchHits] = useState<PlayerSearchHit[]>([]);
+  const [searchHits, setSearchHits] = useState<import('../api/playerFollows').FollowerPlayer[]>([]);
 
   useEffect(() => {
     if (!token) return;
@@ -110,33 +111,48 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
     return conversations.filter((c) => peerDisplayName(c).toLowerCase().includes(q));
   }, [conversations, filter]);
 
+  const [followingList, setFollowingList] = useState<any[]>([]);
+
+  // Cargar lista de personas seguidas al abrir el modal de nuevo chat
   useEffect(() => {
-    if (!newChatOpen || !token) {
-      setSearchHits([]);
+    if (newChatOpen && token && myPlayerId) {
+      setSearchLoading(true);
+      fetchFollowing(token, myPlayerId)
+        .then((res) => {
+          if (res.ok) {
+            setFollowingList(res.following);
+          }
+        })
+        .finally(() => {
+          setSearchLoading(false);
+        });
+    } else {
+      setFollowingList([]);
+    }
+  }, [newChatOpen, token, myPlayerId]);
+
+  // Filtrar la lista localmente en base a lo que escriba el usuario
+  useEffect(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!q) {
+      // Si no escribe nada, mostramos todos a los que sigue (opción amigable)
+      setSearchHits(followingList);
       return;
     }
-    const q = searchQ.trim();
-    if (q.length < 2) {
-      setSearchHits([]);
-      return;
-    }
-    let cancelled = false;
-    setSearchLoading(true);
-    const t = setTimeout(async () => {
-      const res = await searchPlayers(q, token);
-      if (cancelled) return;
-      setSearchLoading(false);
-      if (res.ok) {
-        setSearchHits(res.players.filter((p) => p.id !== myPlayerId));
-      } else {
-        setSearchHits([]);
-      }
-    }, 400);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [newChatOpen, searchQ, token, myPlayerId]);
+
+    const filtered = followingList.filter((p) => {
+      const username = (p.username ?? '').toLowerCase();
+      const firstName = (p.first_name ?? '').toLowerCase();
+      const lastName = (p.last_name ?? '').toLowerCase();
+      return (
+        username.includes(q) ||
+        firstName.includes(q) ||
+        lastName.includes(q)
+      );
+    });
+
+    setSearchHits(filtered);
+  }, [searchQ, followingList]);
 
   const openThread = (peer: MessagePeerNav) => {
     setNewChatOpen(false);
@@ -290,13 +306,17 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                         openThread({
                           id: item.id,
                           displayName: fullName || dn,
-                          avatarUrl: null,
+                          avatarUrl: item.avatar_url ?? null,
                         })
                       }
                     >
-                      <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{initials(fullName || dn)}</Text>
-                      </View>
+                      <AvatarWithFrame
+                        avatarUrl={item.avatar_url ?? null}
+                        initials={initials(fullName || dn)}
+                        size={36}
+                        frame={item.frame ?? null}
+                        animate={false}
+                      />
                       <View style={styles.searchRowText}>
                         <Text style={styles.peerName}>
                           {hasUsername ? `@${item.username}` : fullName || t('common.playerFallback')}
@@ -309,7 +329,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                   );
                 }}
                 ListEmptyComponent={
-                  searchQ.trim().length >= 2 && !searchLoading ? (
+                  !searchLoading ? (
                     <Text style={styles.empty}>{t('messages.noSearchResults')}</Text>
                   ) : null
                 }

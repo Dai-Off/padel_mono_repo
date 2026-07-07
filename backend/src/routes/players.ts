@@ -1703,6 +1703,7 @@ router.get('/', async (req: Request, res: Response) => {
  */
 router.get('/:id/public-profile', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const { playerId: currentUserId } = await getPlayerIdFromBearer(req);
   const locale = parsePeerFeedbackLocale(
     req.query.lang as string | string[] | undefined,
     req.headers['accept-language'] as string | undefined
@@ -1711,7 +1712,7 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: player, error: pErr } = await supabase
       .from('players')
-      .select('id, first_name, last_name, username, avatar_url, cover_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga, preferred_side, preferred_play_style, dominant_hand')
+      .select('id, first_name, last_name, username, avatar_url, cover_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga, preferred_side, preferred_play_style, dominant_hand, followers_count, following_count')
       .eq('id', id)
       .maybeSingle();
 
@@ -1720,6 +1721,18 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
 
     const wl = await fetchPlayerMatchmakingWl(supabase, id);
     const publicData = toPublicPlayer(player as Row);
+
+    // Verificar si el usuario autenticado sigue a este jugador
+    let isFollowing = false;
+    if (currentUserId && currentUserId !== id) {
+      const { data: followExist } = await supabase
+        .from('player_follows')
+        .select('id')
+        .eq('follower_id', currentUserId)
+        .eq('following_id', id)
+        .maybeSingle();
+      isFollowing = !!followExist;
+    }
 
     // Radar / Coach Assessment: se computa FRESCO (ELO + learning) en vez de leer
     // la fila cruda, que puede estar obsoleta si el ELO cambió tras partidos.
@@ -1747,6 +1760,9 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
         ...wl,
         username: (player as { username?: string | null }).username ?? null,
         cover_url: (player as { cover_url?: string | null }).cover_url ?? null,
+        followers_count: player.followers_count ?? 0,
+        following_count: player.following_count ?? 0,
+        is_following: isFollowing,
         coach_assessment: coachLocalized,
         recent_matches: recentMatches || [],
       },
