@@ -10,6 +10,7 @@ export type SeasonPassSeasonRow = {
   lesson_sp_base: number;
   max_level: number;
   track_radius: number;
+  boost_cap: number;
   hero_chip_label: string | null;
   elite_card_subtitle: string | null;
   mission_period_tabs: unknown;
@@ -24,7 +25,7 @@ export async function getActiveSeasonRow(): Promise<SeasonPassSeasonRow | null> 
   const { data, error } = await supabase
     .from('season_pass_seasons')
     .select(
-      'slug, title, subtitle, ends_at, active, sp_per_level, lesson_sp_base, max_level, track_radius, hero_chip_label, elite_card_subtitle, mission_period_tabs, elite_modal_bullets'
+      'slug, title, subtitle, ends_at, active, sp_per_level, lesson_sp_base, max_level, track_radius, boost_cap, hero_chip_label, elite_card_subtitle, mission_period_tabs, elite_modal_bullets'
     )
     .eq('active', true)
     .limit(1)

@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import { getSupabaseServiceRoleClient } from './supabase';
+import { touchActiveDayFromRequest } from '../services/playerActiveDays';
 
 export async function getPlayerIdFromBearer(req: Request): Promise<{ playerId: string; error?: string }> {
   const authHeader = req.headers.authorization;
@@ -20,7 +21,10 @@ export async function getPlayerIdFromBearer(req: Request): Promise<{ playerId: s
     .neq('status', 'deleted')
     .maybeSingle();
   if (errAuth) return { playerId: '', error: errAuth.message };
-  if (byAuth) return { playerId: byAuth.id as string };
+  if (byAuth) {
+    touchActiveDayFromRequest(req, byAuth.id as string);
+    return { playerId: byAuth.id as string };
+  }
 
   const email = user.email ? String(user.email).trim().toLowerCase() : '';
   if (!email) return { playerId: '', error: 'No existe jugador vinculado a esta cuenta' };
@@ -34,6 +38,7 @@ export async function getPlayerIdFromBearer(req: Request): Promise<{ playerId: s
   if (errPlayer) return { playerId: '', error: errPlayer.message };
   if (!player) return { playerId: '', error: 'No existe jugador vinculado a esta cuenta' };
 
+  touchActiveDayFromRequest(req, player.id as string);
   return { playerId: player.id as string };
 }
 
@@ -60,7 +65,10 @@ export async function getPlayerAuthFromBearer(
     .neq('status', 'deleted')
     .maybeSingle();
   if (errAuth) return { playerId: '', authUserId: '', error: errAuth.message };
-  if (byAuth) return { playerId: byAuth.id as string, authUserId: user.id };
+  if (byAuth) {
+    touchActiveDayFromRequest(req, byAuth.id as string);
+    return { playerId: byAuth.id as string, authUserId: user.id };
+  }
 
   const email = user.email ? String(user.email).trim().toLowerCase() : '';
   if (!email) return { playerId: '', authUserId: '', error: 'No existe jugador vinculado a esta cuenta' };
@@ -74,5 +82,6 @@ export async function getPlayerAuthFromBearer(
   if (errPlayer) return { playerId: '', authUserId: '', error: errPlayer.message };
   if (!player) return { playerId: '', authUserId: '', error: 'No existe jugador vinculado a esta cuenta' };
 
+  touchActiveDayFromRequest(req, player.id as string);
   return { playerId: player.id as string, authUserId: user.id };
 }

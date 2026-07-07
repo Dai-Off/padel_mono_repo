@@ -14,6 +14,7 @@ import { insertClubChatMention } from '../lib/clubChatMentions';
 import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
 import { clubTimezoneOrDefault } from '../lib/clubTimezone';
 import { ensureOpenMatchRecordForBooking, type OpenMatchSyncOpts } from '../lib/matchFromBookingSync';
+import { evaluateMissionsAndBuildDelta } from '../services/seasonPassEngine';
 import { checkWalletBalances, computeBookingStatus, upsertManualPayments } from '../lib/bookingManualPayment';
 import {
   collectStripePlayerIds,
@@ -1845,7 +1846,24 @@ router.post('/', async (req: Request, res: Response) => {
       console.error('[POST /bookings] resolveCourtContention:', contentionErr);
     }
     const { data: bookingWithMatch } = await supabase.from('bookings').select(SELECT_ONE).eq('id', booking.id).maybeSingle();
-    return res.status(201).json({ ok: true, booking: bookingWithMatch ?? finalBooking ?? booking });
+
+    // Season pass instant channel (plan §6.7): player-created bookings can
+    // complete booking missions; celebrate in the action response.
+    let seasonPassDelta = null;
+    const playerCreated =
+      organizer_player_id && ['app', 'mobile', 'web'].includes(String(source_channel ?? ''));
+    if (playerCreated) {
+      seasonPassDelta = await evaluateMissionsAndBuildDelta(
+        String(organizer_player_id),
+        String(timezone ?? 'UTC')
+      );
+    }
+
+    return res.status(201).json({
+      ok: true,
+      booking: bookingWithMatch ?? finalBooking ?? booking,
+      season_pass: seasonPassDelta,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
