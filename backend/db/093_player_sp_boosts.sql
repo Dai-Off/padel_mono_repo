@@ -37,11 +37,18 @@ comment on table public.player_sp_boosts is
 -- 48-72h window. Product knob — tune from SQL.
 -- ────────────────────────────────────────────────────────────
 
--- Free lane: a taste of boosters (+30%, 48h)
+-- Free lane: steady booster cadence (~every 10 levels) — small ones early so
+-- everyone tries the mechanic, two bigger ones near the end of the track.
 insert into public.season_pass_rewards (season_slug, level, tier, reward_type, boost_config, display, sort_order) values
+  ('s1', 12, 'free', 'sp_boost', '{"bonus":0.15,"expires_hours":24}', '{"icon":"🚀","label":"+15% SP · 24h"}', 0),
+  ('s1', 22, 'free', 'sp_boost', '{"bonus":0.15,"expires_hours":24}', '{"icon":"🚀","label":"+15% SP · 24h"}', 0),
+  ('s1', 32, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
   ('s1', 45, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
+  ('s1', 55, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
   ('s1', 65, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 95, 'free', 'sp_boost', '{"bonus":0.50,"expires_hours":48}', '{"icon":"🚀","label":"+50% SP · 48h"}', 0)
+  ('s1', 80, 'free', 'sp_boost', '{"bonus":0.50,"expires_hours":48}', '{"icon":"🚀","label":"+50% SP · 48h"}', 0),
+  ('s1', 88, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
+  ('s1', 95, 'free', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0)
 on conflict (season_slug, level, tier, reward_type, unlockable_id) do update set
   boost_config = excluded.boost_config, display = excluded.display, sort_order = excluded.sort_order;
 
