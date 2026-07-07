@@ -636,33 +636,38 @@ export function SeasonPassScreen({ onBack }: Props) {
     void load().finally(() => setRefreshing(false));
   }, [load]);
 
+  // Confirmación de reroll: modal propio con el estilo dark de la app (el
+  // Alert nativo desentona). rerollTarget != null = modal abierto.
+  const [rerollTarget, setRerollTarget] = useState<SeasonPassMissionDto | null>(null);
   const [rerolling, setRerolling] = useState(false);
+  const [rerollErr, setRerollErr] = useState<string | null>(null);
+
   const handleReroll = useCallback(
     (m: SeasonPassMissionDto) => {
-      const token = session?.access_token;
-      if (!token || !m.assignment_id || rerolling) return;
-      Alert.alert(
-        t('alerts.seasonPass.rerollTitle'),
-        t('alerts.seasonPass.rerollMsg', { title: m.title }),
-        [
-          { text: t('alerts.seasonPass.rerollCancel'), style: 'cancel' },
-          {
-            text: t('alerts.seasonPass.rerollConfirm'),
-            onPress: () => {
-              setRerolling(true);
-              void rerollSeasonPassMission(token, m.assignment_id!, 'Europe/Madrid')
-                .then((r) => {
-                  if (!r.ok) Alert.alert(t('alerts.seasonPass.rerollFail'));
-                  return load();
-                })
-                .finally(() => setRerolling(false));
-            },
-          },
-        ],
-      );
+      if (!m.assignment_id || rerolling) return;
+      setRerollErr(null);
+      setRerollTarget(m);
     },
-    [session?.access_token, rerolling, load, t],
+    [rerolling],
   );
+
+  const confirmReroll = useCallback(() => {
+    const token = session?.access_token;
+    const target = rerollTarget;
+    if (!token || !target?.assignment_id || rerolling) return;
+    setRerolling(true);
+    setRerollErr(null);
+    void rerollSeasonPassMission(token, target.assignment_id, 'Europe/Madrid')
+      .then(async (r) => {
+        if (!r.ok) {
+          setRerollErr(t('alerts.seasonPass.rerollFail'));
+          return;
+        }
+        setRerollTarget(null);
+        await load();
+      })
+      .finally(() => setRerolling(false));
+  }, [session?.access_token, rerollTarget, rerolling, load, t]);
 
   const spPer = me?.sp_per_level ?? DEFAULT_SP_PER_LEVEL;
   const levelMax = me?.level_max ?? 100;
@@ -1169,6 +1174,65 @@ export function SeasonPassScreen({ onBack }: Props) {
         )}
       </ScrollView>
 
+      <Modal
+        visible={rerollTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => (!rerolling ? setRerollTarget(null) : undefined)}
+      >
+        <View style={{ flex: 1 }}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => (!rerolling ? setRerollTarget(null) : undefined)}
+          >
+            <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
+          </Pressable>
+          <View style={styles.rerollModalWrap} pointerEvents="box-none">
+            <View style={styles.rerollModalCard}>
+              <View style={styles.rerollModalIcon}>
+                <Ionicons name="refresh" size={22} color={ACCENT} />
+              </View>
+              <Text style={styles.rerollModalTitle}>{t('alerts.seasonPass.rerollTitle')}</Text>
+              <Text style={styles.rerollModalMsg}>
+                {t('alerts.seasonPass.rerollMsg', { title: rerollTarget?.title ?? '' })}
+              </Text>
+              <Text style={styles.rerollModalQuota}>
+                {rerollTarget?.period === 'weekly'
+                  ? t('alerts.seasonPass.rerollQuotaWeekly')
+                  : t('alerts.seasonPass.rerollQuotaDaily')}
+              </Text>
+              {rerollErr ? <Text style={styles.rerollModalErr}>{rerollErr}</Text> : null}
+              <Pressable
+                onPress={confirmReroll}
+                disabled={rerolling}
+                style={({ pressed }) => [
+                  styles.rerollModalCta,
+                  rerolling && { opacity: 0.7 },
+                  pressed && !rerolling && styles.pressed,
+                ]}
+              >
+                {rerolling ? (
+                  <ActivityIndicator color="#0B1120" size="small" />
+                ) : (
+                  <Text style={styles.rerollModalCtaTxt}>
+                    {t('alerts.seasonPass.rerollConfirm')}
+                  </Text>
+                )}
+              </Pressable>
+              <Pressable
+                onPress={() => setRerollTarget(null)}
+                disabled={rerolling}
+                style={{ marginTop: 10, paddingVertical: 6 }}
+              >
+                <Text style={styles.rerollModalCancelTxt}>
+                  {t('alerts.seasonPass.rerollCancel')}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={showElite} transparent animationType="fade" onRequestClose={() => setShowElite(false)}>
         <View style={{ flex: 1 }}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowElite(false)}>
@@ -1542,6 +1606,74 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.14)',
+  },
+  rerollModalWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 28,
+  },
+  rerollModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#141414',
+    borderColor: BORDER,
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 22,
+    alignItems: 'center',
+  },
+  rerollModalIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  rerollModalTitle: androidReadableText({
+    color: '#F9FAFB',
+    fontSize: 17,
+    fontWeight: '800',
+    textAlign: 'center',
+  }),
+  rerollModalMsg: androidReadableText({
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 19,
+  }),
+  rerollModalQuota: androidReadableText({
+    color: ACCENT,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 8,
+  }),
+  rerollModalErr: androidReadableText({
+    color: '#f87171',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
+  }),
+  rerollModalCta: {
+    marginTop: 16,
+    alignSelf: 'stretch',
+    backgroundColor: ACCENT,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  rerollModalCtaTxt: { color: '#0B1120', fontSize: 15, fontWeight: '800' },
+  rerollModalCancelTxt: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   milestoneCard: {
     marginTop: 8,
