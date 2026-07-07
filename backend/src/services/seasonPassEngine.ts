@@ -39,6 +39,8 @@ export type SeasonPassMissionPayload = {
   sp_granted: number | null;
   period_end_iso: string | null;
   expires_label: string | null;
+  /** Puede descartarse vía reroll (pool diario / semanal, no completada). */
+  rerollable: boolean;
 };
 
 export type SeasonPassPendingCelebration = {
@@ -71,6 +73,8 @@ export type SeasonPassDelta = {
 export type SeasonPassState = {
   missions: SeasonPassMissionPayload[];
   pending_celebrations: SeasonPassPendingCelebration[];
+  /** Reroll v1: 1 gratis por día (diarias del pool) y 1 por semana (semanales). */
+  reroll: { daily_available: boolean; weekly_available: boolean };
 };
 
 type AssignmentRow = {
@@ -81,6 +85,7 @@ type AssignmentRow = {
   completed_at: string | null;
   sp_granted: number | null;
   notified_at: string | null;
+  rerolled_to: string | null;
 };
 
 type CompletedNow = {
@@ -230,7 +235,7 @@ async function runEvaluation(
   const lookbackKey = addDaysToKey(periods.daily.period_start, -LOOKBACK_DAYS);
   const { data, error } = await supabase
     .from('player_season_pass_missions')
-    .select('id, mission_id, period_start, progress, completed_at, sp_granted, notified_at')
+    .select('id, mission_id, period_start, progress, completed_at, sp_granted, notified_at, rerolled_to')
     .eq('player_id', playerId)
     .gte('period_start', lookbackKey);
   if (error) throw new Error(error.message);
@@ -249,6 +254,7 @@ async function runEvaluation(
   const graceFloorKey = addDaysToKey(periods.daily.period_start, -PAST_PERIOD_GRACE_DAYS);
 
   for (const row of rows) {
+    if (row.rerolled_to) continue; // discarded via reroll — replacement has its own row
     const def = defsById.get(row.mission_id);
     if (!def) continue; // definition deactivated after assignment
 
@@ -373,6 +379,7 @@ export async function buildSeasonPassState(
 
   const missions: SeasonPassMissionPayload[] = rows
     .filter((row) => {
+      if (row.rerolled_to) return false;
       const def = defsById.get(row.mission_id);
       return def && row.period_start === periods[def.period].period_start;
     })
@@ -395,6 +402,9 @@ export async function buildSeasonPassState(
         sp_granted: row.sp_granted,
         period_end_iso: period.end_iso,
         expires_label: def.period === 'daily' ? formatDailyExpires(period.end_iso, tz) : null,
+        rerollable:
+          !row.completed_at &&
+          (def.assignment === 'daily_pool' || def.assignment === 'weekly_calendar'),
       };
     })
     .sort((a, b) => {
@@ -424,7 +434,22 @@ export async function buildSeasonPassState(
     .filter((c): c is SeasonPassPendingCelebration => c !== null)
     .sort((a, b) => a.completed_at.localeCompare(b.completed_at));
 
-  return { missions, pending_celebrations };
+  const rerollUsed = (periodKind: MissionPeriodKind) =>
+    rows.some(
+      (row) =>
+        row.rerolled_to !== null &&
+        defsById.get(row.mission_id)?.period === periodKind &&
+        row.period_start === periods[periodKind].period_start
+    );
+
+  return {
+    missions,
+    pending_celebrations,
+    reroll: {
+      daily_available: !rerollUsed('daily'),
+      weekly_available: !rerollUsed('weekly'),
+    },
+  };
 }
 
 /**
@@ -482,6 +507,102 @@ export async function evaluateMissionsAndBuildDelta(
     console.warn('[season-pass] delta evaluation failed:', (e as Error).message);
     return null;
   }
+}
+
+export type RerollResult =
+  | { ok: true; new_mission: { id: string; slug: string; icon: string; title: string } }
+  | { ok: false; code: 'not_found' | 'not_rerollable' | 'limit_reached' | 'no_candidates' | 'conflict' };
+
+/**
+ * Reroll v1 (plan §6.5, free): swap one incomplete pool daily (or weekly) for
+ * another mission of the same pool, once per day/week. Deterministic pick via
+ * PRNG excluding everything already assigned in the period; the discarded row
+ * keeps `rerolled_to` as the audit trail and stops being evaluated/shown.
+ */
+export async function rerollMission(
+  playerId: string,
+  season: SeasonPassSeasonRow,
+  tz: string,
+  assignmentId: string
+): Promise<RerollResult> {
+  const supabase = getSupabaseServiceRoleClient();
+  const defs = await loadActiveDefs(season.slug);
+  const defsById = new Map(defs.map((d) => [d.id, d]));
+
+  const { data: rowData, error: rowErr } = await supabase
+    .from('player_season_pass_missions')
+    .select('id, mission_id, period_start, completed_at, rerolled_to')
+    .eq('id', assignmentId)
+    .eq('player_id', playerId)
+    .maybeSingle();
+  if (rowErr || !rowData) return { ok: false, code: 'not_found' };
+
+  const def = defsById.get(String(rowData.mission_id));
+  if (!def) return { ok: false, code: 'not_found' };
+  if (rowData.completed_at || rowData.rerolled_to) return { ok: false, code: 'not_rerollable' };
+  if (def.assignment !== 'daily_pool' && def.assignment !== 'weekly_calendar') {
+    return { ok: false, code: 'not_rerollable' };
+  }
+
+  const period = currentPeriod(def.period, tz);
+  if (String(rowData.period_start) !== period.period_start) {
+    return { ok: false, code: 'not_rerollable' }; // only the current period
+  }
+
+  // Every assignment of this period type: quota check + exclusion list.
+  const { data: periodRows, error: listErr } = await supabase
+    .from('player_season_pass_missions')
+    .select('mission_id, rerolled_to')
+    .eq('player_id', playerId)
+    .eq('period_start', period.period_start);
+  if (listErr) return { ok: false, code: 'conflict' };
+
+  const samePeriodRows = (periodRows ?? []).filter(
+    (r) => defsById.get(String(r.mission_id))?.period === def.period
+  );
+  if (samePeriodRows.some((r) => r.rerolled_to !== null)) {
+    return { ok: false, code: 'limit_reached' }; // v1: one free reroll per period
+  }
+
+  const assignedIds = new Set(samePeriodRows.map((r) => String(r.mission_id)));
+  const candidates = defs
+    .filter((d) => d.assignment === def.assignment && !assignedIds.has(d.id))
+    .sort((a, b) => a.slug.localeCompare(b.slug));
+  if (candidates.length === 0) return { ok: false, code: 'no_candidates' };
+
+  const [replacement] = drawDeterministic(
+    candidates,
+    1,
+    `${playerId}:${period.period_start}:reroll:${assignmentId}`
+  );
+
+  // Claim the reroll (conditional on rerolled_to still null — race-safe).
+  const { data: claimed, error: claimErr } = await supabase
+    .from('player_season_pass_missions')
+    .update({ rerolled_to: replacement.id, updated_at: new Date().toISOString() })
+    .eq('id', assignmentId)
+    .is('rerolled_to', null)
+    .is('completed_at', null)
+    .select('id');
+  if (claimErr || !claimed || claimed.length === 0) return { ok: false, code: 'conflict' };
+
+  const { error: insErr } = await supabase
+    .from('player_season_pass_missions')
+    .upsert(
+      { player_id: playerId, mission_id: replacement.id, period_start: period.period_start },
+      { onConflict: 'player_id,mission_id,period_start', ignoreDuplicates: true }
+    );
+  if (insErr) console.warn('[season-pass reroll] insert failed:', insErr.message);
+
+  return {
+    ok: true,
+    new_mission: {
+      id: replacement.id,
+      slug: replacement.slug,
+      icon: replacement.icon,
+      title: replacement.title,
+    },
+  };
 }
 
 /** Ack de celebraciones diferidas (Home queue). Returns how many rows were acked. */

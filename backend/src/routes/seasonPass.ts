@@ -3,7 +3,11 @@ import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { computeSeasonPass, getOrCreateSeasonPassRow } from '../services/seasonPassService';
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { computeTrackLevels, listSpHowRows } from '../services/seasonPassMissions';
-import { ackMissionCelebrations, buildSeasonPassState } from '../services/seasonPassEngine';
+import {
+  ackMissionCelebrations,
+  buildSeasonPassState,
+  rerollMission,
+} from '../services/seasonPassEngine';
 import {
   ackRewardGrants,
   buildRewardDisplay,
@@ -96,6 +100,7 @@ router.get('/me', async (req: Request, res: Response) => {
       mission_period_tabs: season.mission_period_tabs,
       missions: state.missions,
       pending_celebrations: state.pending_celebrations,
+      reroll: state.reroll,
       sp_how,
       track_levels,
       track_rewards,
@@ -127,6 +132,33 @@ router.post('/missions/ack', async (req: Request, res: Response) => {
   try {
     const acked = await ackMissionCelebrations(playerId!, ids);
     return res.json({ ok: true, acked });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /season-pass/missions/:id/reroll?timezone=Europe/Madrid
+ * Reroll v1 (gratis): descarta una misión del pool (diaria o semanal) del
+ * período actual y la sustituye por otra elegida determinísticamente.
+ * Cuota: 1/día para diarias y 1/semana para semanales.
+ */
+router.post('/missions/:id/reroll', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const tz = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
+
+  try {
+    const season = await getActiveSeasonRow();
+    if (!season) return res.status(503).json({ ok: false, error: 'Sin temporada activa' });
+
+    const result = await rerollMission(playerId!, season, tz, String(req.params.id));
+    if (!result.ok) {
+      const status =
+        result.code === 'not_found' ? 404 : result.code === 'limit_reached' ? 409 : 400;
+      return res.status(status).json({ ok: false, error: result.code });
+    }
+    return res.json({ ok: true, new_mission: result.new_mission });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
