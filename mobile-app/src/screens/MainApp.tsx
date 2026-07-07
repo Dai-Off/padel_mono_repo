@@ -52,6 +52,7 @@ import { fetchMyPlayerProfile } from '../api/players';
 import { fetchMatchById } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { UnlockModalHost } from '../components/profile/UnlockModalHost';
+import { SeasonPassCelebrationHost } from '../components/seasonPass/SeasonPassCelebrationHost';
 import {
   fetchMatchmakingStatus,
   fetchSeasonTransition,
@@ -1534,6 +1535,9 @@ export function MainApp() {
           setVitrinaScrollNonce((n) => n + 1);
         }}
       />
+
+      {/* Cola de celebraciones del pase: misiones completadas "fuera" de la app. */}
+      <SeasonPassCelebrationHost />
     </View>
   );
 }

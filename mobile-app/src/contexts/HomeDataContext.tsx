@@ -13,7 +13,7 @@ import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { fetchPublicTournaments } from '../api/tournaments';
-import { fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
+import { ackSeasonPassMissions, fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchMyCourtReservations, type CourtReservation } from '../api/bookings';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
@@ -95,6 +95,8 @@ type HomeDataValue = {
   seasonPassMe: SeasonPassMeOk | null;
   seasonPassLoading: boolean;
   refreshSeasonPass: (opts?: { force?: boolean }) => Promise<void>;
+  /** Ack de celebraciones diferidas: las quita localmente y avisa al backend. */
+  ackSeasonPassCelebrations: (assignmentIds: string[]) => Promise<void>;
 
   // Home stats (count pistas libres + jugadores) — quick actions del home.
   stats: HomeStats | null;
@@ -566,6 +568,23 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
+  const ackSeasonPassCelebrations = useCallback(
+    async (assignmentIds: string[]) => {
+      if (assignmentIds.length === 0) return;
+      // Limpieza optimista: el modal se cierra al instante; si el ack falla,
+      // el backend las re-entrega en el siguiente /me y se vuelven a mostrar.
+      setSeasonPassMe((prev) => {
+        if (!prev?.pending_celebrations?.length) return prev;
+        const remaining = prev.pending_celebrations.filter(
+          (c) => !assignmentIds.includes(c.assignment_id),
+        );
+        return { ...prev, pending_celebrations: remaining };
+      });
+      if (token) await ackSeasonPassMissions(token, assignmentIds);
+    },
+    [token],
+  );
+
   const refreshStats = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       if (!force && statsLoadedAt.current > 0) return;
@@ -776,6 +795,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       seasonPassMe,
       seasonPassLoading,
       refreshSeasonPass,
+      ackSeasonPassCelebrations,
       stats,
       statsLoading,
       refreshStats,
@@ -805,6 +825,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       seasonPassMe,
       seasonPassLoading,
       refreshSeasonPass,
+      ackSeasonPassCelebrations,
       stats,
       statsLoading,
       refreshStats,

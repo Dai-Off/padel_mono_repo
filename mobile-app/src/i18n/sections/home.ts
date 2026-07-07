@@ -94,6 +94,11 @@ export interface HomeTranslationKeys {
     levelN: string;
     spToNext: string;
     spCap: string;
+    missionCompleted: string;
+    missionsCompletedMany: string;
+    spGained: string;
+    celebrationCta: string;
+    levelUpBanner: string;
   };
   competitiveLeague: {
     title: string;

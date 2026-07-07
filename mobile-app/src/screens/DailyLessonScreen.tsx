@@ -23,6 +23,7 @@ import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
 import { IconGlow } from '../components/ui/IconGlow';
 import { LessonImpactRadar, type SkillValues } from '../components/learning/LessonImpactRadar';
+import { MissionCelebrationCard } from '../components/seasonPass/MissionCelebrationCard';
 import { useTranslation } from '../i18n';
 
 type Props = {
@@ -376,15 +377,13 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       const totalScore = correctCount * 100;
       setResults({
         ok: true,
-        session: { id: 'repeat', correct_count: correctCount, total_count: answersToSend.length, score: totalScore, xp_earned: 0, completed_at: new Date().toISOString() },
+        session: { id: 'repeat', correct_count: correctCount, total_count: answersToSend.length, score: totalScore, completed_at: new Date().toISOString() },
         streak: {
           current: streak.currentStreak,
           longest: streak.longestStreak,
-          multiplier: streak.multiplier,
-          xp_base: 0,
-          xp_bonus: 0,
         },
         shared_streaks: [],
+        season_pass: null,
         results: answersToSend.map((a, i) => ({ question_id: a.question_id, correct: !failedIndices.includes(i), correct_answer: null, points: failedIndices.includes(i) ? 0 : 100 })),
       });
       setPhase('results');
@@ -402,7 +401,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setPhase('results');
     }
     setSubmitting(false);
-  }, [session?.access_token, session?.user?.id, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier, t]);
+  }, [session?.access_token, session?.user?.id, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, t]);
 
   const startQuestionOrVideo = useCallback((index: number) => {
     const q = questions[index];
@@ -778,7 +777,6 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   // ---------------------------------------------------------------------------
   if (phase === 'intro') {
     const areas = [...new Set(questions.map((q) => q.area))];
-    const multiplierText = streak.multiplier > 0 ? `x${(1 + streak.multiplier).toFixed(1)} XP` : null;
     // Variante "ya completada": mientras carga usamos la señal cacheada de la
     // Home para no parpadear; cuando el fetch resuelve, manda el valor real.
     const showCompleted = loading ? isLessonCompletedToday(homeStreak.lastCompleted, TIMEZONE) : alreadyCompleted;
@@ -827,7 +825,6 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               <View style={styles.streakBadge}>
                 <Ionicons name="flame" size={16} color="#F97316" />
                 <Text style={styles.streakText}>{t('learning.dailyLessonStreakDays', { count: streak.currentStreak })}</Text>
-                {multiplierText && <Text style={styles.multiplierText}>{multiplierText}</Text>}
               </View>
             )}
 
@@ -1090,10 +1087,6 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               <Text style={styles.metricValue}>{pct}%</Text>
               <Text style={styles.metricLabel}>{t('learning.dailyLessonScore')}</Text>
             </View>
-            <View style={[styles.metricItem, styles.metricXp]}>
-              <Text style={styles.metricValueXp}>+{results.session.xp_earned}</Text>
-              <Text style={styles.metricLabel}>{t('learning.dailyLessonSkillPoints')}</Text>
-            </View>
             <View style={[styles.metricItem, styles.metricCorrect]}>
               <Text style={styles.metricValueCorrect}>
                 {results.session.correct_count}/{results.session.total_count}
@@ -1101,6 +1094,31 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               <Text style={styles.metricLabel}>{t('learning.dailyLessonCorrect')}</Text>
             </View>
           </View>
+
+          {/* Recompensa como misión del pase (plan §6.7): sustituye a la
+              antigua métrica de XP. Puede haber más de una (p. ej. la fija de
+              lección + una semanal/mensual de lecciones que cayó con esta). */}
+          {(results.season_pass?.completed_missions?.length ?? 0) > 0 && (
+            <View style={styles.missionCelebrations}>
+              {results.season_pass!.completed_missions.map((m, i) => (
+                <MissionCelebrationCard
+                  key={m.slug}
+                  icon={m.icon}
+                  title={m.title}
+                  spGranted={m.sp_granted}
+                  delay={i * 150}
+                />
+              ))}
+              {results.season_pass!.level_up && (
+                <View style={styles.levelUpBanner}>
+                  <Ionicons name="arrow-up-circle" size={18} color="#FBBF24" />
+                  <Text style={styles.levelUpText}>
+                    {t('home.seasonPass.levelUpBanner', { level: results.season_pass!.level_up.to })}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
 
           <LessonImpactRadar baseSkills={baseSkills} deltas={deltas} />
 
@@ -1112,11 +1130,6 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
                   <Text style={styles.streakResultValue}>{t('learning.dailyLessonStreakDaysLabel', { count: results.streak.current })}</Text>
                   <Text style={styles.streakResultLabel}>{t('learning.dailyLessonStreakCurrent')}</Text>
                 </View>
-                {results.streak.xp_bonus > 0 && (
-                  <View style={styles.bonusBadge}>
-                    <Text style={styles.bonusText}>{t('learning.dailyLessonXpBonus', { xp: results.streak.xp_bonus })}</Text>
-                  </View>
-                )}
               </View>
               {nextMilestone !== null && (
                 <View style={styles.nextBonusRow}>
@@ -1452,7 +1465,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(249,115,22,0.1)', borderWidth: 1, borderColor: 'rgba(249,115,22,0.2)',
   },
   streakText: { color: '#FB923C', fontSize: 14, fontWeight: '700' },
-  multiplierText: { color: 'rgba(249,115,22,0.6)', fontSize: 12 },
   topicBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
   topicBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20, borderWidth: 1 },
   topicBadgeText: { fontSize: 11, fontWeight: '700' },
@@ -1577,10 +1589,22 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 12, gap: 8, width: '100%', marginBottom: 16,
   },
   metricItem: { flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  metricXp: { backgroundColor: 'rgba(241,143,52,0.06)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.12)' },
+  missionCelebrations: { alignSelf: 'stretch', gap: 10, marginTop: 14 },
+  levelUpBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(251,191,36,0.08)',
+    borderColor: 'rgba(251,191,36,0.3)',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  levelUpText: { color: '#FBBF24', fontSize: 14, fontWeight: '800' },
   metricCorrect: { backgroundColor: 'rgba(16,185,129,0.06)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.12)' },
   metricValue: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },
-  metricValueXp: { color: '#F18F34', fontSize: 18, fontWeight: '900' },
   metricValueCorrect: { color: '#10B981', fontSize: 18, fontWeight: '900' },
   metricLabel: { color: '#6B7280', fontSize: 9, fontWeight: '600', letterSpacing: 1, marginTop: 4 },
   streakResultCard: {
@@ -1591,8 +1615,6 @@ const styles = StyleSheet.create({
   streakResultInfo: { flex: 1 },
   streakResultValue: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   streakResultLabel: { color: '#6B7280', fontSize: 11 },
-  bonusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(241,143,52,0.1)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.2)' },
-  bonusText: { color: '#F18F34', fontSize: 11, fontWeight: '700' },
   nextBonusRow: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)',
