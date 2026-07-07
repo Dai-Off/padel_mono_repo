@@ -80,7 +80,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
     { delay: 300, minChars: MIN_SEARCH_CHARS },
   );
 
-  // Sugerencias por defecto (hoy: compañeros frecuentes).
+  // Sugerencias por defecto (hoy: compañeros frecuentes + seguidos).
   useEffect(() => {
     if (!visible) {
       setSuggestions([]);
@@ -89,13 +89,13 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
     }
     let cancelled = false;
     void (async () => {
-      const s = await fetchInviteSuggestions(currentPlayerId, SUGGESTIONS_LIMIT);
+      const s = await fetchInviteSuggestions(currentPlayerId, SUGGESTIONS_LIMIT, token);
       if (!cancelled) setSuggestions(s);
     })();
     return () => {
       cancelled = true;
     };
-  }, [visible, currentPlayerId]);
+  }, [visible, currentPlayerId, token]);
 
   // Invitaciones que envié: aceptadas (listas para buscar) y pendientes (esperando respuesta).
   useEffect(() => {
