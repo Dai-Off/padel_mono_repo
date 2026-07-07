@@ -258,7 +258,7 @@ async function runEvaluation(
         const grant = await grantSeasonPassSp(
           playerId,
           def.sp_reward,
-          { source: 'mission', missionId: def.id },
+          { source: 'mission', missionId: def.id, tz },
           season
         );
         await supabase
@@ -321,7 +321,7 @@ async function runEvaluation(
       const grant = await grantSeasonPassSp(
         playerId,
         def.sp_reward,
-        { source: 'mission', missionId: def.id },
+        { source: 'mission', missionId: def.id, tz },
         season
       );
       await supabase

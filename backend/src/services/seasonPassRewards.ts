@@ -154,7 +154,20 @@ export async function grantLevelRewards(
           console.warn('[season-pass rewards] sp grant failed:', (e as Error).message);
         }
       } else if (r.reward_type === 'sp_boost') {
-        console.warn('[season-pass rewards] sp_boost rewards need phase 3 (player_sp_boosts)');
+        // Auto-activated on grant with a time window (decided 2026-07-07).
+        const cfg = r.boost_config ?? {};
+        const bonus = Number(cfg.bonus ?? 0);
+        const hours = Number(cfg.expires_hours ?? 48);
+        if (bonus > 0) {
+          const expiresAt = new Date(Date.now() + hours * 3_600_000).toISOString();
+          const { error: boostErr } = await supabase.from('player_sp_boosts').insert({
+            player_id: playerId,
+            source: 'pass_reward',
+            bonus,
+            expires_at: expiresAt,
+          });
+          if (boostErr) console.warn('[season-pass rewards] boost grant failed:', boostErr.message);
+        }
       }
 
       granted.push({

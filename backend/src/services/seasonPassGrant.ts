@@ -1,19 +1,7 @@
 import { getActiveSeasonRow, SeasonPassSeasonRow } from './seasonPassSeasonConfig';
 import { addSeasonPassSp, computeSeasonPass, getOrCreateSeasonPassRow } from './seasonPassService';
 import { GrantedReward, grantLevelRewards } from './seasonPassRewards';
-
-export type SpBoostBreakdownRow = { source: string; bonus: number };
-
-/**
- * Active SP bonus for a player. Phase 3 (SP boost engine) plugs in here:
- * lesson_streak (derived from learning_streaks), pass_reward (player_sp_boosts)
- * and catch_up. Until then everything grants at base value.
- */
-export async function getActiveSpBonus(
-  _playerId: string
-): Promise<{ total: number; breakdown: SpBoostBreakdownRow[] }> {
-  return { total: 0, breakdown: [] };
-}
+import { consumeMissionBoosts, getActiveSpBonus } from './seasonPassBoosts';
 
 export type SeasonPassGrantResult = {
   granted_sp: number;
@@ -28,6 +16,8 @@ export type SeasonPassGrantResult = {
 export type SeasonPassGrantContext = {
   source: 'mission' | 'level_reward' | 'admin';
   missionId?: string;
+  /** Player timezone: needed to judge whether the lesson streak is alive. */
+  tz?: string;
 };
 
 /**
@@ -39,13 +29,13 @@ export type SeasonPassGrantContext = {
 export async function grantSeasonPassSp(
   playerId: string,
   baseSp: number,
-  _ctx: SeasonPassGrantContext,
+  ctx: SeasonPassGrantContext,
   seasonArg?: SeasonPassSeasonRow
 ): Promise<SeasonPassGrantResult> {
   const season = seasonArg ?? (await getActiveSeasonRow());
   if (!season) throw new Error('No hay temporada activa en season_pass_seasons');
 
-  const { total } = await getActiveSpBonus(playerId);
+  const { total } = await getActiveSpBonus(playerId, { tz: ctx.tz, season });
   const cap = Math.max(1, Number(season.boost_cap ?? 2));
   const boost = Math.min(Math.max(0, total), cap - 1);
   const finalSp = Math.max(0, Math.round(Math.max(0, baseSp) * (1 + boost)));
@@ -55,6 +45,8 @@ export async function grantSeasonPassSp(
   if (finalSp > 0) {
     const r = await addSeasonPassSp(playerId, finalSp);
     spTotal = r.sp;
+    // Per-mission consumable boosters tick down (no-op with S1's time windows).
+    if (ctx.source === 'mission' && ctx.missionId) await consumeMissionBoosts(playerId);
   }
 
   const levelFrom = computeSeasonPass(before.sp, season.sp_per_level, season.max_level).level;

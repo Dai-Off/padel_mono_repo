@@ -11,6 +11,7 @@ import {
   listGrantedRewardIds,
   loadSeasonRewards,
 } from '../services/seasonPassRewards';
+import { getActiveSpBonus } from '../services/seasonPassBoosts';
 
 const router = Router();
 
@@ -53,6 +54,13 @@ router.get('/me', async (req: Request, res: Response) => {
       await grantLevelRewards(playerId!, season, 0, c.level, tiers);
       grantedIds = await listGrantedRewardIds(playerId!);
     }
+    // Active SP boost (phase 3): streak + consumable boosters + catch-up.
+    const activeBoost = await getActiveSpBonus(playerId!, { tz, season });
+    const boosts = {
+      total_bonus: Math.min(activeBoost.total, Math.max(0, Number(season.boost_cap ?? 2) - 1)),
+      breakdown: activeBoost.breakdown,
+    };
+
     const track_rewards = track_levels.map((level) => ({
       level,
       rewards: seasonRewards
@@ -91,6 +99,7 @@ router.get('/me', async (req: Request, res: Response) => {
       sp_how,
       track_levels,
       track_rewards,
+      boosts,
       next_milestone: null,
       ...c,
     });
