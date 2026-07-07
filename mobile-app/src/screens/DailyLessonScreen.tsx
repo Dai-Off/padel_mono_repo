@@ -1130,6 +1130,15 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
                   <Text style={styles.streakResultValue}>{t('learning.dailyLessonStreakDaysLabel', { count: results.streak.current })}</Text>
                   <Text style={styles.streakResultLabel}>{t('learning.dailyLessonStreakCurrent')}</Text>
                 </View>
+                {(results.season_pass?.boost_applied ?? 0) > 0 && (
+                  <View style={styles.boostBadge}>
+                    <Text style={styles.boostBadgeText}>
+                      {t('home.seasonPass.boostApplied', {
+                        pct: Math.round((results.season_pass?.boost_applied ?? 0) * 100),
+                      })}
+                    </Text>
+                  </View>
+                )}
               </View>
               {nextMilestone !== null && (
                 <View style={styles.nextBonusRow}>
@@ -1590,6 +1599,8 @@ const styles = StyleSheet.create({
   },
   metricItem: { flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   missionCelebrations: { alignSelf: 'stretch', gap: 10, marginTop: 14 },
+  boostBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(241,143,52,0.1)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.2)' },
+  boostBadgeText: { color: '#F18F34', fontSize: 11, fontWeight: '700' },
   levelUpBanner: {
     flexDirection: 'row',
     alignItems: 'center',

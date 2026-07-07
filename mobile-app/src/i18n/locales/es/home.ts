@@ -101,6 +101,12 @@ export const home: HomeTranslationKeys = {
     spGained: '+{sp} SP',
     celebrationCta: '¡Genial!',
     levelUpBanner: '¡Has subido al nivel {level}!',
+    boostActive: 'Boost activo: +{pct}% SP',
+    boostApplied: 'Boost +{pct}% SP',
+    boostSourceStreak: 'Racha diaria',
+    boostSourceBooster: 'Booster',
+    boostSourceCatchUp: 'Catch-up',
+    boostSourceEvent: 'Evento',
   },
   competitiveLeague: {
     title: 'Liga Competitiva',

@@ -101,6 +101,12 @@ export const home: HomeTranslationKeys = {
     spGained: '+{sp} SP',
     celebrationCta: '好嘢！',
     levelUpBanner: '升到等級 {level}！',
+    boostActive: 'SP 加成生效中：+{pct}%',
+    boostApplied: 'SP 加成 +{pct}%',
+    boostSourceStreak: '每日連勝',
+    boostSourceBooster: '加速器',
+    boostSourceCatchUp: '追趕加成',
+    boostSourceEvent: '活動',
   },
   competitiveLeague: {
     title: '競技聯賽',

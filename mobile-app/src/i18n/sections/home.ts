@@ -99,6 +99,12 @@ export interface HomeTranslationKeys {
     spGained: string;
     celebrationCta: string;
     levelUpBanner: string;
+    boostActive: string;
+    boostApplied: string;
+    boostSourceStreak: string;
+    boostSourceBooster: string;
+    boostSourceCatchUp: string;
+    boostSourceEvent: string;
   };
   competitiveLeague: {
     title: string;

@@ -71,6 +71,16 @@ export type SeasonPassTrackLevelDto = {
   rewards: SeasonPassTrackRewardDto[];
 };
 
+/** Boost de SP activo (racha + boosters consumibles + catch-up), ya capado. */
+export type SeasonPassBoostsDto = {
+  total_bonus: number;
+  breakdown: {
+    source: 'lesson_streak' | 'pass_reward' | 'catch_up' | 'event';
+    bonus: number;
+    expires_at?: string | null;
+  }[];
+};
+
 /** Celebración pendiente de mostrar (misión completada "fuera" de la app). */
 export type SeasonPassPendingCelebrationDto = {
   assignment_id: string;
@@ -107,6 +117,7 @@ export type SeasonPassMeOk = {
   sp_how?: SeasonPassSpHowRowDto[];
   track_levels?: number[];
   track_rewards?: SeasonPassTrackLevelDto[];
+  boosts?: SeasonPassBoostsDto;
   next_milestone: unknown | null;
 };
 

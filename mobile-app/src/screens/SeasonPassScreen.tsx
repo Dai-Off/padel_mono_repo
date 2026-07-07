@@ -637,6 +637,19 @@ export function SeasonPassScreen({ onBack }: Props) {
     return map;
   }, [me?.track_rewards]);
 
+  const boostPct = Math.round((me?.boosts?.total_bonus ?? 0) * 100);
+  const boostSourcesLabel = useMemo(() => {
+    const labels: Record<string, string> = {
+      lesson_streak: t('home.seasonPass.boostSourceStreak'),
+      pass_reward: t('home.seasonPass.boostSourceBooster'),
+      catch_up: t('home.seasonPass.boostSourceCatchUp'),
+      event: t('home.seasonPass.boostSourceEvent'),
+    };
+    return (me?.boosts?.breakdown ?? [])
+      .map((b) => `${labels[b.source] ?? b.source} +${Math.round(b.bonus * 100)}%`)
+      .join(' · ');
+  }, [me?.boosts?.breakdown, t]);
+
   const missionsByPeriod = useMemo(() => {
     const list = me?.missions ?? [];
     const g: Record<MissionPeriod, SeasonPassMissionDto[]> = { daily: [], weekly: [], monthly: [] };
@@ -954,6 +967,18 @@ export function SeasonPassScreen({ onBack }: Props) {
         <Animated.View style={{ opacity: contentOp, paddingHorizontal: PAD, paddingTop: 8 }}>
           {tab === 'rewards' ? (
             <View>
+              {boostPct > 0 ? (
+                <View style={styles.boostBanner}>
+                  <Ionicons name="flame" size={16} color={ACCENT} />
+                  <Text style={styles.boostBannerTxt}>
+                    {t('home.seasonPass.boostActive', { pct: boostPct })}
+                  </Text>
+                  <Text style={styles.boostBannerSources} numberOfLines={1}>
+                    {boostSourcesLabel}
+                  </Text>
+                </View>
+              ) : null}
+
               <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
                   <Ionicons name="ribbon" size={12} color="#facc15" />
@@ -1433,6 +1458,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  boostBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(241,143,52,0.08)',
+    borderColor: 'rgba(241,143,52,0.25)',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 10,
+  },
+  boostBannerTxt: { color: ACCENT, fontSize: 13, fontWeight: '800' },
+  boostBannerSources: { flex: 1, color: 'rgba(255,255,255,0.55)', fontSize: 11, textAlign: 'right' },
   milestoneCard: {
     marginTop: 8,
     marginBottom: 16,
