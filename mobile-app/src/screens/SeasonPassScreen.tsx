@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -29,7 +29,9 @@ import {
   fetchSeasonPassMe,
   type SeasonPassMeOk,
   type SeasonPassMissionDto,
+  type SeasonPassTrackRewardDto,
 } from '../api/seasonPass';
+import { RARITY_CONFIG } from '../design/rarity';
 
 type Props = { onBack: () => void };
 
@@ -225,16 +227,123 @@ function ShimmerBar({ pct }: { pct: number }) {
   );
 }
 
+/**
+ * Thumb de recompensa del track (42px): render procedural desde el descriptor
+ * `display` del backend — rareza (RARITY_CONFIG), preset de icono del catálogo,
+ * paleta de colores para marcos. Sin recompensa → hueco tenue.
+ */
+function RewardThumb({
+  reward,
+  size,
+  dimmed,
+}: {
+  reward: SeasonPassTrackRewardDto | null;
+  size: number;
+  dimmed: boolean;
+}) {
+  if (!reward) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.06)',
+          backgroundColor: 'rgba(255,255,255,0.02)',
+        }}
+      />
+    );
+  }
+
+  const d = reward.display;
+  const rarity = RARITY_CONFIG[d.rarity ?? 'common'] ?? RARITY_CONFIG.common;
+  const granted = reward.status === 'granted';
+  const opacity = dimmed ? 0.28 : 1;
+
+  let inner: ReactNode;
+  if (d.kind === 'frame') {
+    // Marco: anillo con su paleta (override `colors` o color de rareza).
+    const palette =
+      Array.isArray(d.colors) && d.colors.length >= 2
+        ? (d.colors as [string, string, ...string[]])
+        : ([rarity.color, rarity.border] as [string, string]);
+    inner = (
+      <LinearGradient
+        colors={palette}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{
+          width: size - 14,
+          height: size - 14,
+          borderRadius: (size - 14) / 2,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <View
+          style={{
+            width: size - 22,
+            height: size - 22,
+            borderRadius: (size - 22) / 2,
+            backgroundColor: '#111827',
+          }}
+        />
+      </LinearGradient>
+    );
+  } else if (d.kind === 'sp' || d.kind === 'sp_boost') {
+    inner = (
+      <View style={{ alignItems: 'center' }}>
+        <Text style={{ fontSize: 14 }}>{d.icon ?? '⚡'}</Text>
+        <Text style={{ fontSize: 8, fontWeight: '800', color: ACCENT }} numberOfLines={1}>
+          {d.label.replace(' SP', '')}
+        </Text>
+      </View>
+    );
+  } else {
+    // trophy / badge / title: preset de icono del catálogo con color de rareza.
+    inner = <Ionicons name={(d.icon ?? 'trophy') as any} size={18} color={rarity.color} />;
+  }
+
+  return (
+    <View style={{ opacity }}>
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: rarity.border,
+          backgroundColor: rarity.bg,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {inner}
+      </View>
+      {granted ? (
+        <View style={styles.rewardGrantedBadge}>
+          <Ionicons name="checkmark" size={9} color="#0B1120" />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function LevelTrackColumn({
   level,
   isUnlocked,
   isCurrent,
   hasElite,
+  freeReward,
+  eliteReward,
 }: {
   level: number;
   isUnlocked: boolean;
   isCurrent: boolean;
   hasElite: boolean;
+  freeReward: SeasonPassTrackRewardDto | null;
+  eliteReward: SeasonPassTrackRewardDto | null;
 }) {
   const scaleNode = useRef(new Animated.Value(1)).current;
   const ringScale = useRef(new Animated.Value(1)).current;
@@ -290,19 +399,12 @@ function LevelTrackColumn({
   return (
     <View style={{ width: w, alignItems: 'center' }}>
       <View style={{ height: thumbSize + 20, justifyContent: 'center' }}>
-        <View style={{ opacity: hasElite && isUnlocked ? 1 : hasElite ? 0.28 : 0.2 }}>
-          <LinearGradient
-            colors={['rgba(168,85,247,0.35)', 'rgba(17,17,17,0.95)']}
-            style={{
-              width: thumbSize,
-              height: thumbSize,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: 'rgba(250,204,21,0.35)',
-            }}
-          />
-        </View>
-        {!hasElite && (
+        <RewardThumb
+          reward={eliteReward}
+          size={thumbSize}
+          dimmed={!hasElite || !isUnlocked}
+        />
+        {!hasElite && eliteReward && (
           <View style={styles.eliteLockOverlay}>
             <Ionicons name="ribbon" size={14} color="#facc15" />
             <Ionicons name="lock-closed" size={12} color="#fde68a" />
@@ -378,22 +480,7 @@ function LevelTrackColumn({
       </View>
 
       <View style={{ height: thumbSize + 20, justifyContent: 'center' }}>
-        <View style={{ opacity: isUnlocked ? 1 : 0.28 }}>
-          <LinearGradient
-            colors={['rgba(55,65,81,0.9)', 'rgba(17,24,39,0.95)']}
-            style={{
-              width: thumbSize,
-              height: thumbSize,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.12)',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name="diamond-outline" size={20} color="#9ca3af" />
-          </LinearGradient>
-        </View>
+        <RewardThumb reward={freeReward} size={thumbSize} dimmed={!isUnlocked} />
       </View>
     </View>
   );
@@ -541,6 +628,14 @@ export function SeasonPassScreen({ onBack }: Props) {
   const left = daysLeftFromEndsAt(me?.season.ends_at);
   const trackLevels = me?.track_levels ?? [];
   const spHowRows = me?.sp_how ?? [];
+
+  const trackRewardsByLevel = useMemo(() => {
+    const map = new Map<number, SeasonPassTrackRewardDto[]>();
+    for (const entry of me?.track_rewards ?? []) {
+      map.set(entry.level, entry.rewards);
+    }
+    return map;
+  }, [me?.track_rewards]);
 
   const missionsByPeriod = useMemo(() => {
     const list = me?.missions ?? [];
@@ -875,15 +970,20 @@ export function SeasonPassScreen({ onBack }: Props) {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.trackScroll}
               >
-                {trackLevels.map((lvl) => (
-                  <LevelTrackColumn
-                    key={lvl}
-                    level={lvl}
-                    isUnlocked={level >= lvl}
-                    isCurrent={level === lvl}
-                    hasElite={eliteActive}
-                  />
-                ))}
+                {trackLevels.map((lvl) => {
+                  const levelRewards = trackRewardsByLevel.get(lvl) ?? [];
+                  return (
+                    <LevelTrackColumn
+                      key={lvl}
+                      level={lvl}
+                      isUnlocked={level >= lvl}
+                      isCurrent={level === lvl}
+                      hasElite={eliteActive}
+                      freeReward={levelRewards.find((r) => r.tier === 'free') ?? null}
+                      eliteReward={levelRewards.find((r) => r.tier === 'elite') ?? null}
+                    />
+                  );
+                })}
               </ScrollView>
 
               {spHowRows.length > 0 ? (
@@ -1321,6 +1421,17 @@ const styles = StyleSheet.create({
     gap: 2,
     backgroundColor: 'rgba(0,0,0,0.72)',
     borderRadius: 12,
+  },
+  rewardGrantedBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#34d399',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   milestoneCard: {
     marginTop: 8,

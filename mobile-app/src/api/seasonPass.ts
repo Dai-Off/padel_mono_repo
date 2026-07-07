@@ -47,6 +47,30 @@ export type SeasonPassDeltaDto = {
   level_up: { from: number; to: number; rewards: unknown[] } | null;
 };
 
+/** Descriptor de render de una recompensa (rareza/colores/preset, resuelto en cliente). */
+export type RewardDisplayDto = {
+  kind: string; // trophy | badge | title | frame | sp | sp_boost
+  label: string;
+  icon: string | null;
+  rarity: 'common' | 'rare' | 'epic' | 'legendary' | null;
+  colors: string[] | null;
+  animation_type: string | null;
+  style: string | null;
+};
+
+export type SeasonPassTrackRewardDto = {
+  id: string;
+  tier: 'free' | 'elite';
+  reward_type: 'unlockable' | 'sp_boost' | 'sp';
+  display: RewardDisplayDto;
+  status: 'locked' | 'unlocked' | 'granted';
+};
+
+export type SeasonPassTrackLevelDto = {
+  level: number;
+  rewards: SeasonPassTrackRewardDto[];
+};
+
 /** Celebración pendiente de mostrar (misión completada "fuera" de la app). */
 export type SeasonPassPendingCelebrationDto = {
   assignment_id: string;
@@ -82,6 +106,7 @@ export type SeasonPassMeOk = {
   pending_celebrations?: SeasonPassPendingCelebrationDto[];
   sp_how?: SeasonPassSpHowRowDto[];
   track_levels?: number[];
+  track_rewards?: SeasonPassTrackLevelDto[];
   next_milestone: unknown | null;
 };
 
