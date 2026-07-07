@@ -1,5 +1,6 @@
 import { getActiveSeasonRow, SeasonPassSeasonRow } from './seasonPassSeasonConfig';
 import { addSeasonPassSp, computeSeasonPass, getOrCreateSeasonPassRow } from './seasonPassService';
+import { GrantedReward, grantLevelRewards } from './seasonPassRewards';
 
 export type SpBoostBreakdownRow = { source: string; bonus: number };
 
@@ -20,6 +21,8 @@ export type SeasonPassGrantResult = {
   boost_applied: number;
   level_from: number;
   level_to: number;
+  /** Level rewards delivered by this grant (phase 2), for celebration UIs. */
+  rewards_granted: GrantedReward[];
 };
 
 export type SeasonPassGrantContext = {
@@ -55,12 +58,31 @@ export async function grantSeasonPassSp(
   }
 
   const levelFrom = computeSeasonPass(before.sp, season.sp_per_level, season.max_level).level;
-  const levelTo = computeSeasonPass(spTotal, season.sp_per_level, season.max_level).level;
+  let levelTo = computeSeasonPass(spTotal, season.sp_per_level, season.max_level).level;
+
+  // Phase 2: crossing levels delivers the track rewards (free always, elite
+  // if purchased). Direct-SP rewards can push further levels — refresh after.
+  let rewardsGranted: GrantedReward[] = [];
+  if (levelTo > levelFrom) {
+    try {
+      const tiers: ('free' | 'elite')[] = before.has_elite ? ['free', 'elite'] : ['free'];
+      rewardsGranted = await grantLevelRewards(playerId, season, levelFrom, levelTo, tiers);
+      if (rewardsGranted.some((r) => r.reward_type === 'sp')) {
+        const refreshed = await getOrCreateSeasonPassRow(playerId);
+        spTotal = refreshed.sp;
+        levelTo = computeSeasonPass(spTotal, season.sp_per_level, season.max_level).level;
+      }
+    } catch (e) {
+      console.warn('[season-pass] level rewards failed:', (e as Error).message);
+    }
+  }
+
   return {
     granted_sp: spTotal - before.sp,
     sp_total: spTotal,
     boost_applied: boost,
     level_from: levelFrom,
     level_to: levelTo,
+    rewards_granted: rewardsGranted,
   };
 }

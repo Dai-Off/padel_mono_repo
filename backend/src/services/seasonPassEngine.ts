@@ -459,8 +459,10 @@ export async function evaluateMissionsAndBuildDelta(
     if (completedNow.length) {
       const from = Math.min(...completedNow.map((c) => c.grant.level_from));
       const to = Math.max(...completedNow.map((c) => c.grant.level_to));
-      // rewards: filled in phase 2 (season_pass_rewards display descriptors).
-      if (to > from) levelUp = { from, to, rewards: [] };
+      const rewards = completedNow.flatMap((c) =>
+        c.grant.rewards_granted.map((r) => ({ tier: r.tier, display: r.display }))
+      );
+      if (to > from) levelUp = { from, to, rewards };
     }
 
     return {

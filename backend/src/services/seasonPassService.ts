@@ -80,6 +80,22 @@ export async function setSeasonPassEliteFlag(playerId: string, value: boolean): 
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Retroactivo Elite (plan §6.3.3): al activar Elite se otorgan las recompensas
+ * `elite` de todos los niveles ya alcanzados. Dynamic import: seasonPassRewards
+ * depende de este módulo (evita el ciclo estático). Nunca rompe la compra.
+ */
+async function grantEliteRetroactiveSafe(playerId: string): Promise<void> {
+  try {
+    const season = await getActiveSeasonRow();
+    if (!season) return;
+    const { grantEliteRetroactiveRewards } = await import('./seasonPassRewards');
+    await grantEliteRetroactiveRewards(playerId, season);
+  } catch (e) {
+    console.warn('[season-pass] elite retroactive rewards failed:', (e as Error).message);
+  }
+}
+
 /** Tras pago Stripe confirmado (webhook o confirm-client): registro contable + activa Elite (idempotente por `paymentIntentId`). */
 export async function finalizeSeasonPassElitePurchase(params: {
   playerId: string;
@@ -94,6 +110,7 @@ export async function finalizeSeasonPassElitePurchase(params: {
     .maybeSingle();
   if (dup) {
     await setSeasonPassEliteFlag(params.playerId, true);
+    await grantEliteRetroactiveSafe(params.playerId);
     return { ok: true };
   }
 
@@ -111,11 +128,13 @@ export async function finalizeSeasonPassElitePurchase(params: {
     const msg = String(txErr.message ?? '');
     if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('unique')) {
       await setSeasonPassEliteFlag(params.playerId, true);
+      await grantEliteRetroactiveSafe(params.playerId);
       return { ok: true };
     }
     return { ok: false, error: msg };
   }
 
   await setSeasonPassEliteFlag(params.playerId, true);
+  await grantEliteRetroactiveSafe(params.playerId);
   return { ok: true };
 }

@@ -4,6 +4,13 @@ import { computeSeasonPass, getOrCreateSeasonPassRow } from '../services/seasonP
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { computeTrackLevels, listSpHowRows } from '../services/seasonPassMissions';
 import { ackMissionCelebrations, buildSeasonPassState } from '../services/seasonPassEngine';
+import {
+  ackRewardGrants,
+  buildRewardDisplay,
+  grantLevelRewards,
+  listGrantedRewardIds,
+  loadSeasonRewards,
+} from '../services/seasonPassRewards';
 
 const router = Router();
 
@@ -33,6 +40,36 @@ router.get('/me', async (req: Request, res: Response) => {
     const sp_how = await listSpHowRows(season.slug);
     const track_levels = computeTrackLevels(c.level, season.max_level, season.track_radius);
 
+    // Rewards track (phase 2). Self-heal: grant anything pending up to the
+    // current level (covers players who leveled before rewards shipped and
+    // grants that crashed mid-way) — idempotent via the grant ledger.
+    const seasonRewards = await loadSeasonRewards(season.slug);
+    let grantedIds = await listGrantedRewardIds(playerId!);
+    const tiers: ('free' | 'elite')[] = row.has_elite ? ['free', 'elite'] : ['free'];
+    const hasPending = seasonRewards.some(
+      (r) => r.level <= c.level && tiers.includes(r.tier) && !grantedIds.has(r.id)
+    );
+    if (hasPending) {
+      await grantLevelRewards(playerId!, season, 0, c.level, tiers);
+      grantedIds = await listGrantedRewardIds(playerId!);
+    }
+    const track_rewards = track_levels.map((level) => ({
+      level,
+      rewards: seasonRewards
+        .filter((r) => r.level === level)
+        .map((r) => ({
+          id: r.id,
+          tier: r.tier,
+          reward_type: r.reward_type,
+          display: buildRewardDisplay(r),
+          status: grantedIds.has(r.id)
+            ? 'granted'
+            : level <= c.level && (r.tier === 'free' || row.has_elite)
+              ? 'unlocked'
+              : 'locked',
+        })),
+    }));
+
     return res.json({
       ok: true,
       season: {
@@ -53,6 +90,7 @@ router.get('/me', async (req: Request, res: Response) => {
       pending_celebrations: state.pending_celebrations,
       sp_how,
       track_levels,
+      track_rewards,
       next_milestone: null,
       ...c,
     });
@@ -79,6 +117,30 @@ router.post('/missions/ack', async (req: Request, res: Response) => {
 
   try {
     const acked = await ackMissionCelebrations(playerId!, ids);
+    return res.json({ ok: true, acked });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /season-pass/rewards/ack
+ * Marca recompensas celebradas como vistas. Body: { ids: string[] } con ids
+ * de recompensa (`track_rewards[].rewards[].id`). Los cosméticos además
+ * siguen su propio flujo de modal vía player_unlockables.notified_at.
+ */
+router.post('/rewards/ack', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  const raw = (req.body?.ids ?? []) as unknown;
+  const ids = Array.isArray(raw)
+    ? raw.filter((v): v is string => typeof v === 'string' && v.length > 0).slice(0, 100)
+    : [];
+  if (ids.length === 0) return res.status(400).json({ ok: false, error: 'ids requerido' });
+
+  try {
+    const acked = await ackRewardGrants(playerId!, ids);
     return res.json({ ok: true, acked });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
