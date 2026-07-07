@@ -19,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { PublicCourse, enrollInCourse } from "../../api/schoolCourses";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTranslation } from "../../i18n";
+import { isFeatureHidden } from "../../config";
 
 const WEEKDAY_KEYS: Record<string, string> = {
   mon: "common.weekdayMon",
@@ -105,7 +106,9 @@ export function PublicCourseBookingSuccessModal({
 
   const dateTimeStr = firstDay
     ? `${t(WEEKDAY_KEYS[firstDay.weekday] ?? firstDay.weekday).toUpperCase()} · ${firstDay.start_time}`
-    : t("learning.schoolComingSoon");
+    : isFeatureHidden("courses.bookingScheduleComingSoon")
+      ? "—"
+      : t("learning.schoolComingSoon");
 
   const durationStr = firstDay
     ? calculateDuration(firstDay.start_time, firstDay.end_time, t)

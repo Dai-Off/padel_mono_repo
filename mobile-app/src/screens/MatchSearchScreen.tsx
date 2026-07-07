@@ -16,6 +16,7 @@ import { SearchResultsList } from '../components/search/SearchResultsList';
 import { aggregateCourtsByClub } from '../domain/aggregateCourtsByClub';
 import { useMatchSearch } from '../hooks/useMatchSearch';
 import type { SearchCourtResult } from '../api/search';
+import { isFeatureHidden } from '../config';
 
 const BG = filterTheme.bg;
 
@@ -111,11 +112,14 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
           fetchError={fetchError}
           onRetry={refetch}
           onClubPress={onCourtPress}
-          onFavoritePress={(court) =>
-            Alert.alert(
-              t('search.favoritesAlertTitle'),
-              t('search.favoritesAlertBody', { clubName: court.clubName }),
-            )
+          onFavoritePress={
+            isFeatureHidden('search.favoriteClub')
+              ? undefined
+              : (court) =>
+                  Alert.alert(
+                    t('search.favoritesAlertTitle'),
+                    t('search.favoritesAlertBody', { clubName: court.clubName }),
+                  )
           }
         />
       </ScrollView>

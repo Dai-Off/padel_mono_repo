@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import clsx from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { CreateBookingBatchResult } from '../types';
@@ -54,6 +55,14 @@ const PLAY_MODE_MARKER = '__PLAY_MODE__';
 function portalModal(node: React.ReactNode): React.ReactNode {
     if (typeof document === 'undefined') return null;
     return createPortal(node, document.body);
+}
+
+function presentReservationModal(
+    node: React.ReactNode,
+    presentation: 'modal' | 'inline',
+): React.ReactNode {
+    if (presentation === 'inline') return node;
+    return portalModal(node);
 }
 
 function extractPlayMode(rawNotes: string | null | undefined): { mode: 'single' | 'double'; cleanNotes: string } {
@@ -117,6 +126,8 @@ interface ReservationModalProps {
     /** Reservas visibles en la grilla (para cancelar mantenimientos en bloque). */
     gridReservations?: Reservation[];
     onCancelMaintenance?: (bookingIds: string[]) => Promise<void>;
+    /** Embebido en Partidos: sin overlay ni portal. */
+    presentation?: 'modal' | 'inline';
 }
 
 // Helper: Player Search Component
@@ -374,9 +385,10 @@ export const PlayerSearch: React.FC<{
 
 // ─── Tipos de pago por slot ───────────────────────────────────────────────────
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance,
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance, presentation = 'modal',
 }) => {
-    const vvStyle = useVisualViewportFix(isOpen);
+    const isInline = presentation === 'inline';
+    const vvStyle = useVisualViewportFix(isOpen && !isInline);
     const { t, i18n } = useGrillaTranslation();
     const isEditMode = !!editingBookingData;
     const tournamentIdFromBooking = useMemo(() => {
@@ -867,26 +879,33 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     if (!isOpen) return null;
 
     if (isLoadingBookingData && reservation && !reservation.id.startsWith('new-')) {
+        const loadingBody = (
+            <div className={clsx(
+                'relative flex flex-col w-full bg-gray-50 overflow-hidden',
+                isInline ? 'max-h-[min(70vh,720px)] rounded-xl border border-gray-200 shadow-sm' : 'h-[90vh] sm:h-auto sm:max-h-[90vh] sm:w-[520px] sm:rounded-2xl',
+            )}>
+                <div className="flex items-start justify-between px-6 py-4 bg-white border-b border-gray-100 shrink-0">
+                    <h2 className="text-xl font-bold text-gray-900">{t('reservation.modalTitleEdit')}</h2>
+                    <button
+                        onClick={onClose}
+                        className="p-2 text-gray-400 transition-colors bg-gray-100 rounded-full hover:bg-gray-200 hover:text-gray-600 shrink-0"
+                    >
+                        <X size={20} />
+                    </button>
+                </div>
+                <div className="flex-1 flex items-center justify-center p-8">
+                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
+                        <div className="w-4 h-4 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
+                        Cargando datos de la reserva...
+                    </div>
+                </div>
+            </div>
+        );
+        if (isInline) return loadingBody;
         return portalModal(
             <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
                 <div className="absolute inset-0" onClick={onClose} />
-                <div className="relative flex flex-col w-full h-[90vh] bg-gray-50 rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[520px] sm:rounded-2xl overflow-hidden">
-                    <div className="flex items-start justify-between px-6 py-4 bg-white border-b border-gray-100 shrink-0">
-                        <h2 className="text-xl font-bold text-gray-900">{t('reservation.modalTitleEdit')}</h2>
-                        <button
-                            onClick={onClose}
-                            className="p-2 text-gray-400 transition-colors bg-gray-100 rounded-full hover:bg-gray-200 hover:text-gray-600 shrink-0"
-                        >
-                            <X size={20} />
-                        </button>
-                    </div>
-                    <div className="flex-1 flex items-center justify-center p-8">
-                        <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
-                            <div className="w-4 h-4 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
-                            Cargando datos de la reserva...
-                        </div>
-                    </div>
-                </div>
+                {loadingBody}
             </div>,
         );
     }
@@ -1209,14 +1228,13 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
     const minutes = ['00', '15', '30', '45'];
 
-    return portalModal(
-        <>
-        <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
-            {/* Backdrop click to close */}
-            <div className="absolute inset-0" onClick={onClose} />
-
-            {/* Modal Container */}
-            <div className="relative flex flex-col w-full h-[90vh] bg-gray-50 rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[900px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in overflow-hidden">
+    const panelContent = (
+            <div className={clsx(
+                'relative flex flex-col w-full bg-gray-50 overflow-hidden',
+                isInline
+                    ? 'max-h-[min(70vh,720px)] rounded-xl border border-gray-200 shadow-sm'
+                    : 'h-[90vh] rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[900px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in',
+            )}>
 
                 {/* Mobile Drag Indicator */}
                 <div className="flex justify-center w-full pt-3 pb-1 sm:hidden bg-white cursor-grab active:cursor-grabbing" onClick={onClose}>
@@ -2040,7 +2058,16 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 )}
 
             </div>
+    );
+
+    return presentReservationModal(
+        <>
+        {isInline ? panelContent : (
+        <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
+            <div className="absolute inset-0" onClick={onClose} />
+            {panelContent}
         </div>
+        )}
             {maintenanceCancelScopeOpen && reservation && (
                 <MaintenanceCancelScopeModal
                     target={reservation}
