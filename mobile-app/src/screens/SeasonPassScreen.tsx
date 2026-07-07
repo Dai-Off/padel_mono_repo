@@ -27,6 +27,7 @@ import { useStripe } from '../stripe';
 import { confirmPaymentFromClient, createIntentForSeasonPassElite } from '../api/payments';
 import {
   fetchSeasonPassMe,
+  rerollSeasonPassMission,
   type SeasonPassMeOk,
   type SeasonPassMissionDto,
   type SeasonPassTrackRewardDto,
@@ -486,7 +487,15 @@ function LevelTrackColumn({
   );
 }
 
-function MissionRow({ m }: { m: SeasonPassMissionDto }) {
+function MissionRow({
+  m,
+  canReroll = false,
+  onReroll,
+}: {
+  m: SeasonPassMissionDto;
+  canReroll?: boolean;
+  onReroll?: () => void;
+}) {
   const { t } = useTranslation();
   const pct = Math.min(m.target > 0 ? m.current / m.target : 0, 1);
   const w = useRef(new Animated.Value(0)).current;
@@ -520,6 +529,16 @@ function MissionRow({ m }: { m: SeasonPassMissionDto }) {
               {m.title}
             </Text>
             {m.done ? <Ionicons name="checkmark-circle" size={16} color="#34d399" /> : null}
+            {!m.done && canReroll && onReroll ? (
+              <Pressable
+                onPress={onReroll}
+                hitSlop={8}
+                style={({ pressed }) => [styles.rerollBtn, pressed && styles.pressed]}
+                accessibilityLabel={t('alerts.seasonPass.rerollTitle')}
+              >
+                <Ionicons name="refresh" size={13} color="rgba(255,255,255,0.6)" />
+              </Pressable>
+            ) : null}
           </View>
           <Text style={styles.missionDesc}>{m.description}</Text>
           {m.reward_hint ? (
@@ -616,6 +635,34 @@ export function SeasonPassScreen({ onBack }: Props) {
     setRefreshing(true);
     void load().finally(() => setRefreshing(false));
   }, [load]);
+
+  const [rerolling, setRerolling] = useState(false);
+  const handleReroll = useCallback(
+    (m: SeasonPassMissionDto) => {
+      const token = session?.access_token;
+      if (!token || !m.assignment_id || rerolling) return;
+      Alert.alert(
+        t('alerts.seasonPass.rerollTitle'),
+        t('alerts.seasonPass.rerollMsg', { title: m.title }),
+        [
+          { text: t('alerts.seasonPass.rerollCancel'), style: 'cancel' },
+          {
+            text: t('alerts.seasonPass.rerollConfirm'),
+            onPress: () => {
+              setRerolling(true);
+              void rerollSeasonPassMission(token, m.assignment_id!, 'Europe/Madrid')
+                .then((r) => {
+                  if (!r.ok) Alert.alert(t('alerts.seasonPass.rerollFail'));
+                  return load();
+                })
+                .finally(() => setRerolling(false));
+            },
+          },
+        ],
+      );
+    },
+    [session?.access_token, rerolling, load, t],
+  );
 
   const spPer = me?.sp_per_level ?? DEFAULT_SP_PER_LEVEL;
   const levelMax = me?.level_max ?? 100;
@@ -1064,9 +1111,23 @@ export function SeasonPassScreen({ onBack }: Props) {
                   </Text>
                 </View>
               </View>
-              {missions.map((m) => (
-                <MissionRow key={m.id} m={m} />
-              ))}
+              {missions.map((m) => {
+                const quotaAvailable =
+                  m.period === 'daily'
+                    ? me?.reroll?.daily_available === true
+                    : m.period === 'weekly'
+                      ? me?.reroll?.weekly_available === true
+                      : false;
+                const canReroll = (m.rerollable ?? false) && quotaAvailable && !rerolling;
+                return (
+                  <MissionRow
+                    key={m.id}
+                    m={m}
+                    canReroll={canReroll}
+                    onReroll={() => handleReroll(m)}
+                  />
+                );
+              })}
               {missions.length === 0 && periodTabs.length > 0 ? (
                 <Text style={[styles.missionDesc, { textAlign: 'center', paddingVertical: 16 }]}>
                   {t('alerts.seasonPass.noMissionsInTab')}
@@ -1472,6 +1533,16 @@ const styles = StyleSheet.create({
   },
   boostBannerTxt: { color: ACCENT, fontSize: 13, fontWeight: '800' },
   boostBannerSources: { flex: 1, color: 'rgba(255,255,255,0.55)', fontSize: 11, textAlign: 'right' },
+  rerollBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
   milestoneCard: {
     marginTop: 8,
     marginBottom: 16,

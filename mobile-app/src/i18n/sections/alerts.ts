@@ -191,6 +191,11 @@ export interface AlertsTranslationKeys {
     getEliteCta: string;
     continueFree: string;
     confirmFail: string;
+    rerollTitle: string;
+    rerollMsg: string;
+    rerollConfirm: string;
+    rerollCancel: string;
+    rerollFail: string;
   };
   clubReviews: {
     login: string;

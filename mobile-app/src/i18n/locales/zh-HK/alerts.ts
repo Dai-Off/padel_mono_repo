@@ -193,6 +193,11 @@ export const alerts: AlertsTranslationKeys = {
     getEliteCta: '購買 Elite 通行證（信用卡付款）',
     continueFree: '繼續使用免費通行證',
     confirmFail: '無法確認 Elite 通行證。請再試一次。',
+    rerollTitle: '更換任務',
+    rerollMsg: '要將「{title}」換成另一個隨機任務嗎？每個週期只可更換一次。',
+    rerollConfirm: '更換',
+    rerollCancel: '取消',
+    rerollFail: '無法更換任務，請稍後再試。',
   },
   clubReviews: {
     login: '請登入以評價球會。',

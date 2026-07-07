@@ -200,6 +200,11 @@ export const alerts: AlertsTranslationKeys = {
     getEliteCta: 'Obtener Pase Elite (pago con tarjeta)',
     continueFree: 'Continuar con Pase Libre',
     confirmFail: 'No se pudo confirmar el Pase Elite. Inténtalo de nuevo.',
+    rerollTitle: 'Cambiar misión',
+    rerollMsg: '¿Sustituir "{title}" por otra misión al azar? Solo puedes cambiar una por período.',
+    rerollConfirm: 'Cambiar',
+    rerollCancel: 'Cancelar',
+    rerollFail: 'No se pudo cambiar la misión. Inténtalo más tarde.',
   },
   clubReviews: {
     login: 'Debes iniciar sesión para valorar un club.',

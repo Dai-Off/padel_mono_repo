@@ -17,6 +17,8 @@ export type SeasonPassMissionDto = {
   sp_granted?: number | null;
   period_end_iso: string | null;
   expires_label: string | null;
+  /** Puede descartarse vía reroll (pool diario/semanal, no completada). */
+  rerollable?: boolean;
 };
 
 export type SeasonPassSpHowRowDto = {
@@ -114,6 +116,7 @@ export type SeasonPassMeOk = {
   mission_period_tabs?: unknown;
   missions?: SeasonPassMissionDto[];
   pending_celebrations?: SeasonPassPendingCelebrationDto[];
+  reroll?: { daily_available: boolean; weekly_available: boolean };
   sp_how?: SeasonPassSpHowRowDto[];
   track_levels?: number[];
   track_rewards?: SeasonPassTrackLevelDto[];
@@ -132,6 +135,25 @@ export async function fetchSeasonPassMe(
   const data = (await res.json()) as Record<string, unknown>;
   if (!res.ok || data.ok !== true) return null;
   return data as unknown as SeasonPassMeOk;
+}
+
+/** Reroll v1 (gratis): sustituye una misión del pool por otra. ids = assignment_id. */
+export async function rerollSeasonPassMission(
+  token: string,
+  assignmentId: string,
+  timezone?: string | null
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const tz = encodeURIComponent((timezone ?? 'UTC').trim() || 'UTC');
+    const res = await fetch(
+      `${API_URL}/season-pass/missions/${encodeURIComponent(assignmentId)}/reroll?timezone=${tz}`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
+    );
+    const data = (await res.json()) as { ok?: boolean; error?: string };
+    return { ok: data.ok === true, error: data.error };
+  } catch {
+    return { ok: false, error: 'network' };
+  }
 }
 
 /** Marca celebraciones diferidas como vistas (ids = assignment_id). */
