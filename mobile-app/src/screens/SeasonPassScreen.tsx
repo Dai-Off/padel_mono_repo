@@ -33,6 +33,7 @@ import {
   type SeasonPassTrackRewardDto,
 } from '../api/seasonPass';
 import { RARITY_CONFIG } from '../design/rarity';
+import { resolveUnlockableIcon } from '../design/unlockableIcons';
 
 type Props = { onBack: () => void };
 
@@ -303,7 +304,7 @@ function RewardThumb({
     );
   } else {
     // trophy / badge / title: preset de icono del catálogo con color de rareza.
-    inner = <Ionicons name={(d.icon ?? 'trophy') as any} size={18} color={rarity.color} />;
+    inner = <Ionicons name={resolveUnlockableIcon(d.icon)} size={18} color={rarity.color} />;
   }
 
   return (
@@ -641,6 +642,15 @@ export function SeasonPassScreen({ onBack }: Props) {
   const [rerollTarget, setRerollTarget] = useState<SeasonPassMissionDto | null>(null);
   const [rerolling, setRerolling] = useState(false);
   const [rerollErr, setRerollErr] = useState<string | null>(null);
+  // Fade propio y rápido: el animationType="fade" del Modal nativo dura ~300ms
+  // fijos del sistema y se siente lento.
+  const rerollFade = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (rerollTarget !== null) {
+      rerollFade.setValue(0);
+      Animated.timing(rerollFade, { toValue: 1, duration: 140, useNativeDriver: true }).start();
+    }
+  }, [rerollTarget, rerollFade]);
 
   const handleReroll = useCallback(
     (m: SeasonPassMissionDto) => {
@@ -1177,10 +1187,10 @@ export function SeasonPassScreen({ onBack }: Props) {
       <Modal
         visible={rerollTarget !== null}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => (!rerolling ? setRerollTarget(null) : undefined)}
       >
-        <View style={{ flex: 1 }}>
+        <Animated.View style={{ flex: 1, opacity: rerollFade }}>
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={() => (!rerolling ? setRerollTarget(null) : undefined)}
@@ -1230,7 +1240,7 @@ export function SeasonPassScreen({ onBack }: Props) {
               </Pressable>
             </View>
           </View>
-        </View>
+        </Animated.View>
       </Modal>
 
       <Modal visible={showElite} transparent animationType="fade" onRequestClose={() => setShowElite(false)}>
