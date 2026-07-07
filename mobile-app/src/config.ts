@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import comingSoonFeatures from './config/comingSoonFeatures.json';
 
 export const STRIPE_PUBLISHABLE_KEY =
   (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY as string | undefined) || '';
@@ -45,3 +46,18 @@ function envFlag(v: string | undefined): boolean {
  * EXPO_PUBLIC_MATCHMAKING_DEMO=true
  */
 export const MATCHMAKING_DEMO = envFlag(process.env.EXPO_PUBLIC_MATCHMAKING_DEMO);
+
+/**
+ * Oculta funcionalidades marcadas como "Próximamente" o sin terminar.
+ * Las claves listadas en config/comingSoonFeatures.json se ocultan mientras el flag esté activo.
+ * Al completar una función, se elimina su clave del JSON para volver a mostrarla.
+ * EXPO_PUBLIC_HIDE_COMING_SOON=true
+ */
+export const HIDE_COMING_SOON = envFlag(process.env.EXPO_PUBLIC_HIDE_COMING_SOON);
+
+const hiddenFeatures = new Set(comingSoonFeatures.hidden);
+
+/** Indica si una funcionalidad debe ocultarse según el flag y el listado de comingSoonFeatures.json. */
+export function isFeatureHidden(feature: string): boolean {
+  return HIDE_COMING_SOON && hiddenFeatures.has(feature);
+}

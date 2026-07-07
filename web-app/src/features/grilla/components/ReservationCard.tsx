@@ -63,6 +63,16 @@ export const ReservationCard: React.FC<Props> = ({
         reservation.booking_type !== 'blocked' &&
         reservation.booking_type !== 'tournament';
     const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : (isLoadingName ? null : t('grid.noClient'));
+    const showPlayerBubble = reservation.isPublicOpenMatch === true && !isLoadingName;
+    const registeredCount = reservation.registeredPlayerCount ?? reservation.detailedPlayers?.length ?? 0;
+    const renderPlayerBubble = (sizePx: number, fontPx: number) => (
+        <div
+            className="rounded-full bg-white shadow-sm border border-white/80 flex items-center justify-center font-bold text-gray-900 leading-none shrink-0"
+            style={{ width: sizePx, height: sizePx, fontSize: fontPx }}
+        >
+            {registeredCount}
+        </div>
+    );
     const priceLabel =
         reservation.totalPrice != null && reservation.totalPrice > 0
             ? `${reservation.totalPrice.toFixed(2).replace('.', ',')} €`
@@ -228,6 +238,8 @@ export const ReservationCard: React.FC<Props> = ({
                     <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden px-0.5">
                         {isLoadingName ? (
                             <span className="text-[5px] opacity-70 italic">…</span>
+                        ) : showPlayerBubble ? (
+                            renderPlayerBubble(isCompact ? 12 : 14, isCompact ? 7 : 8)
                         ) : displayLabel ? (
                             <span className="uppercase font-bold text-[5.5px] leading-tight line-clamp-4 break-words">
                                 {displayLabel}
@@ -246,6 +258,8 @@ export const ReservationCard: React.FC<Props> = ({
                     <div className="flex-1 flex items-center justify-center min-h-0 px-0.5">
                         {isLoadingName ? (
                             <span className="text-[5px] opacity-70 italic">…</span>
+                        ) : showPlayerBubble ? (
+                            renderPlayerBubble(16, 9)
                         ) : displayLabel ? (
                             <span className="uppercase font-bold text-[5.5px] leading-tight line-clamp-2 break-words">
                                 {displayLabel}
@@ -285,6 +299,8 @@ export const ReservationCard: React.FC<Props> = ({
                                     Cargando...
                                 </span>
                             </div>
+                        ) : showPlayerBubble ? (
+                            renderPlayerBubble(isSmallZoom ? 20 : 16, isSmallZoom ? 11 : 9)
                         ) : displayLabel ? (
                             <span className={clsx(
                                 "uppercase font-bold leading-tight break-words whitespace-normal text-[5.5px]",

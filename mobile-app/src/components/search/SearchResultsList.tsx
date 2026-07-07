@@ -64,7 +64,11 @@ export function SearchResultsList({
             key={group.representative.clubId}
             group={group}
             onPress={() => onClubPress?.(group.representative)}
-            onFavoritePress={() => onFavoritePress?.(group.representative)}
+            onFavoritePress={
+              onFavoritePress
+                ? () => onFavoritePress(group.representative)
+                : undefined
+            }
           />
         ))}
       </View>

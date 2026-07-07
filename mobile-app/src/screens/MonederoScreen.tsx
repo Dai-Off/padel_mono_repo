@@ -19,6 +19,7 @@ import { fetchPlayerWalletBalances } from '../api/wallet';
 import { BackHeader } from '../components/layout/BackHeader';
 import { formatLocale, useTranslation } from '../i18n';
 import { theme } from '../theme';
+import { isFeatureHidden } from '../config';
 
 const CARD = 'rgba(255,255,255,0.06)';
 const BORDER = 'rgba(255,255,255,0.08)';
@@ -207,19 +208,23 @@ export function MonederoScreen({
               {formatAmount(totalCents, numberLocale)}
             </Text>
             <Text style={styles.balanceHint}>{t('wallet.walletClubBalanceHint')}</Text>
-            <Pressable style={[styles.primaryBtn, styles.btnDisabled]} disabled>
-              <Text style={[styles.primaryBtnText, styles.btnTextDisabled]}>
-                {t('wallet.walletLoadFunds')}
-              </Text>
-            </Pressable>
+            {!isFeatureHidden('wallet.loadFunds') && (
+              <Pressable style={[styles.primaryBtn, styles.btnDisabled]} disabled>
+                <Text style={[styles.primaryBtnText, styles.btnTextDisabled]}>
+                  {t('wallet.walletLoadFunds')}
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           <View style={styles.actionRow}>
-            <Pressable style={[styles.secondaryBtn, styles.actionBtn, styles.btnDisabled]} disabled>
-              <Text style={[styles.secondaryBtnText, styles.btnTextDisabled]}>
-                {t('wallet.walletWithdraw')}
-              </Text>
-            </Pressable>
+            {!isFeatureHidden('wallet.withdraw') && (
+              <Pressable style={[styles.secondaryBtn, styles.actionBtn, styles.btnDisabled]} disabled>
+                <Text style={[styles.secondaryBtnText, styles.btnTextDisabled]}>
+                  {t('wallet.walletWithdraw')}
+                </Text>
+              </Pressable>
+            )}
             <Pressable
               style={({ pressed }) => [
                 styles.secondaryBtn,
@@ -264,13 +269,17 @@ export function MonederoScreen({
                 subtitle={t('wallet.allTransactionsSub')}
                 onPress={onTransaccionesPress}
               />
-              <View style={styles.linkDivider} />
-              <LinkRow
-                icon="home-outline"
-                title={t('wallet.clubMemberships')}
-                subtitle={t('wallet.clubMembershipsSoon')}
-                disabled
-              />
+              {!isFeatureHidden('wallet.clubMemberships') && (
+                <>
+                  <View style={styles.linkDivider} />
+                  <LinkRow
+                    icon="home-outline"
+                    title={t('wallet.clubMemberships')}
+                    subtitle={t('wallet.clubMembershipsSoon')}
+                    disabled
+                  />
+                </>
+              )}
             </View>
           </View>
         </ScrollView>

@@ -60,6 +60,9 @@ export interface Reservation {
     paymentNumber?: number;
     hasYellowAlert?: boolean;
     detailedPlayers?: PlayerDetails[];
+    /** Partido abierto público (visible en app): mostrar cupo en grilla en vez del nombre. */
+    isPublicOpenMatch?: boolean;
+    registeredPlayerCount?: number;
     // Extended fields populated when relevant
     instructorName?: string;         // school bookings
     flatRateAgreementId?: string;    // flat_rate bookings
