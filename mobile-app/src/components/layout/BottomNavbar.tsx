@@ -7,13 +7,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
 
-/** Alineado a la BottomNav web (Inicio, Pistas, Tienda, Torneos, Partidos). */
 export type MainTabId =
   | 'inicio'
   | 'pistas'
   | 'tienda'
   | 'torneos'
   | 'partidos'
+  | 'cursos'
   | 'perfil';
 
 type TabConfig = {
@@ -24,11 +24,10 @@ type TabConfig = {
 
 const TABS: TabConfig[] = [
   { id: 'inicio', labelKey: 'nav.tabInicio', icon: 'home' },
+  { id: 'partidos', labelKey: 'nav.tabPartidos', icon: 'flash' },
   { id: 'pistas', labelKey: 'nav.tabPistas', icon: 'calendar' },
   { id: 'tienda', labelKey: 'nav.tabTienda', icon: 'bag-handle-outline' },
-  { id: 'torneos', labelKey: 'nav.tabTorneos', icon: 'trophy' },
-  { id: 'partidos', labelKey: 'nav.tabPartidos', icon: 'flash' },
-  { id: 'perfil', labelKey: 'nav.tabPerfil', icon: 'person' },
+  { id: 'cursos', labelKey: 'nav.tabCursos', icon: 'school-outline' },
 ];
 
 const GRADIENT = ['#F18F34', '#FFA940'] as const;
