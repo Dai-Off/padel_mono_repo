@@ -290,6 +290,58 @@ async function resolvePlayerForInvite(
   return { ok: false, reason: 'invalid_target' };
 }
 
+/**
+ * @openapi
+ * /matches/join/{matchId}:
+ *   get:
+ *     tags: [Matches]
+ *     summary: Landing para unirse a un partido desde enlace compartido
+ *     description: |
+ *       Página HTML que redirige a la app móvil (`wematch://match?match_id=…`).
+ *       Usada por el panel web para compartir partidos abiertos por WhatsApp u otros canales.
+ *     parameters:
+ *       - in: path
+ *         name: matchId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Página HTML con botón para abrir la app
+ *         content:
+ *           text/html:
+ *             schema: { type: string }
+ *       400:
+ *         description: matchId inválido
+ */
+router.get('/join/:matchId', (req: Request, res: Response) => {
+  const matchId = String(req.params.matchId ?? '').trim();
+  if (!matchId || matchId.length < 8) {
+    return res.status(400).type('text/html').send('<h1>Enlace inválido</h1>');
+  }
+  const appUrl = `wematch://match?match_id=${encodeURIComponent(matchId)}`;
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Unirse al partido</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 16px; text-align: center; color: #1a1a1a; }
+    a.btn { display: inline-block; margin-top: 24px; padding: 14px 28px; background: #E31E24; color: #fff; text-decoration: none; border-radius: 12px; font-weight: 700; }
+    p { color: #555; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>Partido en WeMatch</h1>
+  <p>Abre la app para ver el partido y unirte.</p>
+  <a class="btn" href="${appUrl}">Abrir en la app</a>
+  <p style="margin-top:32px;font-size:13px;">Si no se abre automáticamente, instala o abre la app y vuelve a pulsar el enlace.</p>
+  <script>setTimeout(function(){ window.location.href = ${JSON.stringify(appUrl)}; }, 400);</script>
+</body>
+</html>`;
+  return res.status(200).type('text/html').send(html);
+});
+
 /** GET /matches/invites/received — invitaciones pendientes del jugador autenticado */
 router.get('/invites/received', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
@@ -534,6 +586,8 @@ router.get('/invites/:token/accept', (req: Request, res: Response) => {
   <h1>Invitación al partido</h1>
   <p>Abre la app WeMatch para ver y responder la invitación.</p>
   <a class="btn" href="${appUrl}">Abrir en la app</a>
+  <p style="margin-top:32px;font-size:13px;">Si no se abre automáticamente, instala o abre la app y vuelve a pulsar el enlace.</p>
+  <script>setTimeout(function(){ window.location.href = ${JSON.stringify(appUrl)}; }, 400);</script>
 </body>
 </html>`;
   return res.status(200).type('text/html').send(html);
