@@ -417,3 +417,61 @@ Puntos de contrato con los otros equipos:
 3. **Activación de misiones:** al desplegar cada feature social, flip de `active=true` en `season_pass_mission_definitions` (una fila SQL por misión).
 4. **Números de migración:** el pase reserva `091`–`096`; los equipos de social deben coger los siguientes números libres y coordinarlo al mergear (ya hay duplicados históricos en `backend/db/` — no añadir más).
 5. **Zonas de conflicto de merge previsibles en mobile:** `MainApp.tsx` (ambos bloques registran pantallas/estados nuevos), archivos de i18n (`es` + `zh-HK`) y `HomeDataContext.tsx`. Coordinar orden de merge.
+
+---
+
+## 11. Ampliaciones decididas (2026-07-08)
+
+Tras revisar el PRD propio del usuario (`Downloads/PRD_season_pass.md`) y la
+pantalla real, se acuerdan estas líneas de trabajo. **El modelo económico NO
+cambia:** todo el SP sigue viniendo de misiones (nada de SP directo por acción
+suelta — descartado por farming + rompe la economía calibrada de arriba). Lo que
+cambia es la **calidad y gestión** de las misiones y la densidad del track.
+
+### 11.1 Pool de misiones cualitativo (implementación, no cambia reglas)
+El pool actual es demasiado cuantitativo ("juega 3 partidos"). Se enriquece con
+misiones **cualitativas** trackeables con datos existentes, y se generaliza por
+categorías (no solo las del PRD — el sistema debe permitir crecer):
+- **Learning:** ≥80% en la lección, sin fallar ninguna, lección en <4 min,
+  2 lecciones perfectas en la semana.
+- **Partidos:** ganar (no solo jugar), gana en 2 sets, compañero nuevo,
+  rival por encima de tu ELO.
+- **Pistas:** club nuevo, horario mañana/noche, reserva con antelación.
+- **Cruzadas / maestría:** "clase + lección el mismo día", multi-módulo de
+  temporada (las más exigentes, mejores recompensas).
+Nuevos `condition_key`/`condition_params` en el evaluador (score de lección,
+sets del marcador, timing, ELO relativo). Requiere una pasada de motor.
+> Nota de gobernanza: las **reglas base vienen de arriba**; enriquecer el banco
+> es implementación, pero validar el set final con producto antes de sembrarlo.
+
+### 11.2 Recompensa en CADA nivel (decisión de arriba 2026-07-08)
+Cada uno de los 100 niveles debe entregar algo en el carril free (y muchos
+también en elite). Requiere **ampliar mucho el catálogo** y re-sembrar 092/093.
+Fuentes de recompensa disponibles:
+- **Generables ya, sin assets de diseño:** títulos (solo texto), marcos
+  procedurales (`animation_type` + `style` + `colors`), insignias (glyph
+  Ionicons + rareza), SP directo (relleno), boosters de SP (variados).
+- **Requieren diseño/stakeholders:** los 42 iconos custom del PDF (aplazados
+  hasta assets; se insertan en niveles clave al llegar) y recompensas
+  funcionales (descuentos, crédito de reservas, boost XP — fuera de MVP).
+Estrategia sugerida: cosméticos de más rareza en niveles clave (múltiplos de 5 /
+10 y el 100), y en los intermedios mezcla de títulos/insignias común-raro,
+boosters y SP directo, para que ningún nivel quede vacío. (Anula la idea previa
+de "recompensa cada 5 niveles".)
+
+### 11.3 Biblioteca de misiones en la webapp de administración
+Nueva sección en `web-app` (panel de **administración de la app**, no club
+owner) para gestionar el banco de misiones **por categorías y secciones**:
+listar, crear y editar definiciones de `season_pass_mission_definitions`
+(título, descripción, período, `condition_key`, `condition_params`, SP,
+dificultad, `active`). Objetivo: añadir/rotar misiones sin tocar SQL a mano.
+Pendiente de diseño; trabajo propio fuera de las fases 1–4.
+
+### 11.4 Relación con el PDF de producto (§ estructura de recompensas 1-100)
+Se sigue **en concepto** (títulos/marcos/boosters por nivel, más valor arriba,
+free vs premium, cierre épico en nivel 100) pero **no al pie de la letra**: los
+42 iconos siguen aplazados (sin assets), los nombres/niveles exactos de títulos
+del PDF ([NOVATO], [AFÍN] nvl 20, marcos "Pulso Verde"…) no están sembrados así
+(usamos cosméticos propios en niveles propios), y con "recompensas cada 5" nos
+alejamos aún más de su distribución nivel-a-nivel. Al llegar los iconos de
+diseño se puede acercar el seed a los nombres del PDF si producto lo pide.

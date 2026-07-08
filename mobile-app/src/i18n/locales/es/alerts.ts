@@ -191,7 +191,16 @@ export const alerts: AlertsTranslationKeys = {
     tabMissions: '⚡ Misiones',
     legendElite: 'Pase Elite',
     legendFree: 'Pase Libre',
-    howEarnSp: 'Cómo ganar SP',
+    passHelpTitle: '¿Cómo funciona el pase?',
+    passHelpAboutTitle: 'El Pase de Temporada',
+    passHelpAboutBody:
+      'Sube de nivel y desbloquea recompensas antes de que termine. Cada {sp} SP es un nivel, hasta {max}. La temporada ({period}) termina en {days} días.',
+    passHelpEarnTitle: 'Cómo ganar SP',
+    passHelpEarnBody:
+      'Completa las misiones diarias, semanales y mensuales del pase. Los boosts multiplican todo el SP que ganas: los da tu racha de lecciones (+15% a +70%) y también algunas recompensas del pase.',
+    passHelpRewardsTitle: 'Recompensas',
+    passHelpRewardsBody:
+      'Cada nivel entrega recompensas: el carril gratuito es para todos y el carril Elite se desbloquea con el Pase Elite.',
     noMissionsConfigured: 'No hay misiones configuradas para esta temporada.',
     spObtained: 'SP obtenidos',
     completed: 'Completadas',

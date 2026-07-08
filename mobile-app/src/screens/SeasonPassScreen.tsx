@@ -36,6 +36,7 @@ import { RARITY_CONFIG } from '../design/rarity';
 import { resolveUnlockableIcon } from '../design/unlockableIcons';
 import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { AuthButton } from '../components/auth/AuthButton';
+import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
 
 type Props = { onBack: () => void };
 
@@ -599,6 +600,7 @@ export function SeasonPassScreen({ onBack }: Props) {
   const [tab, setTab] = useState<PassTab>('rewards');
   const [mTab, setMTab] = useState<MissionPeriod>('daily');
   const [showElite, setShowElite] = useState(false);
+  const [showHowTo, setShowHowTo] = useState(false);
   const [elitePaying, setElitePaying] = useState(false);
   const [me, setMe] = useState<SeasonPassMeOk | null>(null);
   const [loading, setLoading] = useState(true);
@@ -687,7 +689,6 @@ export function SeasonPassScreen({ onBack }: Props) {
   const eliteActive = me?.has_elite ?? false;
   const left = daysLeftFromEndsAt(me?.season.ends_at);
   const trackLevels = me?.track_levels ?? [];
-  const spHowRows = me?.sp_how ?? [];
 
   const trackRewardsByLevel = useMemo(() => {
     const map = new Map<number, SeasonPassTrackRewardDto[]>();
@@ -924,6 +925,15 @@ export function SeasonPassScreen({ onBack }: Props) {
                 <Ionicons name="arrow-back" size={18} color="#fff" />
               </Pressable>
 
+              <Pressable
+                onPress={() => setShowHowTo(true)}
+                hitSlop={14}
+                style={({ pressed }) => [styles.helpFab, { top: 8 }, pressed && styles.pressed]}
+                accessibilityLabel={t('alerts.seasonPass.passHelpTitle')}
+              >
+                <Ionicons name="help" size={18} color="#fff" />
+              </Pressable>
+
               <View style={styles.heroInner}>
                 <View style={{ alignItems: 'center', marginBottom: 10 }}>
                   <View>
@@ -1096,27 +1106,6 @@ export function SeasonPassScreen({ onBack }: Props) {
                   );
                 })}
               </ScrollView>
-
-              {spHowRows.length > 0 ? (
-              <View style={styles.spBox}>
-                <View style={styles.spBoxHead}>
-                  <Ionicons name="flash" size={16} color={ACCENT} />
-                  <Text style={styles.spBoxTitle}>{t('alerts.seasonPass.howEarnSp')}</Text>
-                </View>
-                {spHowRows.map((row, idx) => (
-                  <View
-                    key={`${row.label}-${idx}`}
-                    style={[styles.spBoxRow, idx === spHowRows.length - 1 && styles.spBoxRowLast]}
-                  >
-                    <Text style={styles.spBoxLeft}>
-                      <Text>{row.icon} </Text>
-                      <Text style={styles.spBoxGray}>{row.label}</Text>
-                    </Text>
-                    <Text style={styles.spBoxOrange}>{row.sp_hint}</Text>
-                  </View>
-                ))}
-              </View>
-              ) : null}
             </View>
           ) : (
             <View>
@@ -1316,6 +1305,15 @@ export function SeasonPassScreen({ onBack }: Props) {
           )}
         </View>
       </FilterBottomSheet>
+
+      <PassHelpSheet
+        visible={showHowTo}
+        onClose={() => setShowHowTo(false)}
+        period={me?.season.subtitle ?? ''}
+        daysLeft={left}
+        spPerLevel={spPer}
+        levelMax={levelMax}
+      />
     </View>
   );
 }
@@ -1361,6 +1359,19 @@ const styles = StyleSheet.create({
   backFab: {
     position: 'absolute',
     left: 16,
+    zIndex: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helpFab: {
+    position: 'absolute',
+    right: 16,
     zIndex: 20,
     width: 36,
     height: 36,
@@ -1753,30 +1764,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginTop: 2,
   }),
-  spBox: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    padding: 14,
-    marginBottom: 8,
-  },
-  spBoxHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  spBoxTitle: androidReadableText({ fontSize: 13, fontWeight: '800', color: '#fff' }),
-  spBoxRow: {
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  spBoxLeft: androidReadableText({ fontSize: 12, marginBottom: 4 }),
-  spBoxGray: { color: '#9ca3af' },
-  spBoxOrange: androidReadableText({
-    fontSize: 12,
-    fontWeight: '700',
-    color: ACCENT,
-    lineHeight: 17,
-  }),
-  spBoxRowLast: { borderBottomWidth: 0 },
   missionTabs: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   missionTab: {
     flex: 1,
