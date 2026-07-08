@@ -7,6 +7,7 @@ export const nav: NavTranslationKeys = {
   tabTorneos: 'Torneos',
   tabPartidos: 'Partidos',
   tabPerfil: 'Perfil',
+  tabCursos: 'Cursos',
   openMenu: 'Abrir menú',
   closeMenu: 'Cerrar menú',
   messages: 'Mensajes',
