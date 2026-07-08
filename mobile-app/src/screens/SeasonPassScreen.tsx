@@ -314,10 +314,21 @@ function RewardThumb({
         />
       </LinearGradient>
     );
-  } else if (d.kind === 'sp' || d.kind === 'sp_boost') {
+  } else if (d.kind === 'sp') {
+    // SP directo: solo el valor, sin icono (el rayo no aportaba nada).
     inner = (
       <View style={{ alignItems: 'center' }}>
-        <Text style={{ fontSize: 14 }}>{d.icon ?? '⚡'}</Text>
+        <Text style={{ fontSize: 13, fontWeight: '900', color: ACCENT }} numberOfLines={1}>
+          {d.label.replace(' SP', '')}
+        </Text>
+        <Text style={{ fontSize: 8, fontWeight: '700', color: ACCENT }}>SP</Text>
+      </View>
+    );
+  } else if (d.kind === 'sp_boost') {
+    // Booster: cohete + %, el icono sí comunica "boost temporal".
+    inner = (
+      <View style={{ alignItems: 'center' }}>
+        <Text style={{ fontSize: 14 }}>🚀</Text>
         <Text style={{ fontSize: 8, fontWeight: '800', color: ACCENT }} numberOfLines={1}>
           {d.label.replace(' SP', '')}
         </Text>
