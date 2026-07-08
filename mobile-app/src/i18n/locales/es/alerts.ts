@@ -197,7 +197,7 @@ export const alerts: AlertsTranslationKeys = {
     missionCloses: 'Cierra · {label}',
     noMissionsInTab: 'No hay misiones en esta pestaña.',
     modalBenefitsDefault: 'Beneficios según la configuración de tu temporada.',
-    getEliteCta: 'Obtener Pase Elite (pago con tarjeta)',
+    getEliteCta: 'Obtener Pase Elite',
     continueFree: 'Continuar con Pase Libre',
     confirmFail: 'No se pudo confirmar el Pase Elite. Inténtalo de nuevo.',
     rerollTitle: 'Cambiar misión',

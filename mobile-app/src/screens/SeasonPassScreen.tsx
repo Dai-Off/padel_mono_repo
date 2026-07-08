@@ -34,6 +34,8 @@ import {
 } from '../api/seasonPass';
 import { RARITY_CONFIG } from '../design/rarity';
 import { resolveUnlockableIcon } from '../design/unlockableIcons';
+import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
+import { AuthButton } from '../components/auth/AuthButton';
 
 type Props = { onBack: () => void };
 
@@ -1243,62 +1245,44 @@ export function SeasonPassScreen({ onBack }: Props) {
         </Animated.View>
       </Modal>
 
-      <Modal visible={showElite} transparent animationType="fade" onRequestClose={() => setShowElite(false)}>
-        <View style={{ flex: 1 }}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowElite(false)}>
-            <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
-          </Pressable>
-          <View style={styles.modalSheetWrap} pointerEvents="box-none">
-          <Pressable style={[styles.modalSheet, { paddingBottom: 24 + insets.bottom }]} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalGrab} />
-            <LinearGradient
-              colors={['rgba(255,215,0,0.12)', 'transparent']}
-              style={StyleSheet.absoluteFill}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 0.45 }}
-            />
-            <View style={styles.modalCrown}>
-              <Text style={{ fontSize: 36 }}>👑</Text>
-            </View>
-            <Text style={styles.modalTitle}>{t('alerts.seasonPass.elitePass')}</Text>
-            <Text style={styles.modalSub}>
-              {[me?.season.slug, me?.season.title].filter(Boolean).join(' · ') || t('alerts.seasonPass.elitePass')}
-            </Text>
-            <View style={{ gap: 12, marginBottom: 20 }}>
-              {eliteBullets.length > 0 ? (
-                eliteBullets.map((b) => (
-                  <View key={b.text} style={styles.modalBullet}>
-                    <Text style={{ fontSize: 18 }}>{b.icon}</Text>
-                    <Text style={styles.modalBulletTxt}>{b.text}</Text>
-                  </View>
-                ))
-              ) : (
-                <Text style={styles.modalBulletTxt}>{t('alerts.seasonPass.modalBenefitsDefault')}</Text>
-              )}
-            </View>
-            <Pressable
+      <FilterBottomSheet
+        visible={showElite}
+        title={t('alerts.seasonPass.elitePass')}
+        onClose={() => setShowElite(false)}
+        footer={
+          <View style={styles.eliteSheetFooter}>
+            <AuthButton
+              loading={elitePaying}
+              icon="ribbon"
               onPress={() => void purchaseEliteWithStripe()}
-              disabled={elitePaying}
-              style={({ pressed }) => [pressed && !elitePaying && styles.pressed]}
             >
-              <LinearGradient
-                colors={['#FFD700', '#FFA500', '#FF6B00']}
-                style={[styles.modalCta, elitePaying && { opacity: 0.85 }]}
-              >
-                {elitePaying ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={styles.modalCtaTxt}>{t('alerts.seasonPass.getEliteCta')}</Text>
-                )}
-              </LinearGradient>
-            </Pressable>
-            <Pressable onPress={() => setShowElite(false)} style={{ marginTop: 12, paddingVertical: 8 }}>
+              {t('alerts.seasonPass.getEliteCta')}
+            </AuthButton>
+            <Pressable onPress={() => setShowElite(false)} style={{ paddingVertical: 8 }}>
               <Text style={styles.modalDismiss}>{t('alerts.seasonPass.continueFree')}</Text>
             </Pressable>
-          </Pressable>
           </View>
+        }
+      >
+        <View style={styles.modalCrown}>
+          <Text style={{ fontSize: 36 }}>👑</Text>
         </View>
-      </Modal>
+        <Text style={styles.modalSub}>
+          {[me?.season.slug, me?.season.title].filter(Boolean).join(' · ') || t('alerts.seasonPass.elitePass')}
+        </Text>
+        <View style={{ gap: 12, marginBottom: 4 }}>
+          {eliteBullets.length > 0 ? (
+            eliteBullets.map((b) => (
+              <View key={b.text} style={styles.modalBullet}>
+                <Text style={{ fontSize: 18 }}>{b.icon}</Text>
+                <Text style={styles.modalBulletTxt}>{b.text}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.modalBulletTxt}>{t('alerts.seasonPass.modalBenefitsDefault')}</Text>
+          )}
+        </View>
+      </FilterBottomSheet>
     </View>
   );
 }
@@ -1831,27 +1815,8 @@ const styles = StyleSheet.create({
   },
   missionExpireText: androidReadableText({ fontSize: 10, color: '#4b5563' }),
   pressed: { opacity: 0.9 },
-  modalSheetWrap: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: '#1a1000',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderTopWidth: 1,
-    borderColor: 'rgba(234,179,8,0.2)',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    overflow: 'hidden',
-  },
-  modalGrab: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignSelf: 'center',
-    marginBottom: 16,
+  eliteSheetFooter: {
+    paddingHorizontal: 16,
   },
   modalCrown: {
     alignSelf: 'center',
@@ -1863,12 +1828,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
-  modalTitle: androidReadableText({
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#fff',
-    textAlign: 'center',
-  }),
   modalSub: androidReadableText({
     fontSize: 11,
     color: '#facc15',
@@ -1877,12 +1836,6 @@ const styles = StyleSheet.create({
   }),
   modalBullet: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   modalBulletTxt: androidReadableText({ flex: 1, fontSize: 13, color: '#d1d5db' }),
-  modalCta: {
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  modalCtaTxt: androidReadableText({ fontSize: 16, fontWeight: '900', color: '#000' }),
   modalDismiss: androidReadableText({
     textAlign: 'center',
     fontSize: 11,

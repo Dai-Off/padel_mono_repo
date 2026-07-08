@@ -190,7 +190,7 @@ export const alerts: AlertsTranslationKeys = {
     missionCloses: '截止 · {label}',
     noMissionsInTab: '此分頁暫無任務。',
     modalBenefitsDefault: '福利視本賽季設定而定。',
-    getEliteCta: '購買 Elite 通行證（信用卡付款）',
+    getEliteCta: '購買 Elite 通行證',
     continueFree: '繼續使用免費通行證',
     confirmFail: '無法確認 Elite 通行證。請再試一次。',
     rerollTitle: '更換任務',
