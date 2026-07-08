@@ -955,14 +955,31 @@ export function SeasonPassScreen({ onBack }: Props) {
                         </View>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.levelCardHint}>{t('alerts.seasonPass.totalSp')}</Text>
-                        <Text style={styles.spHuge}>{sp.toLocaleString('es-ES')}</Text>
+                        {level >= levelMax ? (
+                          <>
+                            <Text style={styles.levelCardHint}>{t('alerts.seasonPass.totalSp')}</Text>
+                            <Text style={styles.spHuge}>{sp.toLocaleString('es-ES')}</Text>
+                            <Text style={styles.spTotalInline}>{t('alerts.seasonPass.seasonMax')}</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.levelCardHint}>
+                              {t('alerts.seasonPass.forNextLevel', { level: level + 1 })}
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+                              <Text style={styles.spHuge}>{spToNext.toLocaleString('es-ES')}</Text>
+                              <Text style={styles.spHugeUnit}>SP</Text>
+                            </View>
+                            <Text style={styles.spTotalInline}>
+                              {t('alerts.seasonPass.totalSpInline', { sp: sp.toLocaleString('es-ES') })}
+                            </Text>
+                          </>
+                        )}
                       </View>
                     </View>
 
                     <View style={styles.barLabels}>
                       <Text style={styles.barTiny}>{t('alerts.seasonPass.levelShort', { level })}</Text>
-                      <Text style={styles.barTiny}>{t('alerts.seasonPass.spRemaining', { sp: spToNext.toLocaleString('es-ES') })}</Text>
                       <Text style={styles.barTiny}>{t('alerts.seasonPass.levelShort', { level: Math.min(levelMax, level + 1) })}</Text>
                     </View>
                     <ShimmerBar pct={pct} />
@@ -1391,7 +1408,7 @@ const styles = StyleSheet.create({
   },
   levelCardHint: androidReadableText({
     fontSize: 10,
-    color: '#6b7280',
+    color: '#9ca3af',
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 6,
@@ -1404,7 +1421,7 @@ const styles = StyleSheet.create({
   }),
   levelSlash: androidReadableText({
     fontSize: 15,
-    color: '#4b5563',
+    color: '#9ca3af',
     fontWeight: '700',
   }),
   spHuge: androidReadableText({
@@ -1412,12 +1429,22 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: ACCENT,
   }),
+  spHugeUnit: androidReadableText({
+    fontSize: 12,
+    fontWeight: '800',
+    color: ACCENT,
+  }),
+  spTotalInline: androidReadableText({
+    fontSize: 10,
+    color: '#9ca3af',
+    marginTop: 4,
+  }),
   barLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-  barTiny: androidReadableText({ fontSize: 10, color: '#6b7280' }),
+  barTiny: androidReadableText({ fontSize: 10, color: '#9ca3af' }),
   barTrackHero: {
     height: 10,
     borderRadius: 999,
@@ -1438,7 +1465,7 @@ const styles = StyleSheet.create({
   },
   barFoot: androidReadableText({
     fontSize: 10,
-    color: '#4b5563',
+    color: '#9ca3af',
     textAlign: 'right',
     marginTop: 6,
     marginBottom: 12,

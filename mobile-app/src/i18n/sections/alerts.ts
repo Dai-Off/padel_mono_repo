@@ -171,6 +171,8 @@ export interface AlertsTranslationKeys {
     daysRemaining: string;
     currentLevel: string;
     totalSp: string;
+    forNextLevel: string;
+    totalSpInline: string;
     levelShort: string;
     spRemaining: string;
     spInLevel: string;

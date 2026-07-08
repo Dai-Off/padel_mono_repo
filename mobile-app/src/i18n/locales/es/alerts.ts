@@ -180,6 +180,8 @@ export const alerts: AlertsTranslationKeys = {
     daysRemaining: '{count} días restantes',
     currentLevel: 'Tu nivel actual',
     totalSp: 'SP totales',
+    forNextLevel: 'Para nivel {level}',
+    totalSpInline: '{sp} SP totales',
     levelShort: 'Nivel {level}',
     spRemaining: 'Faltan {sp} SP',
     spInLevel: '{into} / {total} SP en este nivel',

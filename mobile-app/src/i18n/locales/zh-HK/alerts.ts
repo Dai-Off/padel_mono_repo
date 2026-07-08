@@ -173,6 +173,8 @@ export const alerts: AlertsTranslationKeys = {
     daysRemaining: '尚餘 {count} 天',
     currentLevel: '你目前的等級',
     totalSp: 'SP 總計',
+    forNextLevel: '距離等級 {level}',
+    totalSpInline: 'SP 總計 {sp}',
     levelShort: '等級 {level}',
     spRemaining: '尚欠 {sp} SP',
     spInLevel: '本等級 {into} / {total} SP',
