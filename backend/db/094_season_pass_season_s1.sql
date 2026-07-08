@@ -58,7 +58,7 @@ insert into public.season_pass_mission_definitions
    sort_order, condition_key, condition_params, assignment, reward_hint, active)
 values
   -- Fixed daily anchor (outside the draw)
-  ('s1', 'daily_lesson', '📚', 'Lección diaria', 'Completa la lección del día en Aprendizaje.',
+  ('s1', 'daily_lesson', '📚', 'Lección diaria', 'Completa la lección del día y mantén tu racha.',
    'daily', 1, 150, 0, 'daily_lesson', '{}', 'daily_fixed',
    'La constancia cuenta: mantén tu racha diaria.', true),
 
