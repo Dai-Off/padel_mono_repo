@@ -59,6 +59,24 @@ function formatEurFromCents(cents: number): string {
   return `${v.toFixed(2).replace('.', ',')} €`;
 }
 
+/**
+ * Tiempo restante hasta el fin del período, con granularidad según su tipo
+ * (crea urgencia): diarias en horas/minutos, semanales en días/horas,
+ * mensuales en días. Estático al render (no necesita segundos).
+ */
+function formatPeriodTimeLeft(endIso: string | null | undefined, period: MissionPeriod): string {
+  if (!endIso) return '';
+  const ms = new Date(endIso).getTime() - Date.now();
+  if (Number.isNaN(ms) || ms <= 0) return '';
+  const totalMin = Math.floor(ms / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (period === 'daily') return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  if (period === 'weekly') return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+  return days > 0 ? `${days}d` : `${hours}h`; // monthly
+}
+
 function HeroParticles() {
   const anims = useRef(
     Array.from({ length: 14 }, () => new Animated.Value(0))
@@ -515,23 +533,23 @@ function MissionRow({
     outputRange: ['0%', '100%'],
   });
 
+  const spColor = m.done ? '#34d399' : ACCENT;
   return (
-    <View
-      style={[
-        styles.missionCard,
-        m.done ? styles.missionCardDone : null,
-      ]}
-    >
+    <View style={[styles.missionCard, m.done ? styles.missionCardDone : null]}>
       <View style={styles.missionRow}>
         <View style={[styles.missionIconBox, m.done && styles.missionIconBoxDone]}>
-          <Text style={{ fontSize: 20 }}>{m.icon}</Text>
+          <Text style={{ fontSize: 17 }}>{m.icon}</Text>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={styles.missionTitleRow}>
-            <Text style={styles.missionTitle} numberOfLines={2}>
+            <Text style={styles.missionTitle} numberOfLines={1}>
               {m.title}
             </Text>
-            {m.done ? <Ionicons name="checkmark-circle" size={16} color="#34d399" /> : null}
+            <View style={styles.missionSpBadge}>
+              <Text style={[styles.missionMetaSp, { color: spColor }]}>
+                {m.sp_reward.toLocaleString('es-ES')} SP
+              </Text>
+            </View>
             {!m.done && canReroll && onReroll ? (
               <Pressable
                 onPress={onReroll}
@@ -543,14 +561,14 @@ function MissionRow({
               </Pressable>
             ) : null}
           </View>
-          <Text style={styles.missionDesc}>{m.description}</Text>
-          {m.reward_hint ? (
-            <Text style={[styles.missionDesc, { fontSize: 10, opacity: 0.85, marginTop: -4 }]}>
-              {m.reward_hint}
-            </Text>
-          ) : null}
-          {!m.done ? (
-            <>
+          <Text style={styles.missionDesc} numberOfLines={1}>{m.description}</Text>
+          {m.done ? (
+            <View style={styles.missionDoneRow}>
+              <Ionicons name="checkmark-circle" size={13} color="#34d399" />
+              <Text style={styles.missionDoneText}>{t('alerts.seasonPass.missionCompleted')}</Text>
+            </View>
+          ) : (
+            <View style={styles.missionProgressRow}>
               <View style={styles.missionBarBg}>
                 <Animated.View style={{ width, height: '100%', borderRadius: 999, overflow: 'hidden' }}>
                   <LinearGradient
@@ -561,35 +579,13 @@ function MissionRow({
                   />
                 </Animated.View>
               </View>
-              <View style={styles.missionMeta}>
-                <Text style={styles.missionMetaLeft}>
-                  {m.current}/{m.target}
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Ionicons name="flash" size={12} color={ACCENT} />
-                  <Text style={styles.missionMetaSp}>+{m.sp_reward.toLocaleString('es-ES')} SP</Text>
-                </View>
-              </View>
-            </>
-          ) : (
-            <View style={styles.missionMeta}>
-              <Text style={styles.missionDoneText}>{t('alerts.seasonPass.missionCompleted')}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="flash" size={12} color="#34d399" />
-                <Text style={[styles.missionMetaSp, { color: '#34d399' }]}>
-                  +{m.sp_reward.toLocaleString('es-ES')} SP
-                </Text>
-              </View>
+              <Text style={styles.missionMetaLeft}>
+                {m.current}/{m.target}
+              </Text>
             </View>
           )}
         </View>
       </View>
-      {!m.done && m.expires_label ? (
-        <View style={styles.missionExpire}>
-          <Ionicons name="time-outline" size={12} color="#4b5563" />
-          <Text style={styles.missionExpireText}>{t('alerts.seasonPass.missionCloses', { label: m.expires_label })}</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -762,6 +758,12 @@ export function SeasonPassScreen({ onBack }: Props) {
 
   const missions = missionsByPeriod[mTab];
 
+  // Countdown del período activo: todas sus misiones comparten period_end_iso.
+  const periodCountdown = useMemo(
+    () => formatPeriodTimeLeft(missions[0]?.period_end_iso, mTab),
+    [missions, mTab],
+  );
+
   const contentOp = useRef(new Animated.Value(1)).current;
 
   /**
@@ -772,10 +774,11 @@ export function SeasonPassScreen({ onBack }: Props) {
     authLoading || (Boolean(loading && session?.access_token) && me === null);
   const passReady = me !== null;
 
-  const pendingSP = useMemo(
-    () => missions.filter((x) => !x.done).reduce((a, x) => a + x.sp_reward, 0),
+  const obtainedSP = useMemo(
+    () => missions.filter((x) => x.done).reduce((a, x) => a + x.sp_reward, 0),
     [missions]
   );
+  const totalSP = useMemo(() => missions.reduce((a, x) => a + x.sp_reward, 0), [missions]);
   const doneCount = useMemo(() => missions.filter((x) => x.done).length, [missions]);
 
   const eliteBullets = useMemo(() => {
@@ -852,7 +855,9 @@ export function SeasonPassScreen({ onBack }: Props) {
     }
   }, [session?.access_token, initPaymentSheet, presentPaymentSheet, load, t]);
 
-  const scrollBottom = theme.scrollBottomPadding + insets.bottom + 28;
+  // El pase es full-screen y oculta la tab bar (MainApp), así que no necesita
+  // el scrollBottomPadding pensado para dejarle sitio: solo safe area + aire.
+  const scrollBottom = insets.bottom + 24;
 
   return (
     /** `ScreenLayout` ya aplica `paddingTop: insets.top` al contenedor; no duplicar aquí. */
@@ -1134,14 +1139,17 @@ export function SeasonPassScreen({ onBack }: Props) {
               )}
               <View style={styles.missionStats}>
                 <View style={styles.missionStatBox}>
-                  <Text style={styles.missionStatHint}>{t('alerts.seasonPass.spAvailable')}</Text>
-                  <Text style={styles.missionStatVal}>+{pendingSP.toLocaleString('es-ES')}</Text>
-                </View>
-                <View style={styles.missionStatBox}>
                   <Text style={styles.missionStatHint}>{t('alerts.seasonPass.completed')}</Text>
                   <Text style={styles.missionStatVal}>
                     {doneCount}
                     <Text style={styles.missionStatSlash}>/{missions.length}</Text>
+                  </Text>
+                </View>
+                <View style={styles.missionStatBox}>
+                  <Text style={styles.missionStatHint}>{t('alerts.seasonPass.spObtained')}</Text>
+                  <Text style={styles.missionStatVal}>
+                    {obtainedSP.toLocaleString('es-ES')}
+                    <Text style={styles.missionStatSlash}>/{totalSP.toLocaleString('es-ES')}</Text>
                   </Text>
                 </View>
               </View>
@@ -1166,6 +1174,14 @@ export function SeasonPassScreen({ onBack }: Props) {
                 <Text style={[styles.missionDesc, { textAlign: 'center', paddingVertical: 16 }]}>
                   {t('alerts.seasonPass.noMissionsInTab')}
                 </Text>
+              ) : null}
+              {periodCountdown ? (
+                <View style={styles.periodCountdown}>
+                  <Ionicons name="time-outline" size={13} color={ACCENT} />
+                  <Text style={styles.periodCountdownTxt}>
+                    {t('alerts.seasonPass.periodEndsIn', { time: periodCountdown })}
+                  </Text>
+                </View>
               ) : null}
             </View>
           )}
@@ -1791,22 +1807,22 @@ const styles = StyleSheet.create({
   missionStatVal: androidReadableText({ fontSize: 20, fontWeight: '900', color: ACCENT }),
   missionStatSlash: androidReadableText({ fontSize: 13, color: '#6b7280', fontWeight: '700' }),
   missionCard: {
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 14,
+    padding: 11,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     backgroundColor: 'rgba(255,255,255,0.05)',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   missionCardDone: {
     backgroundColor: 'rgba(16,185,129,0.08)',
     borderColor: 'rgba(16,185,129,0.25)',
   },
-  missionRow: { flexDirection: 'row', gap: 10 },
+  missionRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   missionIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1814,33 +1830,33 @@ const styles = StyleSheet.create({
   missionIconBoxDone: { backgroundColor: 'rgba(16,185,129,0.2)' },
   missionTitleRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: 8,
-    marginBottom: 4,
+    marginBottom: 3,
   },
   missionTitle: androidReadableText({ fontSize: 13, fontWeight: '800', color: '#fff', flex: 1 }),
-  missionDesc: androidReadableText({ fontSize: 11, color: '#9ca3af', marginBottom: 8 }),
+  missionSpBadge: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  missionDesc: androidReadableText({ fontSize: 11, color: '#9ca3af', marginBottom: 7 }),
+  missionProgressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   missionBarBg: {
+    flex: 1,
     height: 6,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.1)',
     overflow: 'hidden',
-    marginBottom: 6,
   },
-  missionMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  missionMetaLeft: androidReadableText({ fontSize: 10, color: '#6b7280' }),
-  missionMetaSp: androidReadableText({ fontSize: 11, fontWeight: '900', color: ACCENT }),
+  missionMetaLeft: androidReadableText({ fontSize: 10, color: '#9ca3af', fontWeight: '700' }),
+  missionMetaSp: androidReadableText({ fontSize: 12, fontWeight: '900', color: ACCENT }),
+  missionDoneRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   missionDoneText: androidReadableText({ fontSize: 11, fontWeight: '800', color: '#34d399' }),
-  missionExpire: {
+  periodCountdown: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'flex-start',
+    gap: 5,
+    marginTop: 4,
   },
-  missionExpireText: androidReadableText({ fontSize: 10, color: '#4b5563' }),
+  periodCountdownTxt: androidReadableText({ fontSize: 12, fontWeight: '700', color: ACCENT }),
   pressed: { opacity: 0.9 },
   eliteSheetFooter: {
     paddingHorizontal: 16,

@@ -184,10 +184,10 @@ export interface AlertsTranslationKeys {
     legendFree: string;
     howEarnSp: string;
     noMissionsConfigured: string;
-    spAvailable: string;
+    spObtained: string;
     completed: string;
     missionCompleted: string;
-    missionCloses: string;
+    periodEndsIn: string;
     noMissionsInTab: string;
     modalBenefitsDefault: string;
     getEliteCta: string;
