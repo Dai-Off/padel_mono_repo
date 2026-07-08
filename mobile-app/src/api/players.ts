@@ -448,6 +448,7 @@ export type PlayerSearchHit = {
   last_name?: string | null;
   username?: string | null;
   avatar_url?: string | null;
+  frame?: any | null;
   onboarding_completed?: boolean;
 };
 

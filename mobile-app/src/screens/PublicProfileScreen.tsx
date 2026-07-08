@@ -361,6 +361,20 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
         initialTab={followListTab}
         currentUserId={myPlayerId}
         onOpenPlayer={onOpenPlayer}
+        onFollowChange={(targetPlayerId, isFollowingNow) => {
+          // Si el targetPlayerId es el dueño del perfil que estamos viendo
+          if (targetPlayerId === profile.id) {
+            setProfile(prev => {
+              if (!prev) return null;
+              const prevCount = prev.followersCount ?? 0;
+              return {
+                ...prev,
+                isFollowing: isFollowingNow,
+                followersCount: isFollowingNow ? prevCount + 1 : Math.max(0, prevCount - 1),
+              };
+            });
+          }
+        }}
       />
     </View>
   );

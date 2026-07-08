@@ -699,6 +699,9 @@ export function ProfileScreen({
           initialTab={followListTab}
           currentUserId={profile.id}
           onOpenPlayer={onOpenPublicProfile}
+          onFollowChange={(targetPlayerId, isFollowingNow) => {
+            setLocalFollowingCount(prev => Math.max(0, isFollowingNow ? prev + 1 : prev - 1));
+          }}
         />
       ) : null}
     </View>

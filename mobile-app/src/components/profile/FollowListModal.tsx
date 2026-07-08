@@ -22,6 +22,7 @@ interface FollowListModalProps {
   initialTab?: 'followers' | 'following';
   currentUserId?: string | null;
   onOpenPlayer?: (playerId: string) => void;
+  onFollowChange?: (targetPlayerId: string, isFollowingNow: boolean) => void;
 }
 
 export const FollowListModal: React.FC<FollowListModalProps> = ({
@@ -32,6 +33,7 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
   initialTab = 'followers',
   currentUserId,
   onOpenPlayer,
+  onFollowChange,
 }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'followers' | 'following'>(initialTab);
@@ -104,9 +106,11 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
 
     // UI optimista
     const prevStatus = item.is_following;
+    const nextStatus = !prevStatus;
     setList(prev =>
-      prev.map(p => (p.id === item.id ? { ...p, is_following: !prevStatus } : p))
+      prev.map(p => (p.id === item.id ? { ...p, is_following: nextStatus } : p))
     );
+    onFollowChange?.(item.id, nextStatus);
 
     const res = await toggleFollow(token, item.id);
     if (!res.ok) {
@@ -114,6 +118,7 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
       setList(prev =>
         prev.map(p => (p.id === item.id ? { ...p, is_following: prevStatus } : p))
       );
+      onFollowChange?.(item.id, !!prevStatus);
     }
   };
 

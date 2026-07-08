@@ -131,28 +131,76 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
     }
   }, [newChatOpen, token, myPlayerId]);
 
-  // Filtrar la lista localmente en base a lo que escriba el usuario
+  // Buscar local e invocar API en paralelo para priorizar seguidos
   useEffect(() => {
     const q = searchQ.trim().toLowerCase();
     if (!q) {
-      // Si no escribe nada, mostramos todos a los que sigue (opción amigable)
-      setSearchHits(followingList);
+      // Limitar a los primeros 10 seguidos cuando no se ha escrito nada
+      setSearchHits(followingList.slice(0, 10));
       return;
     }
 
-    const filtered = followingList.filter((p) => {
-      const username = (p.username ?? '').toLowerCase();
-      const firstName = (p.first_name ?? '').toLowerCase();
-      const lastName = (p.last_name ?? '').toLowerCase();
-      return (
-        username.includes(q) ||
-        firstName.includes(q) ||
-        lastName.includes(q)
-      );
-    });
+    let cancelled = false;
 
-    setSearchHits(filtered);
-  }, [searchQ, followingList]);
+    // 1. Filtrar seguidos localmente (excluyendo a uno mismo)
+    const localMatches = followingList
+      .filter((p) => p.id !== myPlayerId)
+      .filter((p) => {
+        const username = (p.username ?? '').toLowerCase();
+        const firstName = (p.first_name ?? '').toLowerCase();
+        const lastName = (p.last_name ?? '').toLowerCase();
+        return (
+          username.includes(q) ||
+          firstName.includes(q) ||
+          lastName.includes(q)
+        );
+      });
+
+    if (q.length < 2) {
+      setSearchHits(localMatches);
+      return;
+    }
+
+    setSearchLoading(true);
+
+    // 2. Buscar en la API global con un debounce implícito de delay
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchPlayers(q, token);
+        if (cancelled) return;
+
+        if (res.ok) {
+          const globalResults = res.players.filter((p) => p.id !== myPlayerId);
+          
+          // Combinar priorizando los seguidos
+          const combinedMap = new Map<string, any>();
+          
+          // Primero insertamos los matches locales de seguidos
+          localMatches.forEach((m) => combinedMap.set(m.id, { ...m, is_following: true }));
+          
+          // Luego los globales de la API
+          globalResults.forEach((g) => {
+            if (!combinedMap.has(g.id)) {
+              combinedMap.set(g.id, g);
+            }
+          });
+
+          setSearchHits(Array.from(combinedMap.values()));
+        } else {
+          setSearchHits(localMatches);
+        }
+      } catch {
+        if (!cancelled) setSearchHits(localMatches);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQ, followingList, token, myPlayerId]);
 
   const openThread = (peer: MessagePeerNav) => {
     setNewChatOpen(false);
@@ -456,7 +504,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: theme.spacing.md,
-    maxHeight: '88%',
+    maxHeight: '94%',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: OUTLINE,
   },
@@ -476,8 +524,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     color: '#fff',
     fontSize: theme.fontSize.base,
+    marginBottom: 8,
   },
-  modalList: { marginTop: theme.spacing.sm, maxHeight: 320 },
+  modalList: { marginTop: theme.spacing.sm, maxHeight: 450 },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
