@@ -97,6 +97,7 @@ export const home: HomeTranslationKeys = {
     spToNext: '{sp} SP para nivel {level}',
     spCap: 'Tope de SP',
     missionCompleted: 'Misión completada',
+    missionAlreadyDone: 'Completada hoy',
     missionsCompletedMany: '¡{count} misiones completadas!',
     spGained: '+{sp} SP',
     celebrationCta: '¡Genial!',

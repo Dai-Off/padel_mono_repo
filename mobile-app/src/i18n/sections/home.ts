@@ -95,6 +95,7 @@ export interface HomeTranslationKeys {
     spToNext: string;
     spCap: string;
     missionCompleted: string;
+    missionAlreadyDone: string;
     missionsCompletedMany: string;
     spGained: string;
     celebrationCta: string;

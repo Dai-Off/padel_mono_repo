@@ -875,6 +875,11 @@ export function MainApp() {
             setShowDailyLesson(false);
             openOnboardingFromSection('daily-lesson');
           }}
+          onOpenSeasonPass={() => {
+            setShowDailyLesson(false);
+            setStreakRefreshKey((k) => k + 1);
+            setShowSeasonPass(true);
+          }}
         />
       );
     }

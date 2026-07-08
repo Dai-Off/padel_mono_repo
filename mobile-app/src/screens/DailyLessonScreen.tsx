@@ -33,6 +33,8 @@ type Props = {
   // pantalla se bloquea y el botón "Empezar cuestionario" llama a este callback
   // para llevar al perfil con el modal de onboarding abierto.
   onOpenOnboarding?: () => void;
+  /** Abre el pase de temporada (cierra la lección). CTA de la card de resultados. */
+  onOpenSeasonPass?: () => void;
 };
 
 type Phase = 'intro' | 'questions' | 'review' | 'results';
@@ -82,14 +84,19 @@ const AREA_TO_SKILL: Record<QuestionArea, keyof SkillValues> = {
 // Skills por defecto si el jugador no tiene coachAssessment
 const DEFAULT_SKILLS: SkillValues = { technical: 25, physical: 25, mental: 25, tactical: 25 };
 
-// Umbrales de racha para siguiente bonus (sincronizados con getMultiplier del backend)
+// Umbrales de racha → boost global de SP (sincronizados con el boost engine
+// del backend: rachas 3/8/21/46 → +15/30/50/70%).
 const STREAK_THRESHOLDS = [3, 8, 21, 46] as const;
+const STREAK_BOOST_PCTS = [15, 30, 50, 70] as const;
 
-function getNextStreakMilestone(current: number): number | null {
-  for (const threshold of STREAK_THRESHOLDS) {
-    if (current < threshold) return threshold - current;
+/** Días que faltan para el siguiente escalón de boost y su %. null si ya al máximo. */
+function getNextBoostInfo(current: number): { days: number; pct: number } | null {
+  for (let i = 0; i < STREAK_THRESHOLDS.length; i += 1) {
+    if (current < STREAK_THRESHOLDS[i]) {
+      return { days: STREAK_THRESHOLDS[i] - current, pct: STREAK_BOOST_PCTS[i] };
+    }
   }
-  return null; // ya en el maximo
+  return null; // ya en el máximo
 }
 
 function getQuestionPreview(q: DailyLessonQuestion, t: (key: string, params?: Record<string, string | number>) => string): string {
@@ -105,7 +112,7 @@ function getQuestionPreview(q: DailyLessonQuestion, t: (key: string, params?: Re
   return t('learning.questionPreviewDefault');
 }
 
-export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Props) {
+export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding, onOpenSeasonPass }: Props) {
   const { t, locale } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -1054,7 +1061,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       }
     });
 
-    const nextMilestone = getNextStreakMilestone(results.streak.current);
+    const nextBoost = getNextBoostInfo(results.streak.current);
 
     const toggleVote = (questionId: string, vote: 'up' | 'down') => {
       // Mutuamente excluyente: re-pulsar el mismo botón lo desmarca; pulsar
@@ -1097,32 +1104,53 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
 
           {/* Recompensa como misión del pase (plan §6.7): sustituye a la
               antigua métrica de XP. Puede haber más de una (p. ej. la fija de
-              lección + una semanal/mensual de lecciones que cayó con esta). */}
-          {(results.season_pass?.completed_missions?.length ?? 0) > 0 && (
-            <View style={styles.missionCelebrations}>
-              {results.season_pass!.completed_missions.map((m, i) => (
-                <MissionCelebrationCard
-                  key={m.slug}
-                  icon={m.icon}
-                  title={m.title}
-                  spGranted={m.sp_granted}
-                  delay={i * 150}
-                />
-              ))}
-              {results.season_pass!.level_up && (
-                <View style={styles.levelUpBanner}>
-                  <Ionicons name="arrow-up-circle" size={18} color="#FBBF24" />
-                  <Text style={styles.levelUpText}>
-                    {t('home.seasonPass.levelUpBanner', { level: results.season_pass!.level_up.to })}
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
+              lección + una semanal/mensual de lecciones que cayó con esta).
+              Al repasar/reabrir una lección ya hecha hoy no hay grant nuevo
+              (season_pass = null): mostramos la lección en modo "ya completada"
+              para dejar claro que su progreso ya cuenta. */}
+          <View style={styles.missionCelebrations}>
+            {(results.season_pass?.completed_missions?.length ?? 0) > 0 ? (
+              <>
+                {results.season_pass!.completed_missions.map((m, i) => (
+                  <MissionCelebrationCard
+                    key={m.slug}
+                    icon={m.icon}
+                    title={m.title}
+                    spGranted={m.sp_granted}
+                    delay={i * 150}
+                  />
+                ))}
+                {results.season_pass!.level_up && (
+                  <View style={styles.levelUpBanner}>
+                    <Ionicons name="arrow-up-circle" size={18} color="#FBBF24" />
+                    <Text style={styles.levelUpText}>
+                      {t('home.seasonPass.levelUpBanner', { level: results.season_pass!.level_up.to })}
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <MissionCelebrationCard
+                icon="📚"
+                title={t('home.dailyLesson.title')}
+                spGranted={0}
+                alreadyDone
+              />
+            )}
+            {onOpenSeasonPass && (
+              <Pressable
+                onPress={onOpenSeasonPass}
+                style={({ pressed }) => [styles.seasonPassLinkBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Text style={styles.seasonPassLinkTxt}>{t('learning.dailyLessonViewInPass')}</Text>
+                <Ionicons name="arrow-forward" size={14} color="#F18F34" />
+              </Pressable>
+            )}
+          </View>
 
           <LessonImpactRadar baseSkills={baseSkills} deltas={deltas} />
 
-          {(results.streak.current > 0 || nextMilestone !== null) && (
+          {(results.streak.current > 0 || nextBoost !== null) && (
             <View style={styles.streakResultCard}>
               <View style={styles.streakResultTop}>
                 <Ionicons name="flame" size={20} color="#F97316" />
@@ -1140,13 +1168,14 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
                   </View>
                 )}
               </View>
-              {nextMilestone !== null && (
+              {nextBoost !== null && (
                 <View style={styles.nextBonusRow}>
                   <Ionicons name="trending-up-outline" size={12} color="#F18F34" />
                   <Text style={styles.nextBonusText}>
-                    {t('learning.dailyLessonNextBonus', {
-                      count: nextMilestone,
-                      daysLabel: nextMilestone === 1 ? t('learning.dailyLessonDayOne') : t('learning.dailyLessonDayMany'),
+                    {t('learning.dailyLessonNextBoost', {
+                      pct: nextBoost.pct,
+                      count: nextBoost.days,
+                      daysLabel: nextBoost.days === 1 ? t('learning.dailyLessonDayOne') : t('learning.dailyLessonDayMany'),
                     })}
                   </Text>
                 </View>
@@ -1598,7 +1627,19 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 12, gap: 8, width: '100%', marginBottom: 16,
   },
   metricItem: { flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  missionCelebrations: { alignSelf: 'stretch', gap: 10, marginTop: 14 },
+  missionCelebrations: { alignSelf: 'stretch', gap: 10, marginBottom: 16 },
+  seasonPassLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(241,143,52,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.22)',
+  },
+  seasonPassLinkTxt: { color: '#F18F34', fontSize: 13, fontWeight: '700' },
   boostBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(241,143,52,0.1)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.2)' },
   boostBadgeText: { color: '#F18F34', fontSize: 11, fontWeight: '700' },
   levelUpBanner: {

@@ -30,7 +30,8 @@ export interface LearningTranslationKeys {
   dailyLessonStreakCurrent: string;
   dailyLessonStreakDaysLabel: string;
   dailyLessonXpBonus: string;
-  dailyLessonNextBonus: string;
+  dailyLessonNextBoost: string;
+  dailyLessonViewInPass: string;
   dailyLessonDayOne: string;
   dailyLessonDayMany: string;
   dailyLessonSummaryTitle: string;

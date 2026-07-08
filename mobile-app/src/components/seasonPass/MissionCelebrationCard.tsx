@@ -9,6 +9,9 @@ type Props = {
   spGranted: number;
   /** Retraso de la animación de entrada (stagger cuando hay varias en stack). */
   delay?: number;
+  /** Modo "ya completada hoy": estado apagado sin animar el SP como nuevo (al
+   *  repasar/reabrir una lección ya hecha). No representa un grant nuevo. */
+  alreadyDone?: boolean;
 };
 
 /**
@@ -16,7 +19,7 @@ type Props = {
  * Mismo componente para el canal instantáneo (pantalla de resultados de
  * lección, confirmaciones de acción) y para la cola diferida del Home.
  */
-export function MissionCelebrationCard({ icon, title, spGranted, delay = 0 }: Props) {
+export function MissionCelebrationCard({ icon, title, spGranted, delay = 0, alreadyDone = false }: Props) {
   const { t } = useTranslation();
   const scale = useRef(new Animated.Value(0.85)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -40,7 +43,11 @@ export function MissionCelebrationCard({ icon, title, spGranted, delay = 0 }: Pr
         </Text>
       </View>
       <View style={styles.spBadge}>
-        <Text style={styles.spText}>{t('home.seasonPass.spGained', { sp: spGranted })}</Text>
+        {alreadyDone ? (
+          <Text style={styles.doneText}>{t('home.seasonPass.missionAlreadyDone')}</Text>
+        ) : (
+          <Text style={styles.spText}>{t('home.seasonPass.spGained', { sp: spGranted })}</Text>
+        )}
       </View>
     </Animated.View>
   );
@@ -83,4 +90,5 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   spText: { color: '#10B981', fontSize: 13, fontWeight: '800' },
+  doneText: { color: 'rgba(16,185,129,0.7)', fontSize: 12, fontWeight: '700' },
 });

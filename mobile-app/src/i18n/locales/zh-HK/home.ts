@@ -97,6 +97,7 @@ export const home: HomeTranslationKeys = {
     spToNext: '距離等級 {level} 還需 {sp} SP',
     spCap: 'SP 已達上限',
     missionCompleted: '任務完成',
+    missionAlreadyDone: '今日已完成',
     missionsCompletedMany: '完成咗 {count} 個任務！',
     spGained: '+{sp} SP',
     celebrationCta: '好嘢！',
