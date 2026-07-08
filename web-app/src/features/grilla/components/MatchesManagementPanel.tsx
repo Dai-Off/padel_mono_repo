@@ -14,6 +14,7 @@ import {
     Trash2,
     Pencil,
     LayoutGrid,
+    Link2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetchWithAuth } from '../../../services/api';
@@ -29,6 +30,7 @@ import {
     slotIndexFromTeamPosition,
     usedSlotIndexes,
 } from '../utils/matchPlayerSlots';
+import { buildMatchShareTextFromMatch } from '../utils/matchShareText';
 
 interface MatchesManagementPanelProps {
     clubId: string | null;
@@ -458,6 +460,15 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         return currentDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
     };
 
+    const copyMatchInvitation = async (match: any) => {
+        try {
+            await navigator.clipboard.writeText(buildMatchShareTextFromMatch(match));
+            toast.success('Invitación copiada al portapapeles');
+        } catch {
+            toast.error('No se pudo copiar la invitación');
+        }
+    };
+
     // Render Player Avatar Block
     const renderPlayer = (mp: any, index: number, matchBookingId: string, team: string, matchId: string) => {
         if (!mp || !mp.players || (!mp.players.first_name && !mp.players.last_name && mp.players.elo_rating === null)) {
@@ -848,7 +859,19 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                             <span className="text-[11px] font-medium text-gray-600 uppercase tracking-wide">{court?.name || 'Pista'}</span>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap text-right text-[11px] font-medium">
-                                            <div className="relative inline-block text-left">
+                                            <div className="flex items-center justify-end gap-0.5">
+                                                <button
+                                                    type="button"
+                                                    title="Copiar invitación"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void copyMatchInvitation(match);
+                                                    }}
+                                                    className="p-2 hover:bg-[#006A6A]/10 rounded-full text-gray-400 hover:text-[#006A6A] transition-colors"
+                                                >
+                                                    <Link2 size={16} />
+                                                </button>
+                                                <div className="relative inline-block text-left">
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -887,6 +910,17 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     setMenuOpenFor(null);
+                                                                    void copyMatchInvitation(match);
+                                                                }}
+                                                                className="w-full text-left px-3 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 font-medium border-t border-gray-100"
+                                                            >
+                                                                <Link2 className="w-3.5 h-3.5" />
+                                                                Copiar invitación
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setMenuOpenFor(null);
                                                                     setRemovingFromMatch(match);
                                                                 }}
                                                                 className="w-full text-left px-3 py-2.5 text-xs text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 font-medium border-t border-gray-100"
@@ -897,6 +931,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                         </div>
                                                     </>
                                                 )}
+                                            </div>
                                             </div>
                                         </td>
                                     </tr>

@@ -59,3 +59,9 @@ export function buildMatchInviteUrl(matchId: string, token: string): string {
   const base = getMatchInviteBaseUrl();
   return `${base}/matches/invites/${encodeURIComponent(token)}/accept?match_id=${encodeURIComponent(matchId)}`;
 }
+
+/** Enlace compartible (WhatsApp, etc.) que abre la app móvil en el detalle del partido. */
+export function buildMatchShareUrl(matchId: string): string {
+  const base = getMatchInviteBaseUrl();
+  return `${base}/matches/join/${encodeURIComponent(matchId)}`;
+}

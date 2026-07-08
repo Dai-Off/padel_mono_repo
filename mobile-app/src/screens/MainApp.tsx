@@ -62,8 +62,9 @@ import {
 import { SeasonTransitionModal } from '../components/matchmaking/SeasonTransitionModal';
 import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
-import { fetchReceivedMatchInvites, type ReceivedMatchInvite } from '../api/matchInvites';
+import { fetchReceivedMatchInvites, acceptMatchInviteByToken, type ReceivedMatchInvite } from '../api/matchInvites';
 import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
+import { parseMatchDeepLink, type ParsedMatchDeepLink } from '../lib/parseMatchDeepLink';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { isPlayerInPartido } from '../lib/partidoPlayerUtils';
 import { CommunityScreen } from './CommunityScreen';
@@ -87,6 +88,7 @@ import type { PublicCourse } from '../api/schoolCourses';
  * vez de dejarlo en el perfil.
  */
 const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
+const PENDING_MATCH_DEEPLINK_KEY = 'pending_match_deeplink';
 
 type PostOnboardingReturn =
   | 'home'
@@ -388,16 +390,55 @@ export function MainApp() {
     [session?.access_token, profile?.id, upsertMisPartido, t],
   );
 
+  const processMatchDeepLink = useCallback(
+    async (link: ParsedMatchDeepLink) => {
+      const accessToken = session?.access_token;
+      if (!accessToken) return;
+
+      if (link.kind === 'invite') {
+        const result = await acceptMatchInviteByToken(link.token, accessToken);
+        if (result.ok) {
+          if (!result.already_accepted) {
+            Alert.alert(t('alerts.matchInvite.accepted'), t('alerts.matchInvite.acceptedBody'));
+          }
+        } else {
+          Alert.alert(t('alerts.matchInvite.title'), result.error);
+        }
+      }
+
+      const viewerId = profile?.id ?? null;
+      const loaded = await reloadMatchPartido(link.matchId, accessToken, {
+        viewerPlayerId: viewerId,
+      });
+      if (loaded) {
+        setActiveTab('partidos');
+        setSelectedPartido(loaded);
+        if (viewerId && isPlayerInPartido(loaded, viewerId)) {
+          upsertMisPartido(loaded);
+        }
+      } else {
+        Alert.alert(t('alerts.error.title'), t('partidos.matchInviteOpenFail'));
+      }
+    },
+    [session?.access_token, profile?.id, upsertMisPartido, t],
+  );
+
   const consumeInviteUrl = useCallback(
     async (url: string | null) => {
       if (!url) return;
+      const matchParsed = parseMatchDeepLink(url);
+      if (matchParsed) {
+        await AsyncStorage.removeItem(PENDING_MATCH_DEEPLINK_KEY);
+        await processMatchDeepLink(matchParsed);
+        return;
+      }
       const tournamentParsed = parseTournamentInviteUrl(url);
       if (tournamentParsed) {
         await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
         await processTournamentInvite(tournamentParsed.token, tournamentParsed.tournamentId);
       }
     },
-    [processTournamentInvite],
+    [processMatchDeepLink, processTournamentInvite],
   );
 
   useEffect(() => {
@@ -416,6 +457,19 @@ export function MainApp() {
           await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
         }
       }
+      const rawMatch = await AsyncStorage.getItem(PENDING_MATCH_DEEPLINK_KEY);
+      if (rawMatch) {
+        try {
+          const parsed = JSON.parse(rawMatch) as ParsedMatchDeepLink;
+          if (parsed.matchId) {
+            await AsyncStorage.removeItem(PENDING_MATCH_DEEPLINK_KEY);
+            await processMatchDeepLink(parsed);
+            return;
+          }
+        } catch {
+          await AsyncStorage.removeItem(PENDING_MATCH_DEEPLINK_KEY);
+        }
+      }
       const initial = await Linking.getInitialURL();
       if (initial) await consumeInviteUrl(initial);
     })();
@@ -423,7 +477,7 @@ export function MainApp() {
       void consumeInviteUrl(url);
     });
     return () => sub.remove();
-  }, [session?.access_token, consumeInviteUrl, processTournamentInvite]);
+  }, [session?.access_token, consumeInviteUrl, processTournamentInvite, processMatchDeepLink]);
 
   useEffect(() => {
     const token = session?.access_token ?? null;

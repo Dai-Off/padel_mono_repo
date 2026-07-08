@@ -17,6 +17,7 @@ import {
     Eye,
     MessageSquare,
     Send,
+    Link2,
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
@@ -44,6 +45,7 @@ import { countBookingPlayers, shareCentsPerPlayer } from '../utils/moneyInput';
 import { MaintenanceCancelScopeModal, type MaintenanceCancelScope } from './MaintenanceCancelScopeModal';
 import { findRelatedMaintenanceBookings, isMaintenanceReservation } from '../utils/gridSelectUtils';
 import { isOpenMatchType, normalizeReservationTypeSlug } from '../utils/reservationTypeSlug';
+import { buildMatchShareTextFromBooking } from '../utils/matchShareText';
 import {
     durationOptionsForReservationType,
     resolveBookingDurationMinutes,
@@ -1318,6 +1320,25 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             >
                                 {activeTab === 'chat' ? 'Cerrar' : t('reservation.cancel')}
                             </button>
+                            {activeTab !== 'chat' && isEditMode && editingBookingData && isOpenMatchType(resType) && (() => {
+                                const shareText = buildMatchShareTextFromBooking(editingBookingData);
+                                if (!shareText) return null;
+                                return (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            void navigator.clipboard
+                                                .writeText(shareText)
+                                                .then(() => toast.success('Invitación copiada al portapapeles'))
+                                                .catch(() => toast.error('No se pudo copiar la invitación'));
+                                        }}
+                                        className="flex items-center gap-1.5 px-4 py-1.5 bg-white border border-gray-300 text-gray-700 text-xs font-bold rounded-md hover:bg-gray-50 transition-colors"
+                                    >
+                                        <Link2 size={14} />
+                                        Copiar invitación
+                                    </button>
+                                );
+                            })()}
                             {activeTab !== 'chat' && isEditMode && editingBookingData && (
                                 <button
                                     type="button"
