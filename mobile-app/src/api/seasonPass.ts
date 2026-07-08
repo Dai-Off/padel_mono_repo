@@ -70,6 +70,10 @@ export type SeasonPassTrackRewardDto = {
 
 export type SeasonPassTrackLevelDto = {
   level: number;
+  /** Nivel actual del jugador (para auto-centrar el track). */
+  current?: boolean;
+  /** El jugador ya alcanzó este nivel. */
+  unlocked?: boolean;
   rewards: SeasonPassTrackRewardDto[];
 };
 

@@ -191,6 +191,10 @@ export const alerts: AlertsTranslationKeys = {
     tabMissions: '⚡ Misiones',
     legendElite: 'Pase Elite',
     legendFree: 'Pase Libre',
+    rewardDetailTitle: 'Recompensa · Nivel {level}',
+    rewardGranted: 'Conseguida',
+    rewardUnlocked: 'Disponible para reclamar',
+    rewardLocked: 'Alcanza el nivel {level} para desbloquearla',
     passHelpTitle: '¿Cómo funciona el pase?',
     passHelpAboutTitle: 'El Pase de Temporada',
     passHelpAboutBody:

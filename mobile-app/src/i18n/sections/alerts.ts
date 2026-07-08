@@ -182,6 +182,10 @@ export interface AlertsTranslationKeys {
     tabMissions: string;
     legendElite: string;
     legendFree: string;
+    rewardDetailTitle: string;
+    rewardGranted: string;
+    rewardUnlocked: string;
+    rewardLocked: string;
     passHelpTitle: string;
     passHelpAboutTitle: string;
     passHelpAboutBody: string;

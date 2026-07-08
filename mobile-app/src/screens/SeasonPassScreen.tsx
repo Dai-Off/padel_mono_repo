@@ -37,6 +37,7 @@ import { resolveUnlockableIcon } from '../design/unlockableIcons';
 import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { AuthButton } from '../components/auth/AuthButton';
 import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
+import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
 
 type Props = { onBack: () => void };
 
@@ -47,6 +48,7 @@ const BG = '#0F0F0F';
 const BORDER = 'rgba(255,255,255,0.1)';
 const PAD = 20;
 const DEFAULT_SP_PER_LEVEL = 1000;
+const TRACK_COL_W = 74; // ancho de cada columna de nivel del track
 
 function daysLeftFromEndsAt(endsAtIso: string | undefined): number {
   if (!endsAtIso) return 0;
@@ -259,10 +261,12 @@ function RewardThumb({
   reward,
   size,
   dimmed,
+  onPress,
 }: {
   reward: SeasonPassTrackRewardDto | null;
   size: number;
   dimmed: boolean;
+  onPress?: () => void;
 }) {
   if (!reward) {
     return (
@@ -340,7 +344,11 @@ function RewardThumb({
   }
 
   return (
-    <View style={{ opacity }}>
+    <Pressable
+      style={({ pressed }) => [{ opacity: pressed ? opacity * 0.6 : opacity }]}
+      onPress={onPress}
+      disabled={!onPress}
+    >
       <View
         style={{
           width: size,
@@ -360,7 +368,7 @@ function RewardThumb({
           <Ionicons name="checkmark" size={9} color="#0B1120" />
         </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -371,6 +379,7 @@ function LevelTrackColumn({
   hasElite,
   freeReward,
   eliteReward,
+  onPressReward,
 }: {
   level: number;
   isUnlocked: boolean;
@@ -378,6 +387,7 @@ function LevelTrackColumn({
   hasElite: boolean;
   freeReward: SeasonPassTrackRewardDto | null;
   eliteReward: SeasonPassTrackRewardDto | null;
+  onPressReward: (reward: SeasonPassTrackRewardDto) => void;
 }) {
   const scaleNode = useRef(new Animated.Value(1)).current;
   const ringScale = useRef(new Animated.Value(1)).current;
@@ -428,7 +438,7 @@ function LevelTrackColumn({
   });
 
   const thumbSize = 42;
-  const w = 74;
+  const w = TRACK_COL_W;
 
   return (
     <View style={{ width: w, alignItems: 'center' }}>
@@ -437,6 +447,7 @@ function LevelTrackColumn({
           reward={eliteReward}
           size={thumbSize}
           dimmed={!hasElite || !isUnlocked}
+          onPress={eliteReward ? () => onPressReward(eliteReward) : undefined}
         />
         {!hasElite && eliteReward && (
           <View style={styles.eliteLockOverlay}>
@@ -514,7 +525,12 @@ function LevelTrackColumn({
       </View>
 
       <View style={{ height: thumbSize + 20, justifyContent: 'center' }}>
-        <RewardThumb reward={freeReward} size={thumbSize} dimmed={!isUnlocked} />
+        <RewardThumb
+          reward={freeReward}
+          size={thumbSize}
+          dimmed={!isUnlocked}
+          onPress={freeReward ? () => onPressReward(freeReward) : undefined}
+        />
       </View>
     </View>
   );
@@ -604,7 +620,7 @@ function MissionRow({
 
 export function SeasonPassScreen({ onBack }: Props) {
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const { session, isLoading: authLoading } = useAuth();
   const { t } = useTranslation();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -613,6 +629,8 @@ export function SeasonPassScreen({ onBack }: Props) {
   const [showElite, setShowElite] = useState(false);
   const [showHowTo, setShowHowTo] = useState(false);
   const [elitePaying, setElitePaying] = useState(false);
+  const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
+  const trackScrollRef = useRef<ScrollView>(null);
   const [me, setMe] = useState<SeasonPassMeOk | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -699,7 +717,6 @@ export function SeasonPassScreen({ onBack }: Props) {
   const spToNext = me?.sp_to_next ?? spPer;
   const eliteActive = me?.has_elite ?? false;
   const left = daysLeftFromEndsAt(me?.season.ends_at);
-  const trackLevels = me?.track_levels ?? [];
 
   const trackRewardsByLevel = useMemo(() => {
     const map = new Map<number, SeasonPassTrackRewardDto[]>();
@@ -708,6 +725,23 @@ export function SeasonPassScreen({ onBack }: Props) {
     }
     return map;
   }, [me?.track_rewards]);
+
+  // Track completo 1..max: si el backend manda track_rewards (100 niveles) los
+  // usamos; si no, caemos al radio (track_levels) por compatibilidad.
+  const trackAllLevels = useMemo(() => {
+    const fromRewards = (me?.track_rewards ?? []).map((e) => e.level);
+    if (fromRewards.length > 0) return fromRewards;
+    return me?.track_levels ?? [];
+  }, [me?.track_rewards, me?.track_levels]);
+
+  // Auto-centrar el track en el nivel actual al cargar / cambiar de nivel.
+  useEffect(() => {
+    if (tab !== 'rewards' || trackAllLevels.length === 0) return;
+    const idx = Math.max(0, trackAllLevels.indexOf(level));
+    const target = Math.max(0, idx * TRACK_COL_W - windowWidth / 2 + TRACK_COL_W / 2);
+    const id = setTimeout(() => trackScrollRef.current?.scrollTo({ x: target, animated: false }), 80);
+    return () => clearTimeout(id);
+  }, [tab, trackAllLevels, level, windowWidth]);
 
   const boostPct = Math.round((me?.boosts?.total_bonus ?? 0) * 100);
   const boostSourcesLabel = useMemo(() => {
@@ -1098,11 +1132,12 @@ export function SeasonPassScreen({ onBack }: Props) {
               </View>
 
               <ScrollView
+                ref={trackScrollRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.trackScroll}
               >
-                {trackLevels.map((lvl) => {
+                {trackAllLevels.map((lvl) => {
                   const levelRewards = trackRewardsByLevel.get(lvl) ?? [];
                   return (
                     <LevelTrackColumn
@@ -1113,6 +1148,7 @@ export function SeasonPassScreen({ onBack }: Props) {
                       hasElite={eliteActive}
                       freeReward={levelRewards.find((r) => r.tier === 'free') ?? null}
                       eliteReward={levelRewards.find((r) => r.tier === 'elite') ?? null}
+                      onPressReward={(reward) => setRewardDetail({ level: lvl, reward })}
                     />
                   );
                 })}
@@ -1325,6 +1361,8 @@ export function SeasonPassScreen({ onBack }: Props) {
         spPerLevel={spPer}
         levelMax={levelMax}
       />
+
+      <RewardDetailSheet target={rewardDetail} onClose={() => setRewardDetail(null)} />
     </View>
   );
 }

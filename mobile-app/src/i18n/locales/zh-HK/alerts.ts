@@ -184,6 +184,10 @@ export const alerts: AlertsTranslationKeys = {
     tabMissions: '⚡ 任務',
     legendElite: 'Elite 通行證',
     legendFree: '免費通行證',
+    rewardDetailTitle: '獎勵 · 等級 {level}',
+    rewardGranted: '已獲得',
+    rewardUnlocked: '可領取',
+    rewardLocked: '升到等級 {level} 即可解鎖',
     passHelpTitle: '通行證怎麼運作？',
     passHelpAboutTitle: '賽季通行證',
     passHelpAboutBody:

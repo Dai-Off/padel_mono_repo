@@ -65,8 +65,14 @@ router.get('/me', async (req: Request, res: Response) => {
       breakdown: activeBoost.breakdown,
     };
 
-    const track_rewards = track_levels.map((level) => ({
+    // Track completo 1..max_level (bloque C): el cliente pinta todos los
+    // niveles y hace scroll; los que no tienen recompensa salen como nodo
+    // simple. track_levels (radio) se mantiene por compatibilidad.
+    const allTrackLevels = Array.from({ length: season.max_level }, (_, i) => i + 1);
+    const track_rewards = allTrackLevels.map((level) => ({
       level,
+      current: level === c.level,
+      unlocked: level <= c.level,
       rewards: seasonRewards
         .filter((r) => r.level === level)
         .map((r) => ({
