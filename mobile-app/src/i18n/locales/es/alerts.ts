@@ -172,7 +172,8 @@ export const alerts: AlertsTranslationKeys = {
   },
   seasonPass: {
     login: 'Necesitas una cuenta para comprar el Pase Elite.',
-    activated: 'Pase Elite activado ({plan}).',
+    eliteOkTitle: '¡Pase Elite activado!',
+    eliteOkBody: 'Ya tienes acceso al carril Elite y a todas sus recompensas de los niveles que ya alcanzaste.',
     loginRequiredLoad: 'Inicia sesión para ver tu progreso en el pase.',
     loadFail: 'No se pudo cargar el pase. ¿Backend y migraciones 049 + 050 activas?',
     loading: 'Cargando pase…',
@@ -195,6 +196,7 @@ export const alerts: AlertsTranslationKeys = {
     rewardGranted: 'Conseguida',
     rewardUnlocked: 'Disponible para reclamar',
     rewardLocked: 'Alcanza el nivel {level} para desbloquearla',
+    rewardNeedsElite: 'Incluida en el Pase Elite',
     passHelpTitle: '¿Cómo funciona el pase?',
     passHelpAboutTitle: 'El Pase de Temporada',
     passHelpAboutBody:

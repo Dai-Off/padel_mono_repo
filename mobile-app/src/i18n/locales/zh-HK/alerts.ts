@@ -165,7 +165,8 @@ export const alerts: AlertsTranslationKeys = {
   },
   seasonPass: {
     login: '你需要帳戶才能購買 Elite 通行證。',
-    activated: 'Elite 通行證已啟用（{plan}）。',
+    eliteOkTitle: 'Elite 通行證已啟用！',
+    eliteOkBody: '你已解鎖 Elite 賽道，以及你已達到等級的所有獎勵。',
     loginRequiredLoad: '請登入以查看你的通行證進度。',
     loadFail: '無法載入通行證。後端及遷移 049 + 050 是否已啟用？',
     loading: '載入通行證中…',
@@ -188,6 +189,7 @@ export const alerts: AlertsTranslationKeys = {
     rewardGranted: '已獲得',
     rewardUnlocked: '可領取',
     rewardLocked: '升到等級 {level} 即可解鎖',
+    rewardNeedsElite: 'Elite 通行證專屬',
     passHelpTitle: '通行證怎麼運作？',
     passHelpAboutTitle: '賽季通行證',
     passHelpAboutBody:

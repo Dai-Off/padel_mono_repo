@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ACCENT } from '../components/home/inicio/constants';
 import { androidReadableText } from '../components/home/inicio/textStyles';
 import { useAuth } from '../contexts/AuthContext';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { theme } from '../theme';
 import { useTranslation } from '../i18n';
 import { useStripe } from '../stripe';
@@ -48,18 +49,13 @@ const BG = '#0F0F0F';
 const BORDER = 'rgba(255,255,255,0.1)';
 const PAD = 20;
 const DEFAULT_SP_PER_LEVEL = 1000;
-const TRACK_COL_W = 74; // ancho de cada columna de nivel del track
+const TRACK_COL_W = 88; // ancho de cada columna de nivel del track
 
 function daysLeftFromEndsAt(endsAtIso: string | undefined): number {
   if (!endsAtIso) return 0;
   const end = new Date(endsAtIso).getTime();
   if (Number.isNaN(end)) return 0;
   return Math.max(0, Math.ceil((end - Date.now()) / 86400000));
-}
-
-function formatEurFromCents(cents: number): string {
-  const v = Math.max(0, Math.round(cents)) / 100;
-  return `${v.toFixed(2).replace('.', ',')} €`;
 }
 
 /**
@@ -268,6 +264,8 @@ function RewardThumb({
   dimmed: boolean;
   onPress?: () => void;
 }) {
+  const rarityKey = reward?.display.rarity ?? 'common';
+  const glowy = rarityKey === 'epic' || rarityKey === 'legendary';
   if (!reward) {
     return (
       <View
@@ -286,7 +284,7 @@ function RewardThumb({
   const d = reward.display;
   const rarity = RARITY_CONFIG[d.rarity ?? 'common'] ?? RARITY_CONFIG.common;
   const granted = reward.status === 'granted';
-  const opacity = dimmed ? 0.28 : 1;
+  const opacity = dimmed ? 0.5 : 1;
 
   let inner: ReactNode;
   if (d.kind === 'frame') {
@@ -353,12 +351,17 @@ function RewardThumb({
         style={{
           width: size,
           height: size,
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: rarity.border,
+          borderRadius: 14,
+          borderWidth: glowy ? 2 : 1,
+          borderColor: glowy ? rarity.color : rarity.border,
           backgroundColor: rarity.bg,
           alignItems: 'center',
           justifyContent: 'center',
+          shadowColor: glowy ? rarity.glow : 'transparent',
+          shadowOpacity: glowy ? 0.9 : 0,
+          shadowRadius: glowy ? 10 : 0,
+          shadowOffset: { width: 0, height: 0 },
+          elevation: glowy ? 6 : 0,
         }}
       >
         {inner}
@@ -370,6 +373,14 @@ function RewardThumb({
       ) : null}
     </Pressable>
   );
+}
+
+/** Etiqueta corta bajo el thumb: nombre para cosméticos; vacío para SP/booster
+ *  (el thumb ya muestra el valor). */
+function rewardShortLabel(reward: SeasonPassTrackRewardDto | null): string {
+  if (!reward) return '';
+  const k = reward.display.kind;
+  return k === 'title' || k === 'frame' || k === 'badge' || k === 'trophy' ? reward.display.label : '';
 }
 
 function LevelTrackColumn({
@@ -437,24 +448,29 @@ function LevelTrackColumn({
     outputRange: ['0deg', '360deg'],
   });
 
-  const thumbSize = 42;
+  const thumbSize = 52;
   const w = TRACK_COL_W;
 
   return (
     <View style={{ width: w, alignItems: 'center' }}>
-      <View style={{ height: thumbSize + 20, justifyContent: 'center' }}>
-        <RewardThumb
-          reward={eliteReward}
-          size={thumbSize}
-          dimmed={!hasElite || !isUnlocked}
-          onPress={eliteReward ? () => onPressReward(eliteReward) : undefined}
-        />
-        {!hasElite && eliteReward && (
-          <View style={styles.eliteLockOverlay}>
-            <Ionicons name="ribbon" size={14} color="#facc15" />
-            <Ionicons name="lock-closed" size={12} color="#fde68a" />
-          </View>
-        )}
+      <View style={{ height: thumbSize + 30, alignItems: 'center' }}>
+        <View style={{ width: thumbSize, height: thumbSize }}>
+          <RewardThumb
+            reward={eliteReward}
+            size={thumbSize}
+            dimmed={!hasElite || !isUnlocked}
+            onPress={eliteReward ? () => onPressReward(eliteReward) : undefined}
+          />
+          {!hasElite && eliteReward && (
+            <View style={styles.eliteLockOverlay} pointerEvents="none">
+              <Ionicons name="ribbon" size={14} color="#facc15" />
+              <Ionicons name="lock-closed" size={12} color="#fde68a" />
+            </View>
+          )}
+        </View>
+        {rewardShortLabel(eliteReward) ? (
+          <Text style={styles.thumbLabel} numberOfLines={1}>{rewardShortLabel(eliteReward)}</Text>
+        ) : null}
       </View>
 
       <View style={{ height: thumbSize, width: '100%', justifyContent: 'center', alignItems: 'center' }}>
@@ -524,13 +540,18 @@ function LevelTrackColumn({
         </Animated.View>
       </View>
 
-      <View style={{ height: thumbSize + 20, justifyContent: 'center' }}>
-        <RewardThumb
-          reward={freeReward}
-          size={thumbSize}
-          dimmed={!isUnlocked}
-          onPress={freeReward ? () => onPressReward(freeReward) : undefined}
-        />
+      <View style={{ height: thumbSize + 30, alignItems: 'center' }}>
+        <View style={{ width: thumbSize, height: thumbSize }}>
+          <RewardThumb
+            reward={freeReward}
+            size={thumbSize}
+            dimmed={!isUnlocked}
+            onPress={freeReward ? () => onPressReward(freeReward) : undefined}
+          />
+        </View>
+        {rewardShortLabel(freeReward) ? (
+          <Text style={styles.thumbLabel} numberOfLines={1}>{rewardShortLabel(freeReward)}</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -622,11 +643,15 @@ export function SeasonPassScreen({ onBack }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const { session, isLoading: authLoading } = useAuth();
+  const { profile } = useHomeData();
+  const playerInitials =
+    `${profile?.firstName?.[0] ?? ''}${profile?.lastName?.[0] ?? ''}`.toUpperCase() || 'W';
   const { t } = useTranslation();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [tab, setTab] = useState<PassTab>('rewards');
   const [mTab, setMTab] = useState<MissionPeriod>('daily');
   const [showElite, setShowElite] = useState(false);
+  const [showEliteSuccess, setShowEliteSuccess] = useState(false);
   const [showHowTo, setShowHowTo] = useState(false);
   const [elitePaying, setElitePaying] = useState(false);
   const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
@@ -892,8 +917,7 @@ export function SeasonPassScreen({ onBack }: Props) {
 
       await load();
       setShowElite(false);
-      const paid = formatEurFromCents(intentRes.amountCents ?? 999);
-      Alert.alert(t('alerts.ready.title'), t('alerts.seasonPass.activated', { plan: paid }));
+      setShowEliteSuccess(true);
     } catch (e) {
       Alert.alert(t('alerts.error.title'), e instanceof Error ? e.message : t('common.paymentProcessError'));
     } finally {
@@ -1070,13 +1094,10 @@ export function SeasonPassScreen({ onBack }: Props) {
                         </LinearGradient>
                       </Pressable>
                     ) : (
-                      <LinearGradient
-                        colors={['#FFD700', '#FFA500']}
-                        style={styles.eliteActiveBar}
-                      >
-                        <Ionicons name="ribbon" size={16} color="#000" />
+                      <View style={styles.eliteActiveChip}>
+                        <Ionicons name="checkmark-circle" size={15} color={ACCENT} />
                         <Text style={styles.eliteActiveText}>{t('alerts.seasonPass.eliteActive')}</Text>
-                      </LinearGradient>
+                      </View>
                     )}
                   </View>
                 </View>
@@ -1362,7 +1383,46 @@ export function SeasonPassScreen({ onBack }: Props) {
         levelMax={levelMax}
       />
 
-      <RewardDetailSheet target={rewardDetail} onClose={() => setRewardDetail(null)} />
+      <RewardDetailSheet
+        target={rewardDetail}
+        onClose={() => setRewardDetail(null)}
+        hasElite={eliteActive}
+        currentLevel={level}
+        playerAvatarUrl={profile?.avatarUrl ?? null}
+        playerInitials={playerInitials}
+        onGetElite={() => {
+          setRewardDetail(null);
+          setShowElite(true);
+        }}
+      />
+
+      <Modal
+        visible={showEliteSuccess}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEliteSuccess(false)}
+      >
+        <View style={styles.eliteOkBackdrop}>
+          <View style={styles.eliteOkCard}>
+            <LinearGradient
+              colors={['rgba(241,143,52,0.16)', 'transparent']}
+              style={StyleSheet.absoluteFill}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 0.6 }}
+            />
+            <View style={styles.eliteOkCrown}>
+              <Text style={{ fontSize: 40 }}>👑</Text>
+            </View>
+            <Text style={styles.eliteOkTitle}>{t('alerts.seasonPass.eliteOkTitle')}</Text>
+            <Text style={styles.eliteOkBody}>{t('alerts.seasonPass.eliteOkBody')}</Text>
+            <Pressable onPress={() => setShowEliteSuccess(false)} style={({ pressed }) => pressed && styles.pressed}>
+              <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.eliteOkCta}>
+                <Text style={styles.eliteOkCtaTxt}>{t('home.seasonPass.celebrationCta')}</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1569,18 +1629,22 @@ const styles = StyleSheet.create({
     color: '#ca8a04',
     marginTop: 2,
   }),
-  eliteActiveBar: {
+  eliteActiveChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    borderRadius: 16,
+    alignSelf: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.35)',
   },
   eliteActiveText: androidReadableText({
     fontSize: 12,
-    fontWeight: '900',
-    color: '#000',
+    fontWeight: '800',
+    color: ACCENT,
   }),
   tabsSticky: {
     backgroundColor: BG,
@@ -1666,8 +1730,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
-    backgroundColor: 'rgba(0,0,0,0.72)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 14,
+  },
+  thumbLabel: {
+    fontSize: 8,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 4,
+    width: TRACK_COL_W - 6,
   },
   rewardGrantedBadge: {
     position: 'absolute',
@@ -1897,6 +1969,43 @@ const styles = StyleSheet.create({
   eliteSheetFooter: {
     paddingHorizontal: 16,
   },
+  eliteOkBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 28,
+  },
+  eliteOkCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#141414',
+    borderColor: 'rgba(241,143,52,0.25)',
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 24,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  eliteOkCrown: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  eliteOkTitle: androidReadableText({ color: '#fff', fontSize: 19, fontWeight: '900', textAlign: 'center' }),
+  eliteOkBody: androidReadableText({
+    color: '#9ca3af',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 20,
+  }),
+  eliteOkCta: { paddingVertical: 13, paddingHorizontal: 40, borderRadius: 14, alignItems: 'center' },
+  eliteOkCtaTxt: androidReadableText({ color: '#fff', fontSize: 15, fontWeight: '800' }),
   modalCrown: {
     alignSelf: 'center',
     width: 64,

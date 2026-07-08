@@ -163,7 +163,8 @@ export interface AlertsTranslationKeys {
   };
   seasonPass: {
     login: string;
-    activated: string;
+    eliteOkTitle: string;
+    eliteOkBody: string;
     loginRequiredLoad: string;
     loadFail: string;
     loading: string;
@@ -186,6 +187,7 @@ export interface AlertsTranslationKeys {
     rewardGranted: string;
     rewardUnlocked: string;
     rewardLocked: string;
+    rewardNeedsElite: string;
     passHelpTitle: string;
     passHelpAboutTitle: string;
     passHelpAboutBody: string;

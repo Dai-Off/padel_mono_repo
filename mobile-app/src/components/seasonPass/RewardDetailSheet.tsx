@@ -6,6 +6,8 @@ import { useTranslation } from '../../i18n';
 import { FilterBottomSheet } from '../filters/FilterBottomSheet';
 import { RARITY_CONFIG, type AchievementRarity } from '../../design/rarity';
 import { resolveUnlockableIcon } from '../../design/unlockableIcons';
+import { Pressable } from 'react-native';
+import { AvatarWithFrame } from '../profile/AvatarWithFrame';
 import type { SeasonPassTrackRewardDto } from '../../api/seasonPass';
 
 export type RewardDetailTarget = {
@@ -16,6 +18,11 @@ export type RewardDetailTarget = {
 type Props = {
   target: RewardDetailTarget | null;
   onClose: () => void;
+  hasElite: boolean;
+  currentLevel: number;
+  playerAvatarUrl: string | null;
+  playerInitials: string;
+  onGetElite: () => void;
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -27,63 +34,126 @@ const KIND_LABEL: Record<string, string> = {
   sp_boost: 'Boost de SP',
 };
 
-/** Render grande del cosmético/recompensa (mismo lenguaje visual que el thumb). */
-function BigReward({ reward }: { reward: SeasonPassTrackRewardDto }) {
+/** Render fiel del cosmético/recompensa — tal como se verá en el perfil. */
+function BigReward({
+  reward,
+  avatarUrl,
+  initials,
+}: {
+  reward: SeasonPassTrackRewardDto;
+  avatarUrl: string | null;
+  initials: string;
+}) {
   const d = reward.display;
   const rarity = RARITY_CONFIG[(d.rarity as AchievementRarity) ?? 'common'] ?? RARITY_CONFIG.common;
-  const SIZE = 96;
 
   if (d.kind === 'frame') {
-    const palette =
-      Array.isArray(d.colors) && d.colors.length >= 2
-        ? (d.colors as [string, string, ...string[]])
-        : ([rarity.color, rarity.border] as [string, string]);
+    // Marco animado real sobre el avatar del jugador (como quedará en su perfil).
     return (
-      <LinearGradient
-        colors={palette}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.big, { borderRadius: SIZE / 2 }]}
+      <AvatarWithFrame
+        initials={initials}
+        avatarUrl={avatarUrl}
+        size={92}
+        animate
+        frame={{
+          rarity: (d.rarity as AchievementRarity) ?? 'common',
+          style: d.style,
+          animationType: d.animation_type,
+          colors: d.colors,
+        }}
+      />
+    );
+  }
+  if (d.kind === 'title') {
+    // El título con su color de rareza y glow (así se lee en el perfil).
+    return (
+      <Text
+        style={{
+          color: rarity.color,
+          fontSize: 26,
+          fontWeight: '900',
+          textAlign: 'center',
+          textShadowColor: rarity.glow,
+          textShadowRadius: 16,
+          textShadowOffset: { width: 0, height: 0 },
+        }}
       >
-        <View style={{ width: SIZE - 26, height: SIZE - 26, borderRadius: (SIZE - 26) / 2, backgroundColor: '#0F0F0F' }} />
-      </LinearGradient>
+        {d.label}
+      </Text>
     );
   }
   if (d.kind === 'sp') {
     return (
-      <View style={[styles.big, { backgroundColor: 'rgba(241,143,52,0.12)', borderColor: 'rgba(241,143,52,0.3)', borderWidth: 1 }]}>
-        <Text style={{ color: '#F18F34', fontSize: 22, fontWeight: '900' }}>{d.label.replace(' SP', '')}</Text>
-        <Text style={{ color: '#F18F34', fontSize: 12, fontWeight: '700' }}>SP</Text>
-      </View>
+      <LinearGradient
+        colors={['#F8A94E', '#E95F32']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.spCoin}
+      >
+        <Text style={styles.spBig}>{d.label.replace(' SP', '')}</Text>
+        <Text style={styles.spUnit}>SP</Text>
+      </LinearGradient>
     );
   }
   if (d.kind === 'sp_boost') {
     return (
-      <View style={[styles.big, { backgroundColor: 'rgba(241,143,52,0.12)', borderColor: 'rgba(241,143,52,0.3)', borderWidth: 1 }]}>
-        <Text style={{ fontSize: 34 }}>🚀</Text>
-      </View>
+      <LinearGradient
+        colors={['#F8A94E', '#E95F32']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.spCoin}
+      >
+        <Text style={{ fontSize: 40 }}>🚀</Text>
+      </LinearGradient>
     );
   }
-  // title / badge / trophy
+  // badge / trophy: icono grande con anillo + glow de rareza.
   return (
-    <View style={[styles.big, { backgroundColor: rarity.bg, borderColor: rarity.border, borderWidth: 1 }]}>
-      <Ionicons name={resolveUnlockableIcon(d.icon)} size={40} color={rarity.color} />
+    <View
+      style={[
+        styles.badgeRing,
+        {
+          borderColor: rarity.color,
+          backgroundColor: rarity.bg,
+          shadowColor: rarity.glow,
+        },
+      ]}
+    >
+      <Ionicons name={resolveUnlockableIcon(d.icon)} size={44} color={rarity.color} />
     </View>
   );
 }
 
-export function RewardDetailSheet({ target, onClose }: Props) {
+export function RewardDetailSheet({
+  target,
+  onClose,
+  hasElite,
+  currentLevel,
+  playerAvatarUrl,
+  playerInitials,
+  onGetElite,
+}: Props) {
   const { t } = useTranslation();
   const reward = target?.reward;
   const d = reward?.display;
   const rarity = d ? RARITY_CONFIG[(d.rarity as AchievementRarity) ?? 'common'] ?? RARITY_CONFIG.common : null;
+
+  // Recompensa Elite bloqueada porque falta el pase (el nivel ya está alcanzado):
+  // se muestra un CTA de compra en vez del típico "alcanza el nivel N".
+  const needsElite =
+    reward?.status === 'locked' &&
+    reward.tier === 'elite' &&
+    !hasElite &&
+    (target?.level ?? 0) <= currentLevel;
 
   const statusLabel =
     reward?.status === 'granted'
       ? t('alerts.seasonPass.rewardGranted')
       : reward?.status === 'unlocked'
         ? t('alerts.seasonPass.rewardUnlocked')
-        : t('alerts.seasonPass.rewardLocked', { level: target?.level ?? 0 });
+        : needsElite
+          ? t('alerts.seasonPass.rewardNeedsElite')
+          : t('alerts.seasonPass.rewardLocked', { level: target?.level ?? 0 });
 
   return (
     <FilterBottomSheet
@@ -93,7 +163,18 @@ export function RewardDetailSheet({ target, onClose }: Props) {
     >
       {reward && d ? (
         <View style={styles.content}>
-          <BigReward reward={reward} />
+          {/* Glow de rareza detrás del premio */}
+          <View style={styles.heroArea}>
+            {rarity ? (
+              <LinearGradient
+                colors={[rarity.glow || 'transparent', 'transparent']}
+                style={styles.heroGlow}
+                start={{ x: 0.5, y: 0.5 }}
+                end={{ x: 0.5, y: 1 }}
+              />
+            ) : null}
+            <BigReward reward={reward} avatarUrl={playerAvatarUrl} initials={playerInitials} />
+          </View>
 
           <Text style={styles.name}>{d.label || KIND_LABEL[d.kind] || '—'}</Text>
 
@@ -125,11 +206,7 @@ export function RewardDetailSheet({ target, onClose }: Props) {
           <View
             style={[
               styles.statusRow,
-              reward.status === 'granted'
-                ? styles.statusGranted
-                : reward.status === 'unlocked'
-                  ? styles.statusUnlocked
-                  : styles.statusLocked,
+              reward.status === 'locked' ? styles.statusLocked : styles.statusGranted,
             ]}
           >
             <Ionicons
@@ -137,15 +214,20 @@ export function RewardDetailSheet({ target, onClose }: Props) {
               size={16}
               color={reward.status === 'locked' ? '#9ca3af' : '#34d399'}
             />
-            <Text
-              style={[
-                styles.statusTxt,
-                { color: reward.status === 'locked' ? '#9ca3af' : '#34d399' },
-              ]}
-            >
+            <Text style={[styles.statusTxt, { color: reward.status === 'locked' ? '#9ca3af' : '#34d399' }]}>
               {statusLabel}
             </Text>
           </View>
+
+          {needsElite ? (
+            <Pressable
+              onPress={onGetElite}
+              style={({ pressed }) => [styles.eliteCta, pressed && { opacity: 0.9 }]}
+            >
+              <Ionicons name="ribbon" size={16} color="#fff" />
+              <Text style={styles.eliteCtaTxt}>{t('alerts.seasonPass.getEliteCta')}</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
     </FilterBottomSheet>
@@ -154,12 +236,35 @@ export function RewardDetailSheet({ target, onClose }: Props) {
 
 const styles = StyleSheet.create({
   content: { alignItems: 'center', paddingBottom: 8 },
-  big: {
-    width: 96,
-    height: 96,
+  heroArea: { height: 128, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', marginBottom: 4 },
+  heroGlow: { ...StyleSheet.absoluteFillObject, opacity: 0.32 },
+  spCoin: {
+    width: 92,
+    height: 92,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#F18F34',
+    shadowOpacity: 0.7,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
+  },
+  spBig: { color: '#fff', fontSize: 27, fontWeight: '900' },
+  spUnit: { color: '#fff', fontSize: 13, fontWeight: '800', marginTop: -2 },
+  badgeRing: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.9,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
   },
   name: { color: '#fff', fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 12 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginBottom: 16 },
@@ -175,8 +280,19 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     justifyContent: 'center',
   },
-  statusGranted: { backgroundColor: 'rgba(16,185,129,0.1)' },
-  statusUnlocked: { backgroundColor: 'rgba(16,185,129,0.08)' },
+  statusGranted: { backgroundColor: 'rgba(16,185,129,0.08)' },
   statusLocked: { backgroundColor: 'rgba(255,255,255,0.05)' },
   statusTxt: { fontSize: 13, fontWeight: '700' },
+  eliteCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+    marginTop: 12,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: '#F18F34',
+  },
+  eliteCtaTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });
