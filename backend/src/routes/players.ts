@@ -9,7 +9,8 @@ import { computeFreshAssessment } from '../services/coachAssessmentService';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
 import { localizeCoachAssessmentText } from '../lib/coachAssessmentLanguage';
-import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
+import { getCachedPeerFeedbackInsight } from '../services/postMatchPeerFeedbackInsightService';
+import { assembleProfileBundle } from '../services/profileBundleService';
 import { syncPlayerVector } from '../lib/mailer';
 import { pickClubImageSource, resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import {
@@ -1450,6 +1451,30 @@ router.get('/:id/feedback-summary', async (req: Request, res: Response) => {
  *         description: Locale BCP-47 para la tarjeta (default `es`)
  *     security: [{ bearerAuth: [] }]
  */
+/**
+ * @openapi
+ * /players/me/profile-bundle:
+ *   get:
+ *     tags: [Players]
+ *     summary: Bundle above-the-fold del perfil en 1 round-trip
+ *     description: |
+ *       Junta las lecturas baratas que el hero y el Coach necesitan
+ *       SOLO lo que bloquea el hero (personalización, marcos, logros). El radar,
+ *       el peer-insight, las stats, la evolución y el social van aparte y
+ *       rellenan su card con skeleton, para que el hero no espere a nada más.
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/me/profile-bundle', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  try {
+    const bundle = await assembleProfileBundle(playerId!);
+    return res.json({ ok: true, ...bundle });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
 router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
@@ -1467,7 +1492,9 @@ router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response
     req.query.lang as string | string[] | undefined,
     req.headers['accept-language'] as string | undefined
   );
-  const insight = await getLastPeerFeedbackInsightForPlayer(supabase, id, { locale });
+  // Sirve la cache (sin OpenAI en la ruta crítica); la genera al vuelo solo la
+  // primera vez que se ve a este jugador en este idioma.
+  const insight = await getCachedPeerFeedbackInsight(supabase, id, { locale });
   return res.json(insight);
 });
 
@@ -1577,6 +1604,19 @@ router.get('/', async (req: Request, res: Response) => {
       .split(/\s+/)
       .filter(Boolean);
 
+    // Prefijo '@' = búsqueda SOLO por username (sin la arroba). Sin '@' = búsqueda amplia.
+    const isUsernameTerm = (t: string) => t.startsWith('@');
+    // Saneado: los caracteres estructurales de PostgREST (coma, paréntesis) romperían el .or()
+    // (p. ej. "a,b" → error de parseo → 500). Se eliminan del término del usuario.
+    const bareTerm = (t: string) => (t.startsWith('@') ? t.slice(1) : t).replace(/[,()]/g, '');
+
+    // Excluir al propio usuario de los resultados (invitaciones): opt-in por token.
+    let selfId: string | null = null;
+    if (req.query.exclude_self === 'true') {
+      const { playerId } = await getPlayerIdFromBearer(req);
+      selfId = playerId ?? null;
+    }
+
     const searchFetchLimit = terms.length <= 1 ? 80 : 160;
     let q = supabase
       .from('players')
@@ -1587,15 +1627,24 @@ router.get('/', async (req: Request, res: Response) => {
       .order('created_at', { ascending: false })
       .limit(terms.length ? searchFetchLimit : 50);
 
+    if (selfId) q = q.neq('id', selfId);
+
     if (terms.length) {
       const orExpr = terms
-        .flatMap((t) => [
-          `first_name.ilike.%${t}%`,
-          `last_name.ilike.%${t}%`,
-          `phone.ilike.%${t}%`,
-          `username.ilike.%${t}%`,
-        ])
+        .flatMap((t) => {
+          const bare = bareTerm(t);
+          if (!bare) return [];
+          if (isUsernameTerm(t)) return [`username.ilike.%${bare}%`];
+          return [
+            `first_name.ilike.%${bare}%`,
+            `last_name.ilike.%${bare}%`,
+            `phone.ilike.%${bare}%`,
+            `username.ilike.%${bare}%`,
+          ];
+        })
         .join(',');
+      // Todos los términos quedaron vacíos tras sanear (p. ej. solo "@"): no listar a todos.
+      if (!orExpr) return res.json({ ok: true, players: [] });
       q = q.or(orExpr);
     }
 
@@ -1613,7 +1662,10 @@ router.get('/', async (req: Request, res: Response) => {
         const uname = String(p.username ?? '').toLowerCase();
         const phoneDigits = phone.replace(/\D/g, '');
         return terms.every((t) => {
-          const term = t.startsWith('@') ? t.slice(1) : t;
+          const term = bareTerm(t);
+          if (!term) return true;
+          // Términos con '@': solo username.
+          if (isUsernameTerm(t)) return uname.includes(term);
           if (full.includes(term)) return true;
           if (uname.includes(term)) return true;
           if (phone.includes(term)) return true;
@@ -1795,16 +1847,23 @@ router.get('/:id/frequent-partners', async (req: Request, res: Response) => {
 
     const { data: players } = await supabase
       .from('players')
-      .select('id, first_name, last_name, username, avatar_url')
+      .select('id, first_name, last_name, username, avatar_url, onboarding_completed')
       .in('id', ranked.map(([pid]) => pid));
-    type PRow = { id: string; first_name?: string | null; last_name?: string | null; username?: string | null; avatar_url?: string | null };
+    type PRow = { id: string; first_name?: string | null; last_name?: string | null; username?: string | null; avatar_url?: string | null; onboarding_completed?: boolean | null };
     const meta = new Map((players ?? []).map((p) => [(p as PRow).id, p as PRow]));
     const frames = await getEquippedFrames(supabase, ranked.map(([pid]) => pid));
 
     const partners = ranked.map(([pid, count]) => {
       const p = meta.get(pid);
       const name = p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || (p.username ?? 'Jugador') : 'Jugador';
-      return { id: pid, name, avatarUrl: p?.avatar_url ?? null, count, frame: frames.get(pid) ?? null };
+      return {
+        id: pid,
+        name,
+        avatarUrl: p?.avatar_url ?? null,
+        count,
+        frame: frames.get(pid) ?? null,
+        onboarding_completed: p?.onboarding_completed ?? null,
+      };
     });
     return res.json({ ok: true, partners });
   } catch (err) {

@@ -20,6 +20,7 @@ export interface CompetitiveTranslationKeys {
     invitedYou: string;
     leavePair: string;
     leavePairMsg: string;
+    alreadyInvited: string;
   };
   banner: { invitesYou: string; sub: string; reject: string; accept: string; acceptSearch: string; count: string };
   season: { endKicker: string; endedIn: string; newKicker: string; newLiga: string; next: string; cta: string };

@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../i18n';
+import { isFeatureHidden } from '../config';
 import { useStripe } from '../stripe';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -1238,32 +1239,36 @@ export function PartidoDetailScreen({
                       {t('partidos.createLocation')}
                     </Text>
                   </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.actionCol, pressed && styles.pressed]}
-                    onPress={() =>
-                      Alert.alert(t('alerts.web.title'), t('alerts.web.body'))
-                    }
-                  >
-                    <View style={styles.actionIconOutline}>
-                      <Ionicons name="globe-outline" size={22} color="rgba(255,255,255,0.6)" />
-                    </View>
-                    <Text style={styles.actionLabel} numberOfLines={2}>
-                      {t('alerts.web.title')}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.actionCol, pressed && styles.pressed]}
-                    onPress={() =>
-                      Alert.alert(t('alerts.phone.title'), t('alerts.phone.body'))
-                    }
-                  >
-                    <View style={styles.actionIconOutline}>
-                      <Ionicons name="call-outline" size={22} color="rgba(255,255,255,0.6)" />
-                    </View>
-                    <Text style={styles.actionLabel} numberOfLines={2}>
-                      {t('alerts.phone.title')}
-                    </Text>
-                  </Pressable>
+                  {!isFeatureHidden('partidoDetail.contactActions') && (
+                    <>
+                      <Pressable
+                        style={({ pressed }) => [styles.actionCol, pressed && styles.pressed]}
+                        onPress={() =>
+                          Alert.alert(t('alerts.web.title'), t('alerts.web.body'))
+                        }
+                      >
+                        <View style={styles.actionIconOutline}>
+                          <Ionicons name="globe-outline" size={22} color="rgba(255,255,255,0.6)" />
+                        </View>
+                        <Text style={styles.actionLabel} numberOfLines={2}>
+                          {t('alerts.web.title')}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [styles.actionCol, pressed && styles.pressed]}
+                        onPress={() =>
+                          Alert.alert(t('alerts.phone.title'), t('alerts.phone.body'))
+                        }
+                      >
+                        <View style={styles.actionIconOutline}>
+                          <Ionicons name="call-outline" size={22} color="rgba(255,255,255,0.6)" />
+                        </View>
+                        <Text style={styles.actionLabel} numberOfLines={2}>
+                          {t('alerts.phone.title')}
+                        </Text>
+                      </Pressable>
+                    </>
+                  )}
                 </View>
               </View>
             </View>

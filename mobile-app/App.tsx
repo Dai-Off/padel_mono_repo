@@ -10,6 +10,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
 import { HomeDataProvider } from './src/contexts/HomeDataContext';
+import { ProfileDataProvider } from './src/contexts/ProfileDataContext';
 import { CartProvider } from './src/contexts/CartContext';
 import { SplashScreen } from './src/components/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -23,9 +24,11 @@ import { theme } from './src/theme';
 import { I18nProvider } from './src/i18n';
 import { isRecoveryDeepLink, parseSupabaseRecoveryFromUrl } from './src/lib/parseAuthRecoveryUrl';
 import { parseTournamentInviteUrl } from './src/lib/parseTournamentInviteUrl';
+import { parseMatchDeepLink } from './src/lib/parseMatchDeepLink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
+const PENDING_MATCH_DEEPLINK_KEY = 'pending_match_deeplink';
 
 async function stashTournamentInviteFromUrl(url: string | null) {
   if (!url) return;
@@ -35,15 +38,25 @@ async function stashTournamentInviteFromUrl(url: string | null) {
   }
 }
 
+async function stashMatchDeepLinkFromUrl(url: string | null) {
+  if (!url) return;
+  const parsed = parseMatchDeepLink(url);
+  if (parsed) {
+    await AsyncStorage.setItem(PENDING_MATCH_DEEPLINK_KEY, JSON.stringify(parsed));
+  }
+}
+
 type AuthScreen = 'login' | 'register' | 'forgot_password' | 'reset_password';
 
 function AuthFlowWrapper() {
   const [screen, setScreen] = useState<AuthScreen>('login');
   const [recovery, setRecovery] = useState<RecoveryPayload | null>(null);
+  const [loginEmail, setLoginEmail] = useState('');
 
   const consumeDeepLink = useCallback((url: string | null) => {
     if (!url) return;
     void stashTournamentInviteFromUrl(url);
+    void stashMatchDeepLinkFromUrl(url);
 
     if (url.includes('email-confirmed')) {
       setRecovery(null);
@@ -78,6 +91,7 @@ function AuthFlowWrapper() {
 
   const goLogin = () => {
     setRecovery(null);
+    setLoginEmail('');
     setScreen('login');
   };
 
@@ -87,10 +101,16 @@ function AuthFlowWrapper() {
         <LoginScreen
           onGoToRegister={() => setScreen('register')}
           onGoToForgot={() => setScreen('forgot_password')}
+          initialEmail={loginEmail}
         />
       )}
       {screen === 'register' && (
-        <RegisterScreen onGoToLogin={() => setScreen('login')} />
+        <RegisterScreen
+          onGoToLogin={(email) => {
+            setLoginEmail(email ?? '');
+            setScreen('login');
+          }}
+        />
       )}
       {screen === 'forgot_password' && (
         <ForgotPasswordScreen onBackToLogin={goLogin} />
@@ -152,9 +172,11 @@ export default function App() {
             <I18nProvider>
               <AuthProvider>
                 <HomeDataProvider>
-                  <CartProvider>
-                    <AppContent />
-                  </CartProvider>
+                  <ProfileDataProvider>
+                    <CartProvider>
+                      <AppContent />
+                    </CartProvider>
+                  </ProfileDataProvider>
                 </HomeDataProvider>
               </AuthProvider>
             </I18nProvider>

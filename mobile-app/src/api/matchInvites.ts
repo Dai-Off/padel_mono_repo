@@ -257,6 +257,44 @@ export async function dismissMatchInvite(
   }
 }
 
+export async function acceptMatchInviteByToken(
+  inviteToken: string,
+  accessToken: string,
+): Promise<
+  | { ok: true; match_id: string; already_accepted?: boolean }
+  | { ok: false; error: string }
+> {
+  try {
+    const res = await fetch(
+      `${API_URL}/matches/invites/${encodeURIComponent(inviteToken)}/accept`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({}),
+      },
+    );
+    const json = (await res.json()) as {
+      ok?: boolean;
+      error?: string;
+      match_id?: string;
+      already_accepted?: boolean;
+    };
+    if (!res.ok || !json.ok) {
+      return { ok: false, error: json.error ?? 'No se pudo aceptar la invitación' };
+    }
+    return {
+      ok: true,
+      match_id: String(json.match_id ?? ''),
+      already_accepted: json.already_accepted,
+    };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
 export function playerInviteLabel(p: PlayerSearchHit): string {
   const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
   if (name && p.username) return `${name} (@${p.username})`;

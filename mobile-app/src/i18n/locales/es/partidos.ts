@@ -169,6 +169,7 @@ export const partidos: PartidosTranslationKeys = {
   privateInviteRegisteredOnly: 'Busca por nombre o @usuario. Tras aceptar, podrán pagar su plaza.',
   privateInviteSearchPlaceholder: 'Nombre o @usuario',
   privateInviteSearchHint: 'Escribe al menos 2 caracteres para buscar.',
+  privateInviteSuggestions: 'Sugerencias',
   privateInviteSearchEmpty: 'No encontramos jugadores con ese criterio.',
   privateInviteSlot: 'Plaza {n}',
   privateInviteSendBtn: 'Enviar invitaciones',

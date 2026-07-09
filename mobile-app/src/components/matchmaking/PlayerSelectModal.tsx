@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,6 +18,8 @@ import { theme } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTranslation } from '../../i18n';
 import { searchPlayers, type PlayerSearchHit } from '../../api/players';
+import { useDebouncedSearch } from '../../hooks/useDebouncedSearch';
+import { fetchInviteSuggestions } from '../../lib/inviteSuggestions';
 import {
   acceptPairInvite,
   cancelPairInvite,
@@ -32,6 +34,7 @@ const BG = '#0F0F0F';
 const ACCENT = theme.auth.accent;
 /** Mínimo de caracteres para lanzar la búsqueda de jugadores. */
 const MIN_SEARCH_CHARS = 2;
+const SUGGESTIONS_LIMIT = 5;
 
 export function playerDisplayName(p: PlayerSearchHit, fallback = 'Jugador'): string {
   const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
@@ -45,17 +48,19 @@ type Props = {
   onSelectAccepted?: (invite: PairInvite) => void;
   /** Ids a ocultar de los resultados (ej. uno mismo). */
   excludeIds?: string[];
+  /** Id del usuario actual, para cargar sugerencias (compañeros frecuentes). */
+  currentPlayerId?: string;
 };
 
-export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeIds }: Props) {
+export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeIds, currentPlayerId }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { t } = useTranslation();
   const token = session?.access_token ?? null;
   const [query, setQuery] = useState('');
-  const [players, setPlayers] = useState<PlayerSearchHit[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
+  const [inviting, setInviting] = useState<Set<string>>(new Set());
+  const [suggestions, setSuggestions] = useState<PlayerSearchHit[]>([]);
   const [accepted, setAccepted] = useState<PairInvite[]>([]);
   const [pending, setPending] = useState<PairInvite[]>([]);
   const [received, setReceived] = useState<PairInvite[]>([]);
@@ -68,30 +73,29 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
     setToastMsg(msg);
   };
 
+  // Búsqueda con debounce (300 ms, 2 chars); el backend excluye al propio usuario.
+  const { items: rawPlayers, loading } = useDebouncedSearch(
+    visible ? query : '',
+    (q) => searchPlayers(q, token, { excludeSelf: true }).then((r) => (r.ok ? r.players : [])),
+    { delay: 300, minChars: MIN_SEARCH_CHARS },
+  );
+
+  // Sugerencias por defecto (hoy: compañeros frecuentes).
   useEffect(() => {
-    if (!visible) return;
-    // No cargamos jugadores hasta que el usuario escriba algo (evita listar "randoms").
-    if (query.trim().length < MIN_SEARCH_CHARS) {
-      setPlayers([]);
-      setLoading(false);
-      setError(null);
+    if (!visible) {
+      setSuggestions([]);
+      setFocused(false);
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    const t = setTimeout(async () => {
-      const res = await searchPlayers(query, token);
-      if (cancelled) return;
-      setLoading(false);
-      if (res.ok) setPlayers(res.players);
-      else setError(res.error);
-    }, 300);
+    void (async () => {
+      const s = await fetchInviteSuggestions(currentPlayerId, SUGGESTIONS_LIMIT);
+      if (!cancelled) setSuggestions(s);
+    })();
     return () => {
       cancelled = true;
-      clearTimeout(t);
     };
-  }, [query, token, visible]);
+  }, [visible, currentPlayerId]);
 
   // Invitaciones que envié: aceptadas (listas para buscar) y pendientes (esperando respuesta).
   useEffect(() => {
@@ -157,7 +161,14 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   };
 
   const handleInvite = async (player: PlayerSearchHit) => {
+    if (inviting.has(player.id)) return; // evita doble invitación por doble tap
+    setInviting((s) => new Set(s).add(player.id));
     const res = await createPairInvite(player.id, token);
+    setInviting((s) => {
+      const n = new Set(s);
+      n.delete(player.id);
+      return n;
+    });
     if (!res.ok) {
       showToast(res.error, 'error');
       return;
@@ -178,9 +189,24 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
       </View>
     );
 
-  const exclude = new Set(excludeIds ?? []);
-  // Oculta a uno mismo y a quien no ha completado el onboarding (no puede jugar competitiva).
-  const list = players.filter((p) => !exclude.has(p.id) && p.onboarding_completed !== false);
+  const searching = query.trim().length >= MIN_SEARCH_CHARS;
+  const exclude = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
+  const suggestionIds = useMemo(() => new Set(suggestions.map((s) => s.id)), [suggestions]);
+  // Ids con invitación en curso (enviada/aceptada/recibida): se marcan y no se re-invitan.
+  const invitedIds = useMemo(
+    () => new Set([...accepted, ...pending, ...received].map((i) => i.other_player_id)),
+    [accepted, pending, received],
+  );
+  // Sin texto → sugerencias; con texto → resultados con las sugerencias que casen arriba.
+  const list = useMemo(() => {
+    const ok = (p: PlayerSearchHit) => !exclude.has(p.id) && p.onboarding_completed !== false;
+    // Sugerencias por defecto: ocultar a los ya invitados (ya salen en la cabecera; evita duplicado).
+    if (!searching) return focused ? suggestions.filter(ok).filter((p) => !invitedIds.has(p.id)) : [];
+    const filtered = rawPlayers.filter(ok);
+    const matched = filtered.filter((p) => suggestionIds.has(p.id));
+    const others = filtered.filter((p) => !suggestionIds.has(p.id));
+    return [...matched, ...others];
+  }, [searching, focused, suggestions, rawPlayers, exclude, suggestionIds, invitedIds]);
 
   const showReceived = received.length > 0;
   const showAccepted = !!onSelectAccepted && accepted.length > 0;
@@ -291,6 +317,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
             <TextInput
               value={query}
               onChangeText={setQuery}
+              onFocus={() => setFocused(true)}
               placeholder={t('competitive.partner.searchPlaceholder')}
               placeholderTextColor="#737373"
               style={styles.searchInput}
@@ -300,43 +327,55 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
           </View>
         </View>
 
-        {loading ? (
-          <View style={styles.centered}>
-            <ActivityIndicator color={ACCENT} />
-          </View>
-        ) : error ? (
-          <View style={styles.centered}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={list}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 16 }}
-            keyboardShouldPersistTaps="handled"
-            ListHeaderComponent={listHeader}
-            ListEmptyComponent={
+        <FlatList
+          data={list}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 16 }}
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={
+            loading ? (
+              <View style={styles.centered}>
+                <ActivityIndicator color={ACCENT} />
+              </View>
+            ) : (
               <Text style={styles.emptyText}>
                 {query.trim().length < MIN_SEARCH_CHARS
                   ? t('competitive.partner.searchHint')
                   : t('competitive.partner.empty')}
               </Text>
-            }
-            renderItem={({ item }) => (
+            )
+          }
+          renderItem={({ item }) => {
+            const isInvited = invitedIds.has(item.id);
+            const busy = inviting.has(item.id);
+            const isSuggestion = suggestionIds.has(item.id);
+            const disabled = isInvited || busy;
+            return (
               <Pressable
-                onPress={() => void handleInvite(item)}
-                style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
+                onPress={disabled ? undefined : () => void handleInvite(item)}
+                disabled={disabled}
+                style={({ pressed }) => [styles.row, disabled && styles.rowDisabled, pressed && !disabled && { opacity: 0.85 }]}
               >
                 {renderAvatar(item.avatar_url)}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.name}>{playerDisplayName(item, t('competitive.screen.fallback.player'))}</Text>
                   {item.username ? <Text style={styles.meta}>@{item.username}</Text> : null}
                 </View>
-                <Ionicons name="person-add-outline" size={18} color={ACCENT} />
+                {isInvited ? (
+                  <Text style={styles.invitedBadge}>{t('competitive.partner.alreadyInvited')}</Text>
+                ) : busy ? (
+                  <ActivityIndicator size="small" color={ACCENT} />
+                ) : (
+                  <>
+                    {isSuggestion ? <Ionicons name="star" size={13} color={ACCENT} style={styles.suggestionStar} /> : null}
+                    <Ionicons name="person-add-outline" size={18} color={ACCENT} />
+                  </>
+                )}
               </Pressable>
-            )}
-          />
-        )}
+            );
+          }}
+        />
         <Toast message={toastMsg} variant={toastVariant} onHide={() => setToastMsg(null)} />
       </KeyboardAvoidingView>
     </Modal>
@@ -395,6 +434,18 @@ const styles = StyleSheet.create({
   },
   name: { color: '#fff', fontSize: 15, fontWeight: '600' },
   meta: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  rowDisabled: { opacity: 0.55 },
+  suggestionStar: { marginRight: 2 },
+  invitedBadge: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
   acceptedBlock: { marginBottom: 4 },
   invitesLoadingWrap: { paddingVertical: 24, alignItems: 'center' },
   sectionLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },

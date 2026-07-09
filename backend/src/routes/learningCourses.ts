@@ -4,6 +4,7 @@ import { requireAuth, getPlayerFromAuth, requireOnboarding } from './learningHel
 import { getMultiplier } from './learningStreaks';
 import { SharedStreakRow, lazyResetSharedStreak, normalizePair } from './learningStreaks';
 import { dayKeyInTz, previousDayKey } from './learningTimezone';
+import { evaluateAndGrant, syncCourseUnlockable } from '../services/unlockablesEngine';
 
 const router = Router();
 
@@ -487,11 +488,21 @@ router.post('/courses/:id/complete-lesson', requireAuth, async (req: Request, re
 
     const completedLessons = (progress || []).length;
     const totalLessons = (allLessons || []).length;
+    const courseCompleted = totalLessons > 0 && completedLessons === totalLessons;
+
+    // Curso completado = evento que otorga el logro (kind='course', no on-read).
+    // Materializa el unlockable del curso (lazy: cubre cursos nuevos + sincroniza
+    // el título) y otorga. Fire-and-forget: no bloquea la respuesta.
+    if (courseCompleted) {
+      void syncCourseUnlockable(supabase, courseId)
+        .then(() => evaluateAndGrant(supabase, player.id))
+        .catch((e) => console.error('[courseComplete grant]', e instanceof Error ? e.message : e));
+    }
 
     return res.json({
       ok: true,
       lesson_completed: true,
-      course_completed: totalLessons > 0 && completedLessons === totalLessons,
+      course_completed: courseCompleted,
       completed_lessons: completedLessons,
       total_lessons: totalLessons,
     });

@@ -19,7 +19,7 @@ function asRarity(raw: string): AchievementRarity {
   return raw === 'rare' || raw === 'epic' || raw === 'legendary' ? raw : 'common';
 }
 
-type AchievementsResponse = {
+export type AchievementsResponse = {
   ok?: boolean;
   achievements?: {
     id: string;
@@ -36,7 +36,7 @@ type AchievementsResponse = {
   error?: string;
 };
 
-function mapAchievements(json: AchievementsResponse): Achievement[] {
+export function mapAchievements(json: AchievementsResponse): Achievement[] {
   return (json.achievements ?? []).map((a) => ({
     id: a.id,
     type: asType(a.type),

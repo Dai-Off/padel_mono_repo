@@ -165,6 +165,7 @@ export const partidos: PartidosTranslationKeys = {
   privateInviteRegisteredOnly: '按名稱或 @用戶名搜尋。接受後即可支付位置。',
   privateInviteSearchPlaceholder: '名稱或 @用戶名',
   privateInviteSearchHint: '請輸入至少 2 個字元以搜尋。',
+  privateInviteSuggestions: '建議',
   privateInviteSearchEmpty: '找不到符合條件的球員。',
   privateInviteSlot: '位置 {n}',
   privateInviteSendBtn: '發送邀請',

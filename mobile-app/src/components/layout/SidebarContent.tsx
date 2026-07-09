@@ -167,16 +167,6 @@ export function SidebarContent() {
       >
         <SidebarSection title={t('nav.sectionYourAccount')}>
           <SidebarRowItem
-            icon="person-outline"
-            title={t('nav.editProfile')}
-            subtitle={t('nav.editProfileSub')}
-            iconVariant="orange"
-            onPress={() => {
-              close?.();
-              ctx?.onNavigateToEditProfile?.();
-            }}
-          />
-          <SidebarRowItem
             icon="trophy-outline"
             title={t('nav.yourActivity')}
             subtitle={t('nav.yourActivitySub')}

@@ -410,36 +410,44 @@ async function computeDynamicSkills(
 }
 
 /**
- * Recalcula el assessment del jugador desde señales reales (ELO + learning),
- * lo persiste (upsert) y lo devuelve con stats. Mantiene el radar fresco al
- * cambiar el ELO (partidos) o el rendimiento en learning, y crea la fila si no
- * existía (p.ej. usuarios sembrados a mano sin pasar por el onboarding).
+ * Recalcula SOLO el radar (skills + meta) desde señales reales (ELO + learning),
+ * lo persiste (upsert) con `needs_recompute = false` y lo devuelve SIN stats
+ * (A1: las stats van por su propio endpoint). Crea la fila si no existía (p.ej.
+ * usuarios sembrados a mano sin pasar por el onboarding).
+ *
+ * `existingAnswers` permite reutilizar las answers ya leídas por
+ * `getRadarAssessment` y evitar un segundo SELECT. Si es `undefined`, se leen de
+ * BD para **preservarlas** (nunca se pisan las respuestas del onboarding).
  */
-export async function recomputeAndGetAssessment(playerId: string) {
+export async function recomputeRadarAssessment(playerId: string, existingAnswers?: unknown) {
   const supabase = getSupabaseServiceRoleClient();
 
   const skills = await computeDynamicSkills(supabase, playerId);
   const meta = resultMetaFromSkills(skills);
 
-  // Preservar answers existentes (si las hubiera) para no perder datos.
-  const { data: existing } = await supabase
-    .from('coach_assessments')
-    .select('answers')
-    .eq('player_id', playerId)
-    .maybeSingle();
+  let answers = existingAnswers;
+  if (answers === undefined) {
+    const { data: prev } = await supabase
+      .from('coach_assessments')
+      .select('answers')
+      .eq('player_id', playerId)
+      .maybeSingle();
+    answers = (prev as { answers?: unknown } | null)?.answers ?? [];
+  }
 
   const { data, error } = await supabase
     .from('coach_assessments')
     .upsert(
       {
         player_id: playerId,
-        answers: (existing as { answers?: unknown } | null)?.answers ?? [],
+        answers,
         level_number: meta.level_number,
         level_name: meta.level_name,
         skills,
         strengths: meta.strengths,
         improvements: meta.improvements,
         recommendation: meta.recommendation,
+        needs_recompute: false,
       },
       { onConflict: 'player_id' },
     )
@@ -447,8 +455,58 @@ export async function recomputeAndGetAssessment(playerId: string) {
     .single();
   if (error) throw error;
 
-  const stats = await getPlayerStats(playerId);
-  return { ...data, stats };
+  return data;
+}
+
+/**
+ * Devuelve el radar del Coach (A1: sin stats). Sirve la fila cacheada en 1 query
+ * y solo recomputa (ELO + learning) si falta la fila o está marcada
+ * `needs_recompute` (A2). Es lo que consume GET /coach-assessment/me en la ruta
+ * crítica del perfil, por eso debe ser barato en el caso común (cache hit).
+ */
+export async function getRadarAssessment(playerId: string) {
+  const supabase = getSupabaseServiceRoleClient();
+
+  const { data: row } = await supabase
+    .from('coach_assessments')
+    .select('*')
+    .eq('player_id', playerId)
+    .maybeSingle();
+
+  // Cache hit: fila presente y fresca -> se sirve tal cual (sin recompute/escritura).
+  if (row && (row as { needs_recompute?: boolean }).needs_recompute === false) {
+    return row;
+  }
+
+  // Miss (no existe) o stale: recomputamos, persistimos y limpiamos el flag.
+  return recomputeRadarAssessment(playerId, (row as { answers?: unknown } | null)?.answers ?? []);
+}
+
+/**
+ * Stats del Coach (A1: endpoint separado del radar). Son contadores en vivo
+ * (partidos, objetivos, lecciones…), no se cachean; se piden aparte para no
+ * bloquear el pintado del radar.
+ */
+export async function getCoachAssessmentStats(playerId: string) {
+  return getPlayerStats(playerId);
+}
+
+/**
+ * A2 (write-through): recalcula y persiste el radar de estos jugadores en el
+ * momento del evento que cambia sus señales (cierre de partido -> ELO; fin de
+ * lección -> shape por área). Así **toda** lectura del perfil es 1 query (nunca
+ * paga recompute on-read). Best-effort: nunca lanza (no debe romper el pipeline
+ * de nivelación ni el submit de lección). Se ejecuta fire-and-forget.
+ */
+export async function recomputeRadarForPlayers(playerIds: string[]): Promise<void> {
+  const ids = [...new Set(playerIds.filter((id) => typeof id === 'string' && id.length > 0))];
+  await Promise.all(
+    ids.map((id) =>
+      recomputeRadarAssessment(id).catch((e) =>
+        console.error('[recomputeRadarForPlayers]', id, e instanceof Error ? e.message : e),
+      ),
+    ),
+  );
 }
 
 /**

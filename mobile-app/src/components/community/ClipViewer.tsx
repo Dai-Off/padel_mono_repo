@@ -308,7 +308,7 @@ const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellH
       {/* Info inferior (solo visual: no bloquea el doble-tap) */}
       <View style={[styles.bottom, { bottom: insets.bottom + 24 }]} pointerEvents="none">
         <View style={styles.authorRow}>
-          <Text style={styles.author}>{formatPlayerLabel(clip.player)}</Text>
+          <Text style={styles.author}>{formatPlayerLabel(clip.player, t('common.playerFallback'))}</Text>
           {/* "Seguir" — solo visual */}
           <View style={styles.followBtn}>
             <Text style={styles.followBtnText}>{t('common.follow')}</Text>

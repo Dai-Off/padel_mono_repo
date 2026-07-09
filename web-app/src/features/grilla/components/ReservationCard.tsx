@@ -63,6 +63,16 @@ export const ReservationCard: React.FC<Props> = ({
         reservation.booking_type !== 'blocked' &&
         reservation.booking_type !== 'tournament';
     const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : (isLoadingName ? null : t('grid.noClient'));
+    const showPlayerBubble = reservation.isPublicOpenMatch === true && !isLoadingName;
+    const registeredCount = reservation.registeredPlayerCount ?? reservation.detailedPlayers?.length ?? 0;
+    const renderPlayerBubble = (sizePx: number, fontPx: number) => (
+        <div
+            className="rounded-full bg-white shadow-sm border border-white/80 flex items-center justify-center font-bold text-gray-900 leading-none shrink-0"
+            style={{ width: sizePx, height: sizePx, fontSize: fontPx }}
+        >
+            {registeredCount}
+        </div>
+    );
     const priceLabel =
         reservation.totalPrice != null && reservation.totalPrice > 0
             ? `${reservation.totalPrice.toFixed(2).replace('.', ',')} €`
@@ -70,6 +80,8 @@ export const ReservationCard: React.FC<Props> = ({
     const isCompact = !!compactPxPerMinute;
     const isSmallZoom = !isCompact && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const isShortBooking = reservation.durationMinutes <= 60;
+    const is90MinBooking = reservation.durationMinutes === 90;
+    const is120MinBooking = reservation.durationMinutes >= 120;
     const ppm = compactPxPerMinute || PIXELS_PER_MINUTE;
     const bounds = useGridBounds();
     const gridStartMin = bounds.startHour * 60;
@@ -183,7 +195,7 @@ export const ReservationCard: React.FC<Props> = ({
                 'absolute inset-x-0 border flex flex-col overflow-hidden transition-[filter,box-shadow]',
                 selectMode ? 'cursor-pointer' : 'cursor-pointer hover:brightness-95',
                 isShortBooking && !isCompact && 'justify-center items-center',
-                isCompact ? 'p-0 px-0.5 text-[8px]' : isShortBooking ? 'p-0 px-0.5' : isSmallZoom ? 'p-1.5 text-[18px]' : 'p-1.5 text-xs',
+                isCompact ? 'p-0 px-0.5 text-[8px]' : (isShortBooking || is90MinBooking) ? 'p-0 px-0.5' : isSmallZoom ? 'p-1.5 text-[18px]' : 'p-1.5 text-xs',
                 typeColorClass,
                 reservation.status === 'pending_payment' && pendingPaymentStyle,
                 isOverlay && 'shadow-lg scale-[1.02] ring-2 ring-blue-400 opacity-95 cursor-grabbing !transition-none',
@@ -226,6 +238,8 @@ export const ReservationCard: React.FC<Props> = ({
                     <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden px-0.5">
                         {isLoadingName ? (
                             <span className="text-[5px] opacity-70 italic">…</span>
+                        ) : showPlayerBubble ? (
+                            renderPlayerBubble(isCompact ? 12 : 14, isCompact ? 7 : 8)
                         ) : displayLabel ? (
                             <span className="uppercase font-bold text-[5.5px] leading-tight line-clamp-4 break-words">
                                 {displayLabel}
@@ -236,14 +250,34 @@ export const ReservationCard: React.FC<Props> = ({
                         <span className="text-[5px] opacity-90 leading-none shrink-0">{priceLabel}</span>
                     )}
                 </div>
+            ) : is90MinBooking ? (
+                <div className="relative z-10 flex flex-col flex-1 min-h-0 text-center justify-between py-px px-0.5">
+                    <span className="text-[7px] font-semibold leading-tight opacity-80 shrink-0">
+                        {reservation.startTime}
+                    </span>
+                    <div className="flex-1 flex items-center justify-center min-h-0 px-0.5">
+                        {isLoadingName ? (
+                            <span className="text-[5px] opacity-70 italic">…</span>
+                        ) : showPlayerBubble ? (
+                            renderPlayerBubble(16, 9)
+                        ) : displayLabel ? (
+                            <span className="uppercase font-bold text-[5.5px] leading-tight line-clamp-2 break-words">
+                                {displayLabel}
+                            </span>
+                        ) : null}
+                    </div>
+                    {priceLabel && (
+                        <span className="text-[7px] opacity-90 leading-tight shrink-0">{priceLabel}</span>
+                    )}
+                </div>
             ) : (
                 <>
                     {/* Time label — hidden for short bookings (≤60 min) on desktop */}
                     {!isShortBooking && (
                         <div className={clsx(
-                            "font-semibold text-center leading-none relative z-10 overflow-hidden opacity-80 pt-0.5",
+                            "font-semibold text-center leading-tight relative z-10 overflow-hidden opacity-80 pt-0.5 shrink-0",
                             isVeryShort && "hidden",
-                            isShort ? "text-[5px] truncate" : "text-[5px] leading-tight",
+                            isShort ? "text-[5px] truncate" : is120MinBooking ? "text-[7px] pb-0.5" : "text-[6px]",
                         )}>
                             {reservation.startTime}
                         </div>
@@ -265,13 +299,25 @@ export const ReservationCard: React.FC<Props> = ({
                                     Cargando...
                                 </span>
                             </div>
+                        ) : showPlayerBubble ? (
+                            renderPlayerBubble(isSmallZoom ? 20 : 16, isSmallZoom ? 11 : 9)
                         ) : displayLabel ? (
-                            <span className="uppercase font-bold leading-tight break-words whitespace-normal text-[5.5px]">
+                            <span className={clsx(
+                                "uppercase font-bold leading-tight break-words whitespace-normal text-[5.5px]",
+                                is120MinBooking && "my-0.5",
+                            )}>
                                 {displayLabel}
                             </span>
                         ) : null}
                         {priceLabel && (
-                            <span className="text-[5px] opacity-90 mt-0.5">{priceLabel}</span>
+                            <span
+                                className={clsx(
+                                    "opacity-90 leading-tight shrink-0",
+                                    is120MinBooking ? "text-[7px] mt-1" : "text-[6px] mt-0.5",
+                                )}
+                            >
+                                {priceLabel}
+                            </span>
                         )}
                     </div>
                 </>

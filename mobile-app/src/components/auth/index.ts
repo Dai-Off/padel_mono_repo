@@ -6,3 +6,4 @@ export { AuthButton } from './AuthButton';
 export { ErrorBanner } from './ErrorBanner';
 export { AuthFormLink } from './AuthFormLink';
 export { AuthFooter } from './AuthFooter';
+export { ExistingAccountModal } from './ExistingAccountModal';

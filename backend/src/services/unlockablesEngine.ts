@@ -158,21 +158,23 @@ function ruleMet(u: UnlockableRow, s: PlayerSignals): boolean {
   }
 }
 
-// Cooldown en memoria: evita reevaluar (queries pesadas) en cada lectura cuando
-// el perfil/modal disparan varias peticiones seguidas. El otorgado es idempotente
-// y on-read, así que basta evaluar una vez cada X segundos por jugador.
-const lastGrantAt = new Map<string, number>();
-const GRANT_COOLDOWN_MS = 15000;
-
 /**
- * Evalúa y otorga los desbloqueables que el jugador haya conseguido.
- * Devuelve los RECIÉN otorgados (con su info de catálogo) para el modal.
+ * Evalúa y otorga los desbloqueables que el jugador haya conseguido. Devuelve los
+ * RECIÉN otorgados (con su info de catálogo) para el modal. **Se otorga por EVENTO,
+ * NO on-read.**
+ *
+ * ⚠️ CONVENCIÓN (importante): llama a esta función tras CUALQUIER acción que cambie
+ * una señal de logro. Las lecturas (perfil / vitrina / unlocks-pending) NO deben
+ * re-evaluar: solo leen lo ya otorgado. Al crear un logro con una señal nueva, hay
+ * que añadir su disparador en la acción que cambia esa señal.
+ *
+ * Disparadores actuales (acción → señal):
+ *  - Cierre de partido matchmaking (`levelingService.runLevelingPipeline`) → matches / wins / win_streak / level.
+ *  - Fin de lección diaria (`routes/learningDailyLesson`) → daily_lesson_streak.
+ *  - Completar lección de curso (`routes/learningCourses`) → courses_completed.
+ *  - (Futuro) torneos ganados, compañeros distintos, etc. → añadir aquí su disparador.
  */
 export async function evaluateAndGrant(supabase: Supa, playerId: string): Promise<UnlockableRow[]> {
-  const now = Date.now();
-  if (now - (lastGrantAt.get(playerId) ?? 0) < GRANT_COOLDOWN_MS) return [];
-  lastGrantAt.set(playerId, now);
-
   const [{ data: catalog }, { data: owned }] = await Promise.all([
     supabase
       .from('unlockables')
@@ -202,4 +204,51 @@ export async function evaluateAndGrant(supabase: Supa, playerId: string): Promis
     console.error('[unlockablesEngine] grant upsert error:', error.message);
   }
   return toGrant;
+}
+
+/**
+ * Materializa (upsert) el unlockable de un curso a partir de `learning_courses`.
+ * Idempotente. Se llama al COMPLETAR el curso (crea el catálogo de cursos nuevos y
+ * mantiene el título sincronizado); los cursos existentes se siembran por migración.
+ * Best-effort: no lanza.
+ */
+export async function syncCourseUnlockable(supabase: Supa, courseId: string): Promise<void> {
+  const { data: course } = await supabase
+    .from('learning_courses')
+    .select('id, title, description, status')
+    .eq('id', courseId)
+    .maybeSingle();
+  if (!course) return;
+  const c = course as { id: string; title: string; description: string | null; status: string };
+  const { error } = await supabase.from('unlockables').upsert(
+    {
+      id: `course_${c.id}`,
+      kind: 'course',
+      title: c.title,
+      description: c.description,
+      rarity: 'common',
+      icon: 'book-outline',
+      unlock_type: 'course',
+      unlock_value: c.id,
+      sort_order: 1000,
+      is_active: c.status === 'active',
+    },
+    { onConflict: 'id' },
+  );
+  if (error) console.error('[syncCourseUnlockable]', error.message);
+}
+
+/**
+ * Otorga por evento a varios jugadores a la vez (p.ej. los 4 de un partido).
+ * Best-effort: nunca lanza (no debe romper el pipeline/evento). Fire-and-forget.
+ */
+export async function evaluateAndGrantForPlayers(supabase: Supa, playerIds: string[]): Promise<void> {
+  const ids = [...new Set(playerIds.filter((id) => typeof id === 'string' && id.length > 0))];
+  await Promise.all(
+    ids.map((id) =>
+      evaluateAndGrant(supabase, id).catch((e) =>
+        console.error('[evaluateAndGrantForPlayers]', id, e instanceof Error ? e.message : e),
+      ),
+    ),
+  );
 }

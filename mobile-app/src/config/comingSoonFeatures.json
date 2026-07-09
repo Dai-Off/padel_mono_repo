@@ -1,0 +1,26 @@
+{
+  "hidden": [
+    "community.news",
+    "profile.follow",
+    "profile.followCounts",
+    "courses.headerFilter",
+    "courses.nearMeFilter",
+    "courses.cancelEnrollment",
+    "clubDetail.competitionsTab",
+    "clubDetail.headerActions",
+    "clubDetail.dateSearch",
+    "clubDetail.favoritesAlerts",
+    "clubDetail.openMatchAlerts",
+    "clubDetail.contactActions",
+    "search.favoriteClub",
+    "wallet.clubMemberships",
+    "wallet.loadFunds",
+    "wallet.withdraw",
+    "crearPartido.externalCourt",
+    "crearPartido.infoButton",
+    "reservationDetail.contactActions",
+    "partidoDetail.contactActions",
+    "privateReservation.tournamentBadge",
+    "courses.bookingScheduleComingSoon"
+  ]
+}

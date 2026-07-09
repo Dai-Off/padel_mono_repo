@@ -111,6 +111,28 @@ function rawPlayerCount(b: {
     return b.organizer_player_id || b.players ? 1 : 0;
 }
 
+/** Jugadores anotados en partido abierto (match_players o participantes del booking). */
+export function countRegisteredOpenMatchPlayers(b: {
+    booking_participants?: Array<{ player_id?: string | null }>;
+    organizer_player_id?: string | null;
+    players?: unknown;
+    matches?: unknown;
+}): number {
+    const raw = b.matches;
+    const match = raw
+        ? (Array.isArray(raw) ? raw[0] : raw) as { match_players?: Array<{ player_id?: string | null }> }
+        : null;
+    const mps = match?.match_players;
+    if (Array.isArray(mps) && mps.length > 0) {
+        const ids = new Set<string>();
+        for (const mp of mps) {
+            if (mp?.player_id) ids.add(String(mp.player_id));
+        }
+        if (ids.size > 0) return ids.size;
+    }
+    return rawPlayerCount(b);
+}
+
 type RawBookingPaymentInput = {
     payment_transactions?: Array<{
         status?: string;
@@ -186,8 +208,11 @@ export function shouldShowRawBookingInGrid(
     const type = rawBookingType(b);
     const isMatchType = MATCH_GRID_FILL_TYPES.has(type);
 
-    // Mostrador: bloqueos, torneos, escuela, etc. Siempre visibles. Los partidos siguen las reglas de abajo.
-    if (b.source_channel === 'manual' && !isMatchType) return true;
+    // Mostrador: pista privada, pozo, bloqueos, escuela, etc. siempre visibles (también pendientes de cobro).
+    // Partidos abiertos públicos/privados desde mostrador siguen las reglas de visibilidad de abajo.
+    if (b.source_channel === 'manual' && !isPublicOpenMatchBooking(b) && !isPrivateMatchBooking(b)) {
+        return true;
+    }
 
     if (b.court_contention_status === 'competing' && !isPrivateMatchBooking(b)) {
         if (rawBookingFullyPaid(b) && (b.status === 'confirmed' || b.status === 'flat_rate')) return true;
@@ -216,7 +241,7 @@ export function shouldShowReservationInGrid(res: Reservation): boolean {
     const type = normalizeReservationTypeSlug(res.booking_type ?? res.reservation_type ?? 'standard');
     const isMatchType = MATCH_GRID_FILL_TYPES.has(type);
 
-    if (res.source_channel === 'manual' && !isMatchType) return true;
+    if (res.source_channel === 'manual' && type !== 'open_match') return true;
 
     if (type === 'open_match') {
         if (playerCount(res) >= PUBLIC_OPEN_MATCH_MIN_PLAYERS) return true;

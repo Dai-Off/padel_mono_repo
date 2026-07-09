@@ -455,6 +455,7 @@ export type PlayerSearchHit = {
 export async function searchPlayers(
   q: string,
   token: string | null | undefined,
+  opts?: { excludeSelf?: boolean },
 ): Promise<
   { ok: true; players: PlayerSearchHit[] } | { ok: false; error: string }
 > {
@@ -462,6 +463,7 @@ export async function searchPlayers(
     const url = new URL(`${API_URL}/players`);
     const trimmed = q.trim();
     if (trimmed.length > 0) url.searchParams.set("q", trimmed);
+    if (opts?.excludeSelf) url.searchParams.set("exclude_self", "true");
     const res = await fetch(url.toString(), {
       headers: {
         "Content-Type": "application/json",

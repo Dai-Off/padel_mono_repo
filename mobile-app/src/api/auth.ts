@@ -81,6 +81,23 @@ export async function checkUsernameAvailable(
   }
 }
 
+export async function checkEmailAvailable(
+  email: string,
+): Promise<{ ok: true; available: boolean } | { ok: false; error: string }> {
+  try {
+    const url = new URL(`${API_URL}/auth/check-email`);
+    url.searchParams.set('email', email.trim().toLowerCase());
+    const res = await fetch(url.toString());
+    const json = (await res.json()) as { ok?: boolean; available?: boolean; error?: string };
+    if (!res.ok || !json.ok) {
+      return { ok: false, error: json.error ?? 'No se pudo comprobar el email' };
+    }
+    return { ok: true, available: json.available === true };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
 export type ForgotPasswordResponse = {
   ok: boolean;
   message?: string;
