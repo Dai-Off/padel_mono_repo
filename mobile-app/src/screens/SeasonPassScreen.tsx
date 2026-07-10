@@ -734,7 +734,7 @@ export function SeasonPassScreen({ onBack }: Props) {
   }, [session?.access_token, rerollTarget, rerolling, load, t]);
 
   const spPer = me?.sp_per_level ?? DEFAULT_SP_PER_LEVEL;
-  const levelMax = me?.level_max ?? 100;
+  const levelMax = me?.level_max ?? 50;
   const level = me?.level ?? 1;
   const sp = me?.sp ?? 0;
   const into = me?.into_level ?? 0;

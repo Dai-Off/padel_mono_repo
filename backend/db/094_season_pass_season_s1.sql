@@ -21,9 +21,12 @@ alter table public.season_pass_seasons
 comment on column public.season_pass_seasons.boost_cap is
   'Global cap on stacked SP multipliers: sp_final = sp_base * clamp(1 + Σ bonuses, 1, boost_cap).';
 
+-- Temporada de 45 días (decidido 2026-07-09): inicio 2026-07-01 → fin 2026-08-15,
+-- 50 niveles (antes 100). max_level es data-driven: el track y el hero se ajustan solos.
 update public.season_pass_seasons
-set ends_at = '2026-09-01T00:00:00Z',
-    subtitle = 'Jun – Sep 2026',
+set max_level = 50,
+    ends_at = '2026-08-15T00:00:00Z',
+    subtitle = 'Jul – Ago 2026',
     updated_at = now()
 where slug = 's1';
 
