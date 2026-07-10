@@ -32,6 +32,7 @@ const KIND_LABEL: Record<string, string> = {
   trophy: 'Trofeo',
   sp: 'Season Points',
   sp_boost: 'Boost de SP',
+  reroll_token: 'Token de cambio',
 };
 
 /** Render fiel del cosmético/recompensa — tal como se verá en el perfil. */
@@ -104,6 +105,18 @@ function BigReward({
         style={styles.spCoin}
       >
         <Text style={{ fontSize: 40 }}>🚀</Text>
+      </LinearGradient>
+    );
+  }
+  if (d.kind === 'reroll_token') {
+    return (
+      <LinearGradient
+        colors={['#F8A94E', '#E95F32']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.spCoin}
+      >
+        <Ionicons name="dice" size={44} color="#fff" />
       </LinearGradient>
     );
   }

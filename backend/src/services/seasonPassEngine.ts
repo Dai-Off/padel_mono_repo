@@ -14,6 +14,11 @@ import {
   MissionDefRow,
   SeasonPassEvalContext,
 } from './seasonPassEvaluators';
+import {
+  consumeRerollToken,
+  getRerollTokenBalance,
+  refundRerollToken,
+} from './seasonPassRerollTokens';
 
 const DAILY_DRAW_COUNT = 3; // rotating dailies per player per day (PDF §3.1)
 const WEEKLY_ACTIVE_COUNT = 6; // community-wide weeklies per ISO week (PDF §3.1)
@@ -73,8 +78,11 @@ export type SeasonPassDelta = {
 export type SeasonPassState = {
   missions: SeasonPassMissionPayload[];
   pending_celebrations: SeasonPassPendingCelebration[];
-  /** Reroll v1: 1 gratis por día (diarias del pool) y 1 por semana (semanales). */
-  reroll: { daily_available: boolean; weekly_available: boolean };
+  /**
+   * Reroll: 1 gratis por día (diarias del pool) y 1 por semana (semanales).
+   * `tokens` = rerolls extra disponibles (consumibles) una vez agotado el gratis.
+   */
+  reroll: { daily_available: boolean; weekly_available: boolean; tokens: number };
 };
 
 type AssignmentRow = {
@@ -442,12 +450,15 @@ export async function buildSeasonPassState(
         row.period_start === periods[periodKind].period_start
     );
 
+  const tokens = await getRerollTokenBalance(playerId, season.slug);
+
   return {
     missions,
     pending_celebrations,
     reroll: {
       daily_available: !rerollUsed('daily'),
       weekly_available: !rerollUsed('weekly'),
+      tokens,
     },
   };
 }
@@ -560,15 +571,20 @@ export async function rerollMission(
   const samePeriodRows = (periodRows ?? []).filter(
     (r) => defsById.get(String(r.mission_id))?.period === def.period
   );
-  if (samePeriodRows.some((r) => r.rerolled_to !== null)) {
-    return { ok: false, code: 'limit_reached' }; // v1: one free reroll per period
-  }
 
   const assignedIds = new Set(samePeriodRows.map((r) => String(r.mission_id)));
   const candidates = defs
     .filter((d) => d.assignment === def.assignment && !assignedIds.has(d.id))
     .sort((a, b) => a.slug.localeCompare(b.slug));
   if (candidates.length === 0) return { ok: false, code: 'no_candidates' };
+
+  // Cuota: 1 reroll gratis por periodo. Agotado, un reroll extra consume 1 token.
+  const freeRerollUsed = samePeriodRows.some((r) => r.rerolled_to !== null);
+  let consumedTokenId: string | null = null;
+  if (freeRerollUsed) {
+    consumedTokenId = await consumeRerollToken(playerId, season.slug, assignmentId);
+    if (!consumedTokenId) return { ok: false, code: 'limit_reached' };
+  }
 
   const [replacement] = drawDeterministic(
     candidates,
@@ -584,7 +600,10 @@ export async function rerollMission(
     .is('rerolled_to', null)
     .is('completed_at', null)
     .select('id');
-  if (claimErr || !claimed || claimed.length === 0) return { ok: false, code: 'conflict' };
+  if (claimErr || !claimed || claimed.length === 0) {
+    if (consumedTokenId) await refundRerollToken(consumedTokenId);
+    return { ok: false, code: 'conflict' };
+  }
 
   const { error: insErr } = await supabase
     .from('player_season_pass_missions')

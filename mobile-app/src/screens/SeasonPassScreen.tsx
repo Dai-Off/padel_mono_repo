@@ -336,6 +336,17 @@ function RewardThumb({
         </Text>
       </View>
     );
+  } else if (d.kind === 'reroll_token') {
+    // Token de reroll: dado + cantidad.
+    const n = d.label.replace(/[^0-9]/g, '') || '1';
+    inner = (
+      <View style={{ alignItems: 'center' }}>
+        <Ionicons name="dice" size={16} color={ACCENT} />
+        <Text style={{ fontSize: 8, fontWeight: '800', color: ACCENT }} numberOfLines={1}>
+          {`×${n}`}
+        </Text>
+      </View>
+    );
   } else {
     // trophy / badge / title: preset de icono del catálogo con color de rareza.
     inner = <Ionicons name={resolveUnlockableIcon(d.icon)} size={18} color={rarity.color} />;
@@ -1217,7 +1228,9 @@ export function SeasonPassScreen({ onBack }: Props) {
                     : m.period === 'weekly'
                       ? me?.reroll?.weekly_available === true
                       : false;
-                const canReroll = (m.rerollable ?? false) && quotaAvailable && !rerolling;
+                const tokensLeft = me?.reroll?.tokens ?? 0;
+                const canReroll =
+                  (m.rerollable ?? false) && (quotaAvailable || tokensLeft > 0) && !rerolling;
                 return (
                   <MissionRow
                     key={m.id}
@@ -1299,9 +1312,20 @@ export function SeasonPassScreen({ onBack }: Props) {
                 {t('alerts.seasonPass.rerollMsg', { title: rerollTarget?.title ?? '' })}
               </Text>
               <Text style={styles.rerollModalQuota}>
-                {rerollTarget?.period === 'weekly'
-                  ? t('alerts.seasonPass.rerollQuotaWeekly')
-                  : t('alerts.seasonPass.rerollQuotaDaily')}
+                {(() => {
+                  const freeAvailable =
+                    rerollTarget?.period === 'weekly'
+                      ? me?.reroll?.weekly_available === true
+                      : me?.reroll?.daily_available === true;
+                  if (rerollTarget && !freeAvailable) {
+                    return t('alerts.seasonPass.rerollTokenMsg', {
+                      count: me?.reroll?.tokens ?? 0,
+                    });
+                  }
+                  return rerollTarget?.period === 'weekly'
+                    ? t('alerts.seasonPass.rerollQuotaWeekly')
+                    : t('alerts.seasonPass.rerollQuotaDaily');
+                })()}
               </Text>
               {rerollErr ? <Text style={styles.rerollModalErr}>{rerollErr}</Text> : null}
               <Pressable

@@ -1,6 +1,7 @@
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { SeasonPassSeasonRow } from './seasonPassSeasonConfig';
 import { addSeasonPassSp, computeSeasonPass, getOrCreateSeasonPassRow } from './seasonPassService';
+import { grantRerollTokens } from './seasonPassRerollTokens';
 
 export type SeasonPassRewardTier = 'free' | 'elite';
 
@@ -9,10 +10,11 @@ export type SeasonPassRewardRow = {
   season_slug: string;
   level: number;
   tier: SeasonPassRewardTier;
-  reward_type: 'unlockable' | 'sp_boost' | 'sp';
+  reward_type: 'unlockable' | 'sp_boost' | 'sp' | 'reroll_token';
   unlockable_id: string | null;
   boost_config: Record<string, unknown> | null;
   sp_amount: number | null;
+  reroll_tokens: number | null;
   display: Record<string, unknown>;
   sort_order: number;
   unlockable: {
@@ -53,7 +55,7 @@ export async function loadSeasonRewards(seasonSlug: string): Promise<SeasonPassR
   const { data, error } = await supabase
     .from('season_pass_rewards')
     .select(
-      'id, season_slug, level, tier, reward_type, unlockable_id, boost_config, sp_amount, display, sort_order, unlockable:unlockables(id, kind, title, rarity, icon, animation_type, style, colors)'
+      'id, season_slug, level, tier, reward_type, unlockable_id, boost_config, sp_amount, reroll_tokens, display, sort_order, unlockable:unlockables(id, kind, title, rarity, icon, animation_type, style, colors)'
     )
     .eq('season_slug', seasonSlug)
     .order('level', { ascending: true })
@@ -168,6 +170,8 @@ export async function grantLevelRewards(
           });
           if (boostErr) console.warn('[season-pass rewards] boost grant failed:', boostErr.message);
         }
+      } else if (r.reward_type === 'reroll_token' && r.reroll_tokens) {
+        await grantRerollTokens(playerId, season.slug, r.reroll_tokens, r.id);
       }
 
       granted.push({

@@ -221,6 +221,7 @@ export const alerts: AlertsTranslationKeys = {
     rerollMsg: '¿Sustituir "{title}" por otra misión al azar?',
     rerollQuotaDaily: 'Solo puedes hacer 1 cambio al día.',
     rerollQuotaWeekly: 'Solo puedes hacer 1 cambio a la semana.',
+    rerollTokenMsg: 'Ya gastaste el cambio gratis. Usarás 1 token ({count} restantes).',
     rerollConfirm: 'Cambiar',
     rerollCancel: 'Cancelar',
     rerollFail: 'No se pudo cambiar la misión. Inténtalo más tarde.',

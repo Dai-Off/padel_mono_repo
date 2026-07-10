@@ -160,7 +160,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 23, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
   ('s1', 24, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
   ('s1', 25, 'free', 'unlockable', 'sp_t_competidor', null, '{}'),        -- hito
-  ('s1', 26, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
+  -- 26 free -> reroll_token (095)
   ('s1', 27, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
   ('s1', 28, 'free', 'unlockable', 'sp_t_habitual', null, '{}'),
   ('s1', 29, 'free', 'sp', null, 450, '{"label":"+450 SP"}'),
@@ -177,7 +177,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 40, 'free', 'unlockable', 'sp_t_guerrero', null, '{}'),          -- hito grande
   ('s1', 41, 'free', 'sp', null, 550, '{"label":"+550 SP"}'),
   ('s1', 42, 'free', 'sp', null, 550, '{"label":"+550 SP"}'),
-  ('s1', 43, 'free', 'sp', null, 550, '{"label":"+550 SP"}'),
+  -- 43 free -> reroll_token (095)
   ('s1', 44, 'free', 'sp', null, 600, '{"label":"+600 SP"}'),
   ('s1', 45, 'free', 'unlockable', 'sp_t_alma', null, '{}'),              -- hito · legendary
   ('s1', 46, 'free', 'sp', null, 600, '{"label":"+600 SP"}'),
@@ -201,7 +201,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 11, 'elite', 'sp', null, 500, '{"label":"+500 SP"}'),
   ('s1', 12, 'elite', 'unlockable', 'sp_t_muro', null, '{}'),
   ('s1', 13, 'elite', 'unlockable', 'sp_t_metralla', null, '{}'),
-  ('s1', 14, 'elite', 'sp', null, 500, '{"label":"+500 SP"}'),
+  -- 14 elite -> reroll_token (095)
   ('s1', 15, 'elite', 'unlockable', 'sp_f_chispa', null, '{}'),           -- hito
   ('s1', 16, 'elite', 'sp', null, 550, '{"label":"+550 SP"}'),
   ('s1', 17, 'elite', 'unlockable', 'sp_t_estrella', null, '{}'),
@@ -219,7 +219,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 29, 'elite', 'sp', null, 700, '{"label":"+700 SP"}'),
   ('s1', 30, 'elite', 'unlockable', 's1_corona_llamas', null, '{}'),      -- hito grande · THEME
   ('s1', 31, 'elite', 'sp', null, 800, '{"label":"+800 SP"}'),
-  ('s1', 32, 'elite', 'sp', null, 800, '{"label":"+800 SP"}'),
+  -- 32 elite -> reroll_token (095)
   ('s1', 33, 'elite', 'unlockable', 'sp_t_resiliente', null, '{}'),
   ('s1', 34, 'elite', 'sp', null, 800, '{"label":"+800 SP"}'),
   ('s1', 35, 'elite', 'unlockable', 'sp_f_fatuo', null, '{}'),            -- hito
@@ -230,7 +230,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 40, 'elite', 'unlockable', 'sp_f_fenix', null, '{}'),            -- hito grande · THEME
   ('s1', 41, 'elite', 'sp', null, 1000, '{"label":"+1000 SP"}'),
   ('s1', 42, 'elite', 'unlockable', 'sp_b_imparable', null, '{}'),
-  ('s1', 43, 'elite', 'sp', null, 1000, '{"label":"+1000 SP"}'),
+  -- 43 elite -> reroll_token (095)
   ('s1', 44, 'elite', 'unlockable', 'sp_b_semifinal', null, '{}'),
   ('s1', 45, 'elite', 'unlockable', 'sp_t_mente', null, '{}'),            -- hito · legendary
   -- 46 elite -> booster (093)

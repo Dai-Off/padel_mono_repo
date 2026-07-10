@@ -209,6 +209,7 @@ export interface AlertsTranslationKeys {
     rerollMsg: string;
     rerollQuotaDaily: string;
     rerollQuotaWeekly: string;
+    rerollTokenMsg: string;
     rerollConfirm: string;
     rerollCancel: string;
     rerollFail: string;

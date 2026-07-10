@@ -212,6 +212,7 @@ export const alerts: AlertsTranslationKeys = {
     rerollMsg: '要將「{title}」換成另一個隨機任務嗎？',
     rerollQuotaDaily: '每日只可更換 1 次。',
     rerollQuotaWeekly: '每週只可更換 1 次。',
+    rerollTokenMsg: '已用完免費更換。將使用 1 個代幣（剩餘 {count} 個）。',
     rerollConfirm: '更換',
     rerollCancel: '取消',
     rerollFail: '無法更換任務，請稍後再試。',

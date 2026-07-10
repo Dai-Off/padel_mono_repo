@@ -120,7 +120,7 @@ export type SeasonPassMeOk = {
   mission_period_tabs?: unknown;
   missions?: SeasonPassMissionDto[];
   pending_celebrations?: SeasonPassPendingCelebrationDto[];
-  reroll?: { daily_available: boolean; weekly_available: boolean };
+  reroll?: { daily_available: boolean; weekly_available: boolean; tokens?: number };
   sp_how?: SeasonPassSpHowRowDto[];
   track_levels?: number[];
   track_rewards?: SeasonPassTrackLevelDto[];
