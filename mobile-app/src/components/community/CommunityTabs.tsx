@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTranslation } from '../../i18n';
+import { isFeatureHidden } from '../../config';
 
 export type CommunityTab = 'feed' | 'reels' | 'noticias';
 
@@ -14,7 +15,9 @@ export const CommunityTabs: React.FC<CommunityTabsProps> = ({ activeTab, onTabCh
   const tabs: { id: CommunityTab; label: string }[] = [
     { id: 'feed', label: t('community.tabsPosts') },
     { id: 'reels', label: t('community.tabsClips') },
-    { id: 'noticias', label: t('community.tabsNews') },
+    ...(isFeatureHidden('community.news')
+      ? []
+      : [{ id: 'noticias' as CommunityTab, label: t('community.tabsNews') }]),
   ];
 
   return (

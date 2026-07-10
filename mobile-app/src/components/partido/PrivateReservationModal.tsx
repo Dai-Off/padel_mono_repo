@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
 import { useTranslation } from '../../i18n';
+import { isFeatureHidden } from '../../config';
 import { OpenMatchPriceBreakdown } from './OpenMatchPriceBreakdown';
 
 const ORANGE = '#F18F34';
@@ -132,9 +133,11 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
             <View style={styles.body}>
               <View style={styles.badgeRow}>
                 <View style={styles.badge}>
-                  <Text style={styles.badgeEmoji}>{kind === 'tournament' ? '🏆' : '🎾'}</Text>
+                  <Text style={styles.badgeEmoji}>
+                    {kind === 'tournament' && !isFeatureHidden('privateReservation.tournamentBadge') ? '🏆' : '🎾'}
+                  </Text>
                   <Text style={[styles.badgeText, androidLabel({})]}>
-                    {kind === 'tournament'
+                    {kind === 'tournament' && !isFeatureHidden('privateReservation.tournamentBadge')
                       ? t('common.comingSoon')
                       : kind === 'reservation'
                         ? t('partidos.yourReservation')

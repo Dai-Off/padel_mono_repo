@@ -59,6 +59,7 @@ import {
   courtReservationSlotStepMinutes,
   type CourtReservationDuration,
 } from "../lib/courtReservationDuration";
+import { isFeatureHidden } from "../config";
 
 type ClubDetailScreenProps = {
   court: SearchCourtResult;
@@ -372,6 +373,13 @@ export function ClubDetailScreen({
   onPartidoPress,
 }: ClubDetailScreenProps) {
   const { t, locale } = useTranslation();
+  const visibleTabs = useMemo(
+    () =>
+      isFeatureHidden("clubDetail.competitionsTab")
+        ? TAB_IDS.filter((tab) => tab !== "competitions")
+        : TAB_IDS,
+    [],
+  );
   const localeBundle = useMemo(() => getLocaleBundle(locale), [locale]);
   const dateLocale = formatLocale(locale);
   const { session } = useAuth();
@@ -912,24 +920,26 @@ export function ClubDetailScreen({
         >
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </Pressable>
-        <View style={styles.headerRight}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.headerButton,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Ionicons name="notifications-outline" size={20} color="#fff" />
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [
-              styles.headerButton,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Ionicons name="heart-outline" size={20} color="#fff" />
-          </Pressable>
-        </View>
+        {!isFeatureHidden("clubDetail.headerActions") && (
+          <View style={styles.headerRight}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.headerButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="notifications-outline" size={20} color="#fff" />
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.headerButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="heart-outline" size={20} color="#fff" />
+            </Pressable>
+          </View>
+        )}
       </View>
 
       <ScrollView
@@ -938,7 +948,7 @@ export function ClubDetailScreen({
         style={styles.tabsScroll}
         contentContainerStyle={styles.tabsContent}
       >
-        {TAB_IDS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <Pressable
             key={tab}
             onPress={() => setActiveTab(tab)}
@@ -1047,9 +1057,11 @@ export function ClubDetailScreen({
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.datePickerRow}
               >
-                <Pressable style={styles.dateSearchBtn}>
-                  <Ionicons name="search-outline" size={16} color="#6b7280" />
-                </Pressable>
+                {!isFeatureHidden("clubDetail.dateSearch") && (
+                  <Pressable style={styles.dateSearchBtn}>
+                    <Ionicons name="search-outline" size={16} color="#6b7280" />
+                  </Pressable>
+                )}
                 {dateOptions.map((opt, i) => (
                   <Pressable
                     key={i}
@@ -1181,31 +1193,33 @@ export function ClubDetailScreen({
                 </Text>
               )}
             </View>
-            <View style={styles.section}>
-              <View style={styles.alertHeader}>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.alertTitleRow}>
-                    <Ionicons
-                      name="notifications-outline"
-                      size={16}
-                      color="#f97316"
-                    />
-                    <Text style={styles.alertSectionTitle}>
-                      {t("alerts.favorites.title")}
+            {!isFeatureHidden("clubDetail.favoritesAlerts") && (
+              <View style={styles.section}>
+                <View style={styles.alertHeader}>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.alertTitleRow}>
+                      <Ionicons
+                        name="notifications-outline"
+                        size={16}
+                        color="#f97316"
+                      />
+                      <Text style={styles.alertSectionTitle}>
+                        {t("alerts.favorites.title")}
+                      </Text>
+                    </View>
+                    <Text style={styles.alertSub}>
+                      {t("common.comingSoonSection")}
                     </Text>
                   </View>
-                  <Text style={styles.alertSub}>
-                    {t("common.comingSoonSection")}
-                  </Text>
+                  <Switch
+                    value={alertsEnabled}
+                    onValueChange={setAlertsEnabled}
+                    trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
+                    thumbColor="#fff"
+                  />
                 </View>
-                <Switch
-                  value={alertsEnabled}
-                  onValueChange={setAlertsEnabled}
-                  trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
-                  thumbColor="#fff"
-                />
               </View>
-            </View>
+            )}
             <View style={styles.section}>
               <Text style={styles.reservaTitle}>{t("partidos.yourReservation")}</Text>
               <Text style={styles.reservaSub}>
@@ -1316,39 +1330,41 @@ export function ClubDetailScreen({
                 </View>
               </View>
             )}
-            <View style={styles.section}>
-              <View style={styles.partidosAlertHeader}>
-                <Ionicons
-                  name="notifications-outline"
-                  size={16}
-                  color="#f97316"
-                />
-                <Text style={styles.partidosAlertTitle}>
-                  {t("alerts.favorites.title")}
-                </Text>
-              </View>
-              <Text style={styles.partidosAlertDesc}>
-                {t("common.comingSoonSection")}
-              </Text>
-              <View style={styles.partidosAlertRow}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.manageAlertsBtn,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.manageAlertsText}>
-                    {t("common.comingSoon")}
+            {!isFeatureHidden("clubDetail.openMatchAlerts") && (
+              <View style={styles.section}>
+                <View style={styles.partidosAlertHeader}>
+                  <Ionicons
+                    name="notifications-outline"
+                    size={16}
+                    color="#f97316"
+                  />
+                  <Text style={styles.partidosAlertTitle}>
+                    {t("alerts.favorites.title")}
                   </Text>
-                </Pressable>
-                <Switch
-                  value={partidosAlertsEnabled}
-                  onValueChange={setPartidosAlertsEnabled}
-                  trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
-                  thumbColor="#fff"
-                />
+                </View>
+                <Text style={styles.partidosAlertDesc}>
+                  {t("common.comingSoonSection")}
+                </Text>
+                <View style={styles.partidosAlertRow}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.manageAlertsBtn,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.manageAlertsText}>
+                      {t("common.comingSoon")}
+                    </Text>
+                  </Pressable>
+                  <Switch
+                    value={partidosAlertsEnabled}
+                    onValueChange={setPartidosAlertsEnabled}
+                    trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
+                    thumbColor="#fff"
+                  />
+                </View>
               </View>
-            </View>
+            )}
           </>
         ) : activeTab === "competitions" ? (
           <>
@@ -1441,38 +1457,42 @@ export function ClubDetailScreen({
                   </Text>
                 </View>
               </View>
-              <View style={styles.actionsRow}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.actionButton,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Ionicons name="navigate" size={20} color="#fff" />
-                  <Text style={styles.actionLabel}>{t("alerts.location.title")}</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.actionButtonOutline,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Ionicons name="globe-outline" size={20} color="#6b7280" />
-                  <Text style={styles.actionLabelOutline}>{t("alerts.web.title")}</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.actionButtonOutline,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Ionicons name="call-outline" size={20} color="#6b7280" />
-                  <Text style={styles.actionLabelOutline}>{t("alerts.phone.title")}</Text>
-                </Pressable>
-              </View>
-              <View style={styles.mapPlaceholder}>
-                <Text style={styles.mapPlaceholderText}>{t("alerts.location.title")}</Text>
-              </View>
+              {!isFeatureHidden("clubDetail.contactActions") && (
+                <>
+                  <View style={styles.actionsRow}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.actionButton,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Ionicons name="navigate" size={20} color="#fff" />
+                      <Text style={styles.actionLabel}>{t("alerts.location.title")}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.actionButtonOutline,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Ionicons name="globe-outline" size={20} color="#6b7280" />
+                      <Text style={styles.actionLabelOutline}>{t("alerts.web.title")}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.actionButtonOutline,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Ionicons name="call-outline" size={20} color="#6b7280" />
+                      <Text style={styles.actionLabelOutline}>{t("alerts.phone.title")}</Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.mapPlaceholder}>
+                    <Text style={styles.mapPlaceholderText}>{t("alerts.location.title")}</Text>
+                  </View>
+                </>
+              )}
             </View>
 
             <View style={styles.section}>

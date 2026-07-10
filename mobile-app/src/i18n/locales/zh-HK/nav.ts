@@ -7,6 +7,7 @@ export const nav: NavTranslationKeys = {
   tabTorneos: '錦標賽',
   tabPartidos: '球局',
   tabPerfil: '個人',
+  tabCursos: '課程',
   openMenu: '打開選單',
   closeMenu: '關閉選單',
   messages: '訊息',

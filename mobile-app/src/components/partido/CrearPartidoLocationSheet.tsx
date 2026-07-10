@@ -37,6 +37,7 @@ import { clubLocalDateTimeToUtcIso, setClubTimeZone } from '../../lib/clubTimeZo
 import { getSlotPrice, type SlotPriceResult } from '../../api/tariffs';
 import { fetchMyPlayerId } from '../../api/players';
 import { formatLocale, useTranslation, type AppLocale } from '../../i18n';
+import { isFeatureHidden } from '../../config';
 
 export type LocationType = 'club_wematch' | 'pista_externa';
 
@@ -640,17 +641,19 @@ export function CrearPartidoLocationSheet({
               step !== 'configurar' &&
               !(step === 'clubs' && presentation === 'fullscreen') && (
             <View style={styles.headerActions}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.iconButton,
-                  matchFlowDark && styles.iconButtonLocation,
-                  pressed && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={t('partidos.detailTabInfo')}
-              >
-                <Ionicons name="information-circle-outline" size={20} color="#9ca3af" />
-              </Pressable>
+              {!isFeatureHidden('crearPartido.infoButton') && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.iconButton,
+                    matchFlowDark && styles.iconButtonLocation,
+                    pressed && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('partidos.detailTabInfo')}
+                >
+                  <Ionicons name="information-circle-outline" size={20} color="#9ca3af" />
+                </Pressable>
+              )}
               <Pressable
                 onPress={onClose}
                 style={({ pressed }) => [
@@ -1177,46 +1180,48 @@ export function CrearPartidoLocationSheet({
             </View>
           </Pressable>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.optionCard,
-              selected === 'pista_externa' && step !== 'location' && styles.optionSelected,
-              step === 'location' && styles.optionCardLocation,
-              step === 'location' && styles.optionCardLocationSecond,
-              selected === 'pista_externa' && step === 'location' && styles.optionCardLocationSelected,
-              styles.optionCardDisabled,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setSelected('pista_externa')}
-            disabled={true}
-            accessibilityRole="button"
-            accessibilityState={{ selected: selected === 'pista_externa' }}
-          >
-            <View
-              style={[
-                styles.optionIconWrap,
-                step !== 'location' && styles.optionIconGray,
-                step === 'location' &&
-                  (selected === 'pista_externa'
-                    ? styles.optionIconWrapLocationSelected
-                    : styles.optionIconWrapLocationNeutral),
+          {!isFeatureHidden('crearPartido.externalCourt') && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.optionCard,
+                selected === 'pista_externa' && step !== 'location' && styles.optionSelected,
+                step === 'location' && styles.optionCardLocation,
+                step === 'location' && styles.optionCardLocationSecond,
+                selected === 'pista_externa' && step === 'location' && styles.optionCardLocationSelected,
+                styles.optionCardDisabled,
+                pressed && styles.pressed,
               ]}
+              onPress={() => setSelected('pista_externa')}
+              disabled={true}
+              accessibilityRole="button"
+              accessibilityState={{ selected: selected === 'pista_externa' }}
             >
-              <Ionicons
-                name="location-outline"
-                size={20}
-                color={step === 'location' ? '#9ca3af' : '#6b7280'}
-              />
-            </View>
-            <View style={styles.optionBody}>
-              <Text style={[styles.optionTitle, step === 'location' && styles.optionTitleLocation]}>
-                {t('partidos.createExternalCourtTitle')}
-              </Text>
-              <Text style={[styles.optionDesc, step === 'location' && styles.optionDescLocation]}>
-                {t('partidos.createExternalCourtSub')}
-              </Text>
-            </View>
-          </Pressable>
+              <View
+                style={[
+                  styles.optionIconWrap,
+                  step !== 'location' && styles.optionIconGray,
+                  step === 'location' &&
+                    (selected === 'pista_externa'
+                      ? styles.optionIconWrapLocationSelected
+                      : styles.optionIconWrapLocationNeutral),
+                ]}
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={20}
+                  color={step === 'location' ? '#9ca3af' : '#6b7280'}
+                />
+              </View>
+              <View style={styles.optionBody}>
+                <Text style={[styles.optionTitle, step === 'location' && styles.optionTitleLocation]}>
+                  {t('partidos.createExternalCourtTitle')}
+                </Text>
+                <Text style={[styles.optionDesc, step === 'location' && styles.optionDescLocation]}>
+                  {t('partidos.createExternalCourtSub')}
+                </Text>
+              </View>
+            </Pressable>
+          )}
 
           <Pressable
             style={({ pressed }) => [

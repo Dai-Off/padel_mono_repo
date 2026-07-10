@@ -27,6 +27,7 @@ import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
 import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
 import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { RARITY_CONFIG } from '../design/rarity';
+import { isFeatureHidden } from '../config';
 
 type PublicProfileScreenProps = {
   playerId: string;
@@ -219,23 +220,29 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
                 <Text style={styles.statValue}>{profile.matchesPlayedTotal ?? 0}</Text>
                 <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
               </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
-              </View>
+              {!isFeatureHidden('profile.followCounts') && (
+                <>
+                  <View style={styles.statDivider} />
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>--</Text>
+                    <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
+                  </View>
+                  <View style={styles.statDivider} />
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>--</Text>
+                    <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
+                  </View>
+                </>
+              )}
             </View>
 
             {/* Acciones: Seguir (placeholder) + Mensaje (chat) */}
             <View style={styles.actionButtonsRow}>
-              <Pressable style={styles.followBtn} onPress={() => {}}>
-                <Text style={styles.followText}>{t('profile.followBtn')}</Text>
-              </Pressable>
+              {!isFeatureHidden('profile.follow') && (
+                <Pressable style={styles.followBtn} onPress={() => {}}>
+                  <Text style={styles.followText}>{t('profile.followBtn')}</Text>
+                </Pressable>
+              )}
               <Pressable style={styles.messageBtn} onPress={() => onChatPress?.(profile.id, displayName)}>
                 <Ionicons name="chatbubble-outline" size={14} color="#F18F34" />
                 <Text style={styles.messageText}>{t('profile.messageBtn')}</Text>

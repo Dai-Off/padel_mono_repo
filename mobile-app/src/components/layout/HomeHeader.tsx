@@ -8,6 +8,7 @@ type HomeHeaderProps = {
   onMessagesPress?: () => void;
   onNotificationsPress?: () => void;
   onGroupsPress?: () => void;
+  onProfilePress?: () => void;
 };
 
 /**
@@ -18,6 +19,7 @@ export function HomeHeader({
   onMessagesPress,
   onNotificationsPress,
   onGroupsPress,
+  onProfilePress,
 }: HomeHeaderProps) {
   const { t } = useTranslation();
   const { width: windowWidth } = useWindowDimensions();
@@ -49,6 +51,14 @@ export function HomeHeader({
         <View style={styles.spacer} />
 
         <View style={[styles.actions, narrow && styles.actionsCompact]}>
+          <Pressable
+            onPress={onProfilePress}
+            style={({ pressed }) => [styles.iconBtn, narrow && styles.iconBtnCompact, pressed && styles.iconBtnPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={t('nav.userProfileA11y')}
+          >
+            <Ionicons name="person-circle-outline" size={iconSize + 2} color="#fff" />
+          </Pressable>
           <Pressable
             onPress={onMessagesPress}
             style={({ pressed }) => [styles.iconBtn, narrow && styles.iconBtnCompact, pressed && styles.iconBtnPressed]}

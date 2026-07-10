@@ -5,6 +5,7 @@ export interface NavTranslationKeys {
   tabTorneos: string;
   tabPartidos: string;
   tabPerfil: string;
+  tabCursos: string;
   openMenu: string;
   closeMenu: string;
   messages: string;
