@@ -32,42 +32,30 @@ comment on table public.player_sp_boosts is
   'Consumable SP boosters (pass rewards). Active = consumed_at null and not expired; lesson_streak/catch_up derive at runtime.';
 
 -- ────────────────────────────────────────────────────────────
--- Booster rewards in the S1 track (PDF: +30/+50/+60%, mostly Elite lane).
--- They fill levels the 092 seed left empty. Auto-activate on grant with a
--- 48-72h window. Product knob — tune from SQL.
+-- Booster rewards in the S1 track (50 niveles). Rellenan los huecos que 092
+-- reserva (free 14/34/49, elite 8/19/27/38/46) — una recompensa por celda, sin
+-- colision con cosmeticos/SP. Auto-activan al otorgarse con ventana 24-72h.
+-- Re-seed idempotente: borra los boosters de s1 y re-siembra (limpia niveles
+-- >50 de temporadas anteriores). Product knob — tune from SQL.
 -- ────────────────────────────────────────────────────────────
 
--- Free lane: steady booster cadence (~every 10 levels) — small ones early so
--- everyone tries the mechanic, two bigger ones near the end of the track.
+delete from public.season_pass_rewards
+  where season_slug = 's1' and reward_type = 'sp_boost';
+
+-- Free lane: cadencia suave — uno pequeno pronto (prueba la mecanica), luego
+-- crece hacia el final del track.
 insert into public.season_pass_rewards (season_slug, level, tier, reward_type, boost_config, display, sort_order) values
-  ('s1', 12, 'free', 'sp_boost', '{"bonus":0.15,"expires_hours":24}', '{"icon":"🚀","label":"+15% SP · 24h"}', 0),
-  ('s1', 22, 'free', 'sp_boost', '{"bonus":0.15,"expires_hours":24}', '{"icon":"🚀","label":"+15% SP · 24h"}', 0),
-  ('s1', 32, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 45, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 55, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 65, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 80, 'free', 'sp_boost', '{"bonus":0.50,"expires_hours":48}', '{"icon":"🚀","label":"+50% SP · 48h"}', 0),
-  ('s1', 88, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 95, 'free', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0)
-on conflict (season_slug, level, tier, reward_type, unlockable_id) do update set
-  boost_config = excluded.boost_config, display = excluded.display, sort_order = excluded.sort_order;
+  ('s1', 14, 'free', 'sp_boost', '{"bonus":0.15,"expires_hours":24}', '{"icon":"🚀","label":"+15% SP · 24h"}', 0),
+  ('s1', 34, 'free', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
+  ('s1', 49, 'free', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0);
 
 -- Elite lane: the real accelerator
 insert into public.season_pass_rewards (season_slug, level, tier, reward_type, boost_config, display, sort_order) values
-  ('s1',  5, 'elite', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 18, 'elite', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 28, 'elite', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0),
-  ('s1', 38, 'elite', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 48, 'elite', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0),
-  ('s1', 58, 'elite', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
-  ('s1', 60, 'elite', 'sp_boost', '{"bonus":0.60,"expires_hours":72}', '{"icon":"🚀","label":"+60% SP · 72h"}', 0),
-  ('s1', 68, 'elite', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0),
-  ('s1', 78, 'elite', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0),
-  ('s1', 85, 'elite', 'sp_boost', '{"bonus":0.60,"expires_hours":72}', '{"icon":"🚀","label":"+60% SP · 72h"}', 0),
-  ('s1', 95, 'elite', 'sp_boost', '{"bonus":0.60,"expires_hours":72}', '{"icon":"🚀","label":"+60% SP · 72h"}', 0),
-  ('s1', 98, 'elite', 'sp_boost', '{"bonus":0.60,"expires_hours":72}', '{"icon":"🚀","label":"+60% SP · 72h"}', 0)
-on conflict (season_slug, level, tier, reward_type, unlockable_id) do update set
-  boost_config = excluded.boost_config, display = excluded.display, sort_order = excluded.sort_order;
+  ('s1',  8, 'elite', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
+  ('s1', 19, 'elite', 'sp_boost', '{"bonus":0.30,"expires_hours":48}', '{"icon":"🚀","label":"+30% SP · 48h"}', 0),
+  ('s1', 27, 'elite', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0),
+  ('s1', 38, 'elite', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0),
+  ('s1', 46, 'elite', 'sp_boost', '{"bonus":0.60,"expires_hours":72}', '{"icon":"🚀","label":"+60% SP · 72h"}', 0);
 
 -- "How to earn SP": streak boost row (deferred from 094 until the engine existed)
 insert into public.season_pass_sp_how_rows (season_slug, sort_order, icon, label, sp_hint) values

@@ -80,8 +80,8 @@ insert into public.unlockables (id, kind, title, description, rarity, icon, unlo
   ('sp_t_senor',       'title', 'Señor de la Pista',   'Recompensa Elite del Pase S1.', 'legendary', 'star', 'manual', 431),
   ('sp_t_depredador',  'title', 'Depredador',          'Recompensa Elite del Pase S1.', 'legendary', 'star', 'manual', 432),
   ('sp_t_cazagigantes','title', 'Cazagigantes',        'Recompensa Elite del Pase S1.', 'legendary', 'star', 'manual', 433),
-  ('sp_t_alma',        'title', 'Alma de WeMatch',     'Recompensa del Pase S1 (nivel 99).', 'legendary', 'star', 'manual', 434),
-  ('sp_t_rey',         'title', 'Rey de la Pista',     'Recompensa Elite del Pase S1 (nivel 100).', 'legendary', 'star', 'manual', 435)
+  ('sp_t_alma',        'title', 'Alma de WeMatch',     'Recompensa del Pase S1 (nivel 45).', 'legendary', 'star', 'manual', 434),
+  ('sp_t_rey',         'title', 'Rey de la Pista',     'Recompensa Elite del Pase S1 (nivel 50).', 'legendary', 'star', 'manual', 435)
 on conflict (id) do update set
   kind = excluded.kind, title = excluded.title, description = excluded.description,
   rarity = excluded.rarity, icon = excluded.icon, unlock_type = excluded.unlock_type,
@@ -98,7 +98,7 @@ insert into public.unlockables (id, kind, title, description, rarity, icon, unlo
   ('sp_b_imparable','badge',  'Imparable',           'Recompensa Elite del Pase S1.', 'epic',      'flame',      'manual', 446),
   ('sp_b_mitad',    'trophy', 'Mitad de Temporada',  'Recompensa Elite del Pase S1.', 'epic',      'medal',      'manual', 447),
   ('sp_b_semifinal','trophy', 'Semifinalista',       'Recompensa Elite del Pase S1.', 'epic',      'ribbon',     'manual', 448),
-  ('sp_b_campeon',  'trophy', 'Campeón S1',          'Recompensa Elite del Pase S1.', 'legendary', 'trophy',     'manual', 449)
+  ('sp_b_campeon',  'trophy', 'Campeón S1',          'Recompensa del Pase S1 (nivel 50).', 'legendary', 'trophy',     'manual', 449)
 on conflict (id) do update set
   kind = excluded.kind, title = excluded.title, description = excluded.description,
   rarity = excluded.rarity, icon = excluded.icon, unlock_type = excluded.unlock_type,
@@ -123,153 +123,118 @@ on conflict (id) do update set
   updated_at = now();
 
 -- ════════════════════════════════════════════════════════════
--- TRACK S1 — recompensa en cada nivel (free) + mayoría (elite).
+-- TRACK S1 (50 niveles) — recompensa en CADA nivel en ambos carriles.
+-- Multiplos de 5 = cosmetico destacado (vs SP suelto en el resto); los hitos
+-- grandes (cada 10) suben a legendary. Los niveles marcados THEME alojaran los
+-- temas (cover + animacion) cuando se disenen (fase 4): swap puntual del reward.
 -- Re-seed idempotente de unlockable/sp (los boosters van en 093).
 -- ════════════════════════════════════════════════════════════
 
 delete from public.season_pass_rewards
   where season_slug = 's1' and reward_type in ('unlockable', 'sp');
 
--- ── FREE (100 niveles) ──
+-- ── FREE (50 niveles, recompensa en TODOS) ──
 insert into public.season_pass_rewards (season_slug, level, tier, reward_type, unlockable_id, sp_amount, display) values
-  ('s1',   1, 'free', 'unlockable', 'sp_b_iniciado', null, '{}'),
-  ('s1',   2, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',   3, 'free', 'unlockable', 'sp_t_novato', null, '{}'),
-  ('s1',   4, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',   5, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',   6, 'free', 'unlockable', 'sp_t_debutante', null, '{}'),
-  ('s1',   7, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',   8, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',   9, 'free', 'unlockable', 'sp_b_saque', null, '{}'),
-  ('s1',  10, 'free', 'sp', null, 200, '{"icon":"⚡","label":"+200 SP"}'),
-  ('s1',  11, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',  12, 'free', 'unlockable', 'sp_t_peloteo', null, '{}'),
-  ('s1',  13, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',  14, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',  15, 'free', 'unlockable', 'sp_t_aprendiz', null, '{}'),
-  ('s1',  16, 'free', 'sp', null, 200, '{"icon":"⚡","label":"+200 SP"}'),
-  ('s1',  17, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',  18, 'free', 'unlockable', 'sp_t_aficionado', null, '{}'),
-  ('s1',  19, 'free', 'sp', null, 150, '{"icon":"⚡","label":"+150 SP"}'),
-  ('s1',  20, 'free', 'sp', null, 200, '{"icon":"⚡","label":"+200 SP"}'),
-  ('s1',  21, 'free', 'unlockable', 'sp_t_habitual', null, '{}'),
-  ('s1',  22, 'free', 'sp', null, 200, '{"icon":"⚡","label":"+200 SP"}'),
-  ('s1',  23, 'free', 'sp', null, 200, '{"icon":"⚡","label":"+200 SP"}'),
-  ('s1',  24, 'free', 'unlockable', 'sp_f_ceniza', null, '{}'),
-  ('s1',  25, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  26, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  27, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  28, 'free', 'unlockable', 'sp_b_pionero', null, '{}'),
-  ('s1',  29, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  30, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  31, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  32, 'free', 'unlockable', 'sp_f_ascua', null, '{}'),
-  ('s1',  33, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  34, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  35, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  36, 'free', 'unlockable', 'sp_t_competidor', null, '{}'),
-  ('s1',  37, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  38, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  39, 'free', 'sp', null, 250, '{"icon":"⚡","label":"+250 SP"}'),
-  ('s1',  40, 'free', 'unlockable', 'sp_f_brasa', null, '{}'),
-  ('s1',  41, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  42, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  43, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  44, 'free', 'unlockable', 'sp_t_retador', null, '{}'),
-  ('s1',  45, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  46, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  47, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  48, 'free', 'unlockable', 'sp_b_constante', null, '{}'),
-  ('s1',  49, 'free', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  50, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  51, 'free', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  52, 'free', 'unlockable', 'sp_t_dedicado', null, '{}'),
-  ('s1',  53, 'free', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  54, 'free', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  55, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  56, 'free', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  57, 'free', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  58, 'free', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  59, 'free', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  60, 'free', 'unlockable', 'sp_t_tactico', null, '{}'),
-  ('s1',  61, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  62, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  63, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  64, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  65, 'free', 'sp', null, 450, '{"icon":"⚡","label":"+450 SP"}'),
-  ('s1',  66, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  67, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  68, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  69, 'free', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  70, 'free', 'unlockable', 'sp_t_guerrero', null, '{}'),
-  ('s1',  71, 'free', 'sp', null, 450, '{"icon":"⚡","label":"+450 SP"}'),
-  ('s1',  72, 'free', 'sp', null, 450, '{"icon":"⚡","label":"+450 SP"}'),
-  ('s1',  73, 'free', 'sp', null, 450, '{"icon":"⚡","label":"+450 SP"}'),
-  ('s1',  74, 'free', 'sp', null, 450, '{"icon":"⚡","label":"+450 SP"}'),
-  ('s1',  75, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  76, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  77, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  78, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  79, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  80, 'free', 'sp', null, 550, '{"icon":"⚡","label":"+550 SP"}'),
-  ('s1',  81, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  82, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  83, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  84, 'free', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  85, 'free', 'sp', null, 550, '{"icon":"⚡","label":"+550 SP"}'),
-  ('s1',  86, 'free', 'sp', null, 550, '{"icon":"⚡","label":"+550 SP"}'),
-  ('s1',  87, 'free', 'sp', null, 550, '{"icon":"⚡","label":"+550 SP"}'),
-  ('s1',  88, 'free', 'sp', null, 550, '{"icon":"⚡","label":"+550 SP"}'),
-  ('s1',  89, 'free', 'sp', null, 550, '{"icon":"⚡","label":"+550 SP"}'),
-  ('s1',  90, 'free', 'sp', null, 600, '{"icon":"⚡","label":"+600 SP"}'),
-  ('s1',  91, 'free', 'sp', null, 600, '{"icon":"⚡","label":"+600 SP"}'),
-  ('s1',  92, 'free', 'sp', null, 600, '{"icon":"⚡","label":"+600 SP"}'),
-  ('s1',  93, 'free', 'sp', null, 600, '{"icon":"⚡","label":"+600 SP"}'),
-  ('s1',  94, 'free', 'sp', null, 600, '{"icon":"⚡","label":"+600 SP"}'),
-  ('s1',  95, 'free', 'sp', null, 700, '{"icon":"⚡","label":"+700 SP"}'),
-  ('s1',  96, 'free', 'sp', null, 700, '{"icon":"⚡","label":"+700 SP"}'),
-  ('s1',  97, 'free', 'sp', null, 700, '{"icon":"⚡","label":"+700 SP"}'),
-  ('s1',  98, 'free', 'sp', null, 700, '{"icon":"⚡","label":"+700 SP"}'),
-  ('s1',  99, 'free', 'unlockable', 'sp_t_alma', null, '{}'),
-  ('s1', 100, 'free', 'unlockable', 'sp_b_campeon', null, '{}');
+  ('s1',  1, 'free', 'unlockable', 'sp_b_iniciado', null, '{}'),
+  ('s1',  2, 'free', 'sp', null, 250, '{"label":"+250 SP"}'),
+  ('s1',  3, 'free', 'unlockable', 'sp_t_novato', null, '{}'),
+  ('s1',  4, 'free', 'sp', null, 250, '{"label":"+250 SP"}'),
+  ('s1',  5, 'free', 'unlockable', 'sp_f_ceniza', null, '{}'),            -- hito
+  ('s1',  6, 'free', 'sp', null, 250, '{"label":"+250 SP"}'),
+  ('s1',  7, 'free', 'unlockable', 'sp_t_debutante', null, '{}'),
+  ('s1',  8, 'free', 'sp', null, 250, '{"label":"+250 SP"}'),
+  ('s1',  9, 'free', 'unlockable', 'sp_b_saque', null, '{}'),
+  ('s1', 10, 'free', 'unlockable', 'sp_f_ascua', null, '{}'),             -- hito
+  ('s1', 11, 'free', 'sp', null, 300, '{"label":"+300 SP"}'),
+  ('s1', 12, 'free', 'unlockable', 'sp_t_peloteo', null, '{}'),
+  ('s1', 13, 'free', 'sp', null, 300, '{"label":"+300 SP"}'),
+  -- 14 free -> booster (093)
+  ('s1', 15, 'free', 'unlockable', 'sp_f_brasa', null, '{}'),             -- hito
+  ('s1', 16, 'free', 'sp', null, 350, '{"label":"+350 SP"}'),
+  ('s1', 17, 'free', 'unlockable', 'sp_t_aprendiz', null, '{}'),
+  ('s1', 18, 'free', 'sp', null, 350, '{"label":"+350 SP"}'),
+  ('s1', 19, 'free', 'sp', null, 350, '{"label":"+350 SP"}'),
+  ('s1', 20, 'free', 'unlockable', 'sp_b_constante', null, '{}'),         -- hito
+  ('s1', 21, 'free', 'unlockable', 'sp_t_aficionado', null, '{}'),
+  ('s1', 22, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
+  ('s1', 23, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
+  ('s1', 24, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
+  ('s1', 25, 'free', 'unlockable', 'sp_t_competidor', null, '{}'),        -- hito
+  ('s1', 26, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
+  ('s1', 27, 'free', 'sp', null, 400, '{"label":"+400 SP"}'),
+  ('s1', 28, 'free', 'unlockable', 'sp_t_habitual', null, '{}'),
+  ('s1', 29, 'free', 'sp', null, 450, '{"label":"+450 SP"}'),
+  ('s1', 30, 'free', 'unlockable', 's1_llamas_eternas', null, '{}'),      -- hito grande · THEME
+  ('s1', 31, 'free', 'sp', null, 450, '{"label":"+450 SP"}'),
+  ('s1', 32, 'free', 'sp', null, 450, '{"label":"+450 SP"}'),
+  ('s1', 33, 'free', 'unlockable', 'sp_t_retador', null, '{}'),
+  -- 34 free -> booster (093)
+  ('s1', 35, 'free', 'unlockable', 'sp_t_tactico', null, '{}'),           -- hito
+  ('s1', 36, 'free', 'sp', null, 500, '{"label":"+500 SP"}'),
+  ('s1', 37, 'free', 'sp', null, 500, '{"label":"+500 SP"}'),
+  ('s1', 38, 'free', 'unlockable', 'sp_t_dedicado', null, '{}'),
+  ('s1', 39, 'free', 'sp', null, 500, '{"label":"+500 SP"}'),
+  ('s1', 40, 'free', 'unlockable', 'sp_t_guerrero', null, '{}'),          -- hito grande
+  ('s1', 41, 'free', 'sp', null, 550, '{"label":"+550 SP"}'),
+  ('s1', 42, 'free', 'sp', null, 550, '{"label":"+550 SP"}'),
+  ('s1', 43, 'free', 'sp', null, 550, '{"label":"+550 SP"}'),
+  ('s1', 44, 'free', 'sp', null, 600, '{"label":"+600 SP"}'),
+  ('s1', 45, 'free', 'unlockable', 'sp_t_alma', null, '{}'),              -- hito · legendary
+  ('s1', 46, 'free', 'sp', null, 600, '{"label":"+600 SP"}'),
+  ('s1', 47, 'free', 'sp', null, 600, '{"label":"+600 SP"}'),
+  ('s1', 48, 'free', 'sp', null, 600, '{"label":"+600 SP"}'),
+  -- 49 free -> booster (093)
+  ('s1', 50, 'free', 'unlockable', 'sp_b_campeon', null, '{}');           -- final · THEME
 
--- ── ELITE ──
+-- ── ELITE (50 niveles, recompensa en TODOS) ──
 insert into public.season_pass_rewards (season_slug, level, tier, reward_type, unlockable_id, sp_amount, display) values
-  ('s1',   1, 'elite', 'unlockable', 'sp_b_elite', null, '{}'),
-  ('s1',   3, 'elite', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',   5, 'elite', 'unlockable', 'sp_t_companero', null, '{}'),
-  ('s1',   8, 'elite', 'sp', null, 300, '{"icon":"⚡","label":"+300 SP"}'),
-  ('s1',  10, 'elite', 'unlockable', 'sp_f_azul', null, '{}'),
-  ('s1',  13, 'elite', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  15, 'elite', 'unlockable', 'sp_t_en_racha', null, '{}'),
-  ('s1',  17, 'elite', 'sp', null, 350, '{"icon":"⚡","label":"+350 SP"}'),
-  ('s1',  20, 'elite', 'unlockable', 'sp_b_veterano', null, '{}'),
-  ('s1',  23, 'elite', 'sp', null, 400, '{"icon":"⚡","label":"+400 SP"}'),
-  ('s1',  25, 'elite', 'unlockable', 'sp_t_calculador', null, '{}'),
-  ('s1',  28, 'elite', 'unlockable', 's1_ember', null, '{}'),
-  ('s1',  30, 'elite', 'unlockable', 'sp_t_sangre_fria', null, '{}'),
-  ('s1',  33, 'elite', 'sp', null, 450, '{"icon":"⚡","label":"+450 SP"}'),
-  ('s1',  34, 'elite', 'unlockable', 'sp_b_imparable', null, '{}'),
-  ('s1',  38, 'elite', 'unlockable', 'sp_f_chispa', null, '{}'),
-  ('s1',  40, 'elite', 'unlockable', 'sp_t_muro', null, '{}'),
-  ('s1',  43, 'elite', 'sp', null, 500, '{"icon":"⚡","label":"+500 SP"}'),
-  ('s1',  44, 'elite', 'unlockable', 'sp_f_fatuo', null, '{}'),
-  ('s1',  48, 'elite', 'unlockable', 'sp_t_metralla', null, '{}'),
-  ('s1',  50, 'elite', 'unlockable', 'sp_t_estrella', null, '{}'),
-  ('s1',  54, 'elite', 'unlockable', 's1_llamas_eternas', null, '{}'),
-  ('s1',  58, 'elite', 'unlockable', 'sp_t_virtuoso', null, '{}'),
-  ('s1',  63, 'elite', 'unlockable', 'sp_b_mitad', null, '{}'),
-  ('s1',  68, 'elite', 'unlockable', 'sp_t_implacable', null, '{}'),
-  ('s1',  70, 'elite', 'unlockable', 'sp_t_resiliente', null, '{}'),
-  ('s1',  73, 'elite', 'sp', null, 650, '{"icon":"⚡","label":"+650 SP"}'),
-  ('s1',  75, 'elite', 'unlockable', 'sp_f_fenix', null, '{}'),
-  ('s1',  76, 'elite', 'unlockable', 'sp_t_mente', null, '{}'),
-  ('s1',  78, 'elite', 'unlockable', 'sp_t_cazagigantes', null, '{}'),
-  ('s1',  80, 'elite', 'unlockable', 'sp_t_senor', null, '{}'),
-  ('s1',  83, 'elite', 'sp', null, 800, '{"icon":"⚡","label":"+800 SP"}'),
-  ('s1',  85, 'elite', 'unlockable', 'sp_b_semifinal', null, '{}'),
-  ('s1',  88, 'elite', 'unlockable', 's1_corona_llamas', null, '{}'),
-  ('s1',  90, 'elite', 'unlockable', 'sp_t_depredador', null, '{}'),
-  ('s1',  93, 'elite', 'sp', null, 900, '{"icon":"⚡","label":"+900 SP"}'),
-  ('s1',  96, 'elite', 'sp', null, 1000, '{"icon":"⚡","label":"+1000 SP"}'),
-  ('s1', 100, 'elite', 'unlockable', 'sp_t_rey', null, '{}');
+  ('s1',  1, 'elite', 'unlockable', 'sp_t_companero', null, '{}'),
+  ('s1',  2, 'elite', 'sp', null, 400, '{"label":"+400 SP"}'),
+  ('s1',  3, 'elite', 'unlockable', 'sp_t_en_racha', null, '{}'),
+  ('s1',  4, 'elite', 'sp', null, 400, '{"label":"+400 SP"}'),
+  ('s1',  5, 'elite', 'unlockable', 'sp_b_elite', null, '{}'),            -- hito
+  ('s1',  6, 'elite', 'sp', null, 400, '{"label":"+400 SP"}'),
+  ('s1',  7, 'elite', 'unlockable', 'sp_t_sangre_fria', null, '{}'),
+  -- 8 elite -> booster (093)
+  ('s1',  9, 'elite', 'unlockable', 's1_ember', null, '{}'),
+  ('s1', 10, 'elite', 'unlockable', 'sp_f_azul', null, '{}'),             -- hito grande · THEME
+  ('s1', 11, 'elite', 'sp', null, 500, '{"label":"+500 SP"}'),
+  ('s1', 12, 'elite', 'unlockable', 'sp_t_muro', null, '{}'),
+  ('s1', 13, 'elite', 'unlockable', 'sp_t_metralla', null, '{}'),
+  ('s1', 14, 'elite', 'sp', null, 500, '{"label":"+500 SP"}'),
+  ('s1', 15, 'elite', 'unlockable', 'sp_f_chispa', null, '{}'),           -- hito
+  ('s1', 16, 'elite', 'sp', null, 550, '{"label":"+550 SP"}'),
+  ('s1', 17, 'elite', 'unlockable', 'sp_t_estrella', null, '{}'),
+  ('s1', 18, 'elite', 'sp', null, 550, '{"label":"+550 SP"}'),
+  -- 19 elite -> booster (093)
+  ('s1', 20, 'elite', 'unlockable', 'sp_b_veterano', null, '{}'),         -- hito grande
+  ('s1', 21, 'elite', 'sp', null, 650, '{"label":"+650 SP"}'),
+  ('s1', 22, 'elite', 'unlockable', 'sp_t_virtuoso', null, '{}'),
+  ('s1', 23, 'elite', 'sp', null, 650, '{"label":"+650 SP"}'),
+  ('s1', 24, 'elite', 'unlockable', 'sp_b_mitad', null, '{}'),
+  ('s1', 25, 'elite', 'unlockable', 'sp_t_calculador', null, '{}'),       -- hito
+  ('s1', 26, 'elite', 'sp', null, 650, '{"label":"+650 SP"}'),
+  -- 27 elite -> booster (093)
+  ('s1', 28, 'elite', 'unlockable', 'sp_t_implacable', null, '{}'),
+  ('s1', 29, 'elite', 'sp', null, 700, '{"label":"+700 SP"}'),
+  ('s1', 30, 'elite', 'unlockable', 's1_corona_llamas', null, '{}'),      -- hito grande · THEME
+  ('s1', 31, 'elite', 'sp', null, 800, '{"label":"+800 SP"}'),
+  ('s1', 32, 'elite', 'sp', null, 800, '{"label":"+800 SP"}'),
+  ('s1', 33, 'elite', 'unlockable', 'sp_t_resiliente', null, '{}'),
+  ('s1', 34, 'elite', 'sp', null, 800, '{"label":"+800 SP"}'),
+  ('s1', 35, 'elite', 'unlockable', 'sp_f_fatuo', null, '{}'),            -- hito
+  ('s1', 36, 'elite', 'sp', null, 850, '{"label":"+850 SP"}'),
+  ('s1', 37, 'elite', 'unlockable', 'sp_t_senor', null, '{}'),
+  -- 38 elite -> booster (093)
+  ('s1', 39, 'elite', 'sp', null, 900, '{"label":"+900 SP"}'),
+  ('s1', 40, 'elite', 'unlockable', 'sp_f_fenix', null, '{}'),            -- hito grande · THEME
+  ('s1', 41, 'elite', 'sp', null, 1000, '{"label":"+1000 SP"}'),
+  ('s1', 42, 'elite', 'unlockable', 'sp_b_imparable', null, '{}'),
+  ('s1', 43, 'elite', 'sp', null, 1000, '{"label":"+1000 SP"}'),
+  ('s1', 44, 'elite', 'unlockable', 'sp_b_semifinal', null, '{}'),
+  ('s1', 45, 'elite', 'unlockable', 'sp_t_mente', null, '{}'),            -- hito · legendary
+  -- 46 elite -> booster (093)
+  ('s1', 47, 'elite', 'unlockable', 'sp_t_depredador', null, '{}'),
+  ('s1', 48, 'elite', 'unlockable', 'sp_t_cazagigantes', null, '{}'),
+  ('s1', 49, 'elite', 'sp', null, 1200, '{"label":"+1200 SP"}'),
+  ('s1', 50, 'elite', 'unlockable', 'sp_t_rey', null, '{}');              -- final · THEME

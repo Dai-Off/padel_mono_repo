@@ -27,6 +27,7 @@ update public.season_pass_seasons
 set max_level = 50,
     ends_at = '2026-08-15T00:00:00Z',
     subtitle = 'Jul – Ago 2026',
+    elite_card_subtitle = '+50 recompensas exclusivas',
     updated_at = now()
 where slug = 's1';
 
