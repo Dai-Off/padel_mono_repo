@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '../i18n';
 import { useStripe } from '../stripe';
 import { useAuth } from '../contexts/AuthContext';
+import { useRealtimeInvalidation } from '../realtime';
 import {
   cancelMatchAsOrganizer,
   fetchMatchById,
@@ -337,33 +338,43 @@ export function PartidoDetailScreen({
   const viewerPlayerId = currentPlayerId ?? myProfile?.id ?? null;
   const isInMatch = isPlayerInPartido(partido, viewerPlayerId);
 
-  useEffect(() => {
+  const reloadOpenMatch = useCallback(() => {
     const token = session?.access_token;
     if (!token || partido.matchPhase === 'past') return;
     const playersFilled = partido.players.filter((p) => !p.isFree).length;
     if (playersFilled >= 4 || isInMatch) return;
-
-    const poll = () => {
-      if (postJoinPendingRef.current || postLeavePendingRef.current || joinInFlightRef.current) return;
-      const viewerId = currentPlayerId ?? myProfile?.id ?? null;
-      const gen = matchFetchGen.current;
-      void reloadMatchPartido(partido.id, token, { viewerPlayerId: viewerId }).then((updated) => {
-        if (gen !== matchFetchGen.current || !updated) return;
-        mergePartidoFromServer(updated);
-      });
-    };
-
-    const interval = setInterval(poll, 4000);
-    return () => clearInterval(interval);
+    if (postJoinPendingRef.current || postLeavePendingRef.current || joinInFlightRef.current) return;
+    const viewerId = currentPlayerId ?? myProfile?.id ?? null;
+    const gen = matchFetchGen.current;
+    void reloadMatchPartido(partido.id, token, { viewerPlayerId: viewerId }).then((updated) => {
+      if (gen !== matchFetchGen.current || !updated) return;
+      mergePartidoFromServer(updated);
+    });
   }, [
     partido.id,
     partido.matchPhase,
+    partido.players,
     session?.access_token,
     currentPlayerId,
     myProfile?.id,
     mergePartidoFromServer,
     isInMatch,
   ]);
+
+  useRealtimeInvalidation(
+    ['matches', 'match_players'],
+    reloadOpenMatch,
+    {
+      enabled: Boolean(session?.access_token) && partido.matchPhase !== 'past',
+      filter: (event) => {
+        if (event.source === 'fallback') return true;
+        const row = event.payload.new ?? event.payload.old;
+        if (!row) return false;
+        const matchId = String(row.match_id ?? row.id ?? '');
+        return matchId === partido.id;
+      },
+    },
+  );
   const userIsOrganizer =
     currentPlayerId != null &&
     partido.organizerPlayerId != null &&

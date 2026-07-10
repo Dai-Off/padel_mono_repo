@@ -55,6 +55,7 @@ import { confirmPaymentFromClient, createIntentForTournament } from '../api/paym
 import { PrivateReservationModal } from '../components/partido/PrivateReservationModal';
 import type { BookingConfirmationData } from './BookingConfirmationScreen';
 import { useAuth } from '../contexts/AuthContext';
+import { useRealtimeInvalidation } from '../realtime';
 import {
   clubLocationLabel,
   formatClubFullAddress,
@@ -576,11 +577,24 @@ export function TournamentDetailScreen({
   useEffect(() => {
     if (tab !== 'chat' || !session?.access_token) return;
     void loadChat();
-    const timer = setInterval(() => {
-      void loadChat({ silent: true });
-    }, 3000);
-    return () => clearInterval(timer);
   }, [tab, session?.access_token, loadChat]);
+
+  useRealtimeInvalidation(
+    'tournament_chat',
+    () => {
+      if (tab !== 'chat' || !session?.access_token) return;
+      void loadChat({ silent: true });
+    },
+    {
+      enabled: tab === 'chat' && Boolean(session?.access_token),
+      filter: (event) => {
+        if (event.source === 'fallback') return true;
+        const row = event.payload.new ?? event.payload.old;
+        if (!row) return false;
+        return String(row.tournament_id ?? '') === tournamentId;
+      },
+    },
+  );
 
   const title = row ? tournamentTitle(row, t) : '';
   const heroUri = useMemo(() => {

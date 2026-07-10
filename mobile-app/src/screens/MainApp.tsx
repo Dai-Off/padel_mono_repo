@@ -15,6 +15,7 @@ import { SidebarContent } from '../components/layout/SidebarContent';
 import { SidebarProvider } from '../contexts/SidebarContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { useSidebar } from '../hooks/useSidebar';
+import { useRealtimeInvalidation } from '../realtime';
 import {
   BookingConfirmationScreen,
   type BookingConfirmationData,
@@ -219,8 +220,6 @@ export function MainApp() {
 
   useEffect(() => {
     const token = session?.access_token ?? null;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     if (!token) {
       setMatchmakingHomeBannerState('hidden');
       setMatchmakingTimeoutNoticePending(false);
@@ -229,6 +228,8 @@ export function MainApp() {
       matchmakingTimeoutInFlightRef.current = false;
       return;
     }
+
+    let cancelled = false;
 
     const pollStatus = async () => {
       const status = await fetchMatchmakingStatus(token);
@@ -266,17 +267,78 @@ export function MainApp() {
         matchmakingTimeoutInFlightRef.current = false;
         setMatchmakingHomeBannerState(matchmakingTimeoutNoticePending ? 'timed_out' : 'hidden');
       }
-      timer = setTimeout(() => {
-        void pollStatus();
-      }, 5000);
     };
 
     void pollStatus();
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
     };
   }, [competitiveQueueStartedAtMs, matchmakingTimeoutNoticePending, pairInviteNonce, session?.access_token]);
+
+  useRealtimeInvalidation(
+    ['matchmaking', 'matchmaking_pair_invites'],
+    () => {
+      const token = session?.access_token ?? null;
+      if (!token) return;
+      void (async () => {
+        const status = await fetchMatchmakingStatus(token);
+        setPairInvites(status?.pair_invites ?? []);
+        if (status?.status === 'matched') {
+          setMatchmakingHomeBannerState('matched');
+          setMatchmakingTimeoutNoticePending(false);
+          setCompetitiveQueueStartedAtMs(null);
+          setCompetitiveQueueElapsedSec(0);
+          matchmakingTimeoutInFlightRef.current = false;
+        } else if (status?.status === 'searching') {
+          setMatchmakingHomeBannerState('searching');
+          setMatchmakingTimeoutNoticePending(false);
+        } else {
+          setCompetitiveQueueStartedAtMs(null);
+          setCompetitiveQueueElapsedSec(0);
+          matchmakingTimeoutInFlightRef.current = false;
+          setMatchmakingHomeBannerState(matchmakingTimeoutNoticePending ? 'timed_out' : 'hidden');
+        }
+      })();
+    },
+    { enabled: Boolean(session?.access_token) },
+  );
+
+  useEffect(() => {
+    if (matchmakingHomeBannerState !== 'searching' || competitiveQueueStartedAtMs == null) return;
+    const token = session?.access_token ?? null;
+    let cancelled = false;
+
+    const tick = async () => {
+      const elapsedSec = Math.max(0, Math.floor((Date.now() - competitiveQueueStartedAtMs) / 1000));
+      setCompetitiveQueueElapsedSec(elapsedSec);
+      if (
+        token &&
+        elapsedSec >= MATCHMAKING_TIMEOUT_SECONDS &&
+        !matchmakingTimeoutInFlightRef.current
+      ) {
+        matchmakingTimeoutInFlightRef.current = true;
+        const leaveResult = await leaveMatchmaking(token);
+        if (cancelled) return;
+        if (leaveResult.ok) {
+          setMatchmakingHomeBannerState('timed_out');
+          setMatchmakingTimeoutNoticePending(true);
+          setCompetitiveQueueStartedAtMs(null);
+          setCompetitiveQueueElapsedSec(0);
+        } else {
+          matchmakingTimeoutInFlightRef.current = false;
+        }
+      }
+    };
+
+    void tick();
+    const id = setInterval(() => {
+      void tick();
+    }, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [matchmakingHomeBannerState, competitiveQueueStartedAtMs, session?.access_token]);
 
   // Modal de fin de temporada: una vez al abrir la app, si hay transición sin ver (por dispositivo).
   useEffect(() => {
@@ -425,27 +487,28 @@ export function MainApp() {
     return () => sub.remove();
   }, [session?.access_token, consumeInviteUrl, processTournamentInvite]);
 
-  useEffect(() => {
+  const refreshMatchInvites = useCallback(async () => {
     const token = session?.access_token ?? null;
-    if (!token) {
+    if (!token) return;
+    const res = await fetchReceivedMatchInvites(token);
+    if (res.ok) setMatchReceivedInvites(res.invites);
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    if (!session?.access_token) {
       setMatchReceivedInvites([]);
       return;
     }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const poll = async () => {
-      const res = await fetchReceivedMatchInvites(token);
-      if (!cancelled && res.ok) setMatchReceivedInvites(res.invites);
-      if (!cancelled) {
-        timer = setTimeout(() => void poll(), 8000);
-      }
-    };
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [session?.access_token, matchInviteNonce]);
+    void refreshMatchInvites();
+  }, [session?.access_token, matchInviteNonce, refreshMatchInvites]);
+
+  useRealtimeInvalidation(
+    'match_invites',
+    () => {
+      void refreshMatchInvites();
+    },
+    { enabled: Boolean(session?.access_token) },
+  );
 
   useEffect(() => {
     if (partidosRefreshNonce < 1) return;

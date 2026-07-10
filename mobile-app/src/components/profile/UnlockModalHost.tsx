@@ -1,16 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRealtimeInvalidation } from '../../realtime';
 import { fetchPendingUnlocks, markUnlocksSeen, type PendingUnlock } from '../../api/unlockables';
 import { UnlockModal } from './UnlockModal';
 
-const POLL_MS = 60000;
-
 /**
  * Host del modal global de desbloqueos: monta en la raíz (MainApp) y muestra
- * "¡Desbloqueado!" esté donde esté el usuario. Sondea los pendientes (al montar,
- * al volver a primer plano y por intervalo) y los muestra de uno en uno,
- * marcándolos como vistos al cerrar.
+ * "¡Desbloqueado!" esté donde esté el usuario. Reacciona a eventos realtime
+ * (y fallback) y revisa al volver a primer plano.
  */
 interface UnlockModalHostProps {
   /** Navega a la Vitrina (perfil) cuando el usuario pulsa "Ir a mi vitrina". */
@@ -44,12 +42,16 @@ export const UnlockModalHost: React.FC<UnlockModalHostProps> = ({ onGoToVitrina 
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') void check();
     });
-    const id = setInterval(() => void check(), POLL_MS);
-    return () => {
-      sub.remove();
-      clearInterval(id);
-    };
+    return () => sub.remove();
   }, [token, check]);
+
+  useRealtimeInvalidation(
+    'unlockables',
+    () => {
+      void check();
+    },
+    { enabled: Boolean(token) },
+  );
 
   const current = queue[0] ?? null;
 

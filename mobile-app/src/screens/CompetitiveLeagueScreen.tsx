@@ -25,6 +25,7 @@ import {
   type SearchCoordinates,
 } from '../lib/matchSearchLocation';
 import { useAuth } from '../contexts/AuthContext';
+import { useRealtimeInvalidation } from '../realtime';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
 import { PlayerSelectModal } from '../components/matchmaking/PlayerSelectModal';
@@ -160,16 +161,8 @@ export function CompetitiveLeagueScreen({
   const [searchCoordsLoading, setSearchCoordsLoading] = useState(false);
   const [locationIssue, setLocationIssue] = useState<LocationIssue | null>(null);
   const [countdownText, setCountdownText] = useState<string>('--:--:--');
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAppliedEntryIntentRef = useRef<'default' | 'queue' | 'prefs' | null>(null);
   const refreshStatusRef = useRef<() => Promise<void>>(async () => {});
-
-  const clearPollTimer = useCallback(() => {
-    if (pollTimerRef.current) {
-      clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-  }, []);
 
   const pollStatus = useCallback(async () => {
     const token = session?.access_token ?? null;
@@ -185,7 +178,6 @@ export function CompetitiveLeagueScreen({
         setQueueElapsedSec(0);
         setLoading(false);
         setStep('found');
-        clearPollTimer();
         return;
       }
       onMatchmakingBannerStateChange?.('hidden', { force: true });
@@ -194,7 +186,6 @@ export function CompetitiveLeagueScreen({
       setProposal(null);
       setLoading(false);
       setStep('home');
-      clearPollTimer();
       return;
     }
     if (s?.status !== 'searching') {
@@ -202,14 +193,18 @@ export function CompetitiveLeagueScreen({
       setQueueStartedAtMs(null);
       setQueueElapsedSec(0);
       setLoading(false);
-      clearPollTimer();
       return;
     }
     onMatchmakingBannerStateChange?.('searching');
-    pollTimerRef.current = setTimeout(() => {
+  }, [matchmakingBannerState, onMatchmakingBannerStateChange, session?.access_token, setQueueElapsedSec, setQueueStartedAtMs]);
+
+  useRealtimeInvalidation(
+    ['matchmaking', 'matchmaking_pair_invites'],
+    () => {
       void pollStatus();
-    }, 5000);
-  }, [clearPollTimer, onMatchmakingBannerStateChange, session?.access_token, setQueueElapsedSec, setQueueStartedAtMs]);
+    },
+    { enabled: Boolean(session?.access_token) },
+  );
 
   const refreshStatus = useCallback(async () => {
     const token = session?.access_token ?? null;
@@ -217,7 +212,6 @@ export function CompetitiveLeagueScreen({
     const s = await fetchMatchmakingStatus(token);
     setStatus(s);
     if (s?.status === 'matched') {
-      clearPollTimer();
       const p = await fetchMatchmakingProposal(token);
       setProposal(p);
       if (isMatchmakingFlowPending(s, p)) {
@@ -245,7 +239,6 @@ export function CompetitiveLeagueScreen({
       setProposal(null);
     }
   }, [
-    clearPollTimer,
     matchmakingBannerState,
     onMatchmakingBannerStateChange,
     pollStatus,
@@ -331,7 +324,7 @@ export function CompetitiveLeagueScreen({
     let cancelled = false;
     if (!token) {
       setIsHomeBootstrapping(false);
-      return () => clearPollTimer();
+      return;
     }
     setIsHomeBootstrapping(true);
     void refreshStatusRef.current().finally(() => {
@@ -339,9 +332,8 @@ export function CompetitiveLeagueScreen({
     });
     return () => {
       cancelled = true;
-      clearPollTimer();
     };
-  }, [clearPollTimer, session?.access_token]);
+  }, [session?.access_token]);
 
   useEffect(() => {
     if (lastAppliedEntryIntentRef.current === entryIntent) return;
@@ -606,7 +598,6 @@ export function CompetitiveLeagueScreen({
       return;
     }
     setErrorText(null);
-    clearPollTimer();
     const { availableFrom, availableUntil } = computeMatchAvailabilityWindow(form);
     const payload: MatchmakingJoinPayload = {
       available_from: availableFrom,
@@ -693,7 +684,6 @@ export function CompetitiveLeagueScreen({
     setStep('queue');
     await pollStatus();
   }, [
-    clearPollTimer,
     clubsInRange.length,
     distanceKm,
     form,
@@ -712,7 +702,6 @@ export function CompetitiveLeagueScreen({
   const handleLeaveQueue = useCallback(async () => {
     const token = session?.access_token ?? null;
     if (!token) return;
-    clearPollTimer();
     setLoading(false);
     const result = await leaveMatchmaking(token);
     if (!result.ok) {
@@ -726,7 +715,6 @@ export function CompetitiveLeagueScreen({
     setQueueElapsedSec(0);
     setStep('home');
   }, [
-    clearPollTimer,
     onMatchmakingBannerStateChange,
     session?.access_token,
     setQueueElapsedSec,
@@ -737,7 +725,6 @@ export function CompetitiveLeagueScreen({
     const token = session?.access_token ?? null;
     const matchId = proposal?.match_id;
     if (!token || !matchId) return;
-    clearPollTimer();
     const result = await rejectMatchmakingProposal(matchId, token);
     if (!result.ok) {
       setErrorText(result.error);
@@ -753,7 +740,6 @@ export function CompetitiveLeagueScreen({
     setLoading(false);
     setStep('home');
   }, [
-    clearPollTimer,
     onMatchmakingBannerStateChange,
     proposal?.match_id,
     session?.access_token,
