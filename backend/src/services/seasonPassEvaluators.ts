@@ -30,6 +30,7 @@ type ConfirmedMatch = {
   start_at: string | null;
   booking_timezone: string | null;
   club_id: string | null;
+  sets: Array<{ a: number; b: number }> | null;
 };
 
 type Teammate = { match_id: string; player_id: string };
@@ -77,7 +78,7 @@ export class SeasonPassEvalContext {
       const { data, error } = await this.supabase
         .from('match_players')
         .select(
-          'match_id, team, result, match:matches!inner(id, type, competitive, score_status, score_confirmed_at, booking:bookings!inner(start_at, timezone, court:courts!inner(club_id)))'
+          'match_id, team, result, match:matches!inner(id, type, competitive, score_status, score_confirmed_at, sets, booking:bookings!inner(start_at, timezone, court:courts!inner(club_id)))'
         )
         .eq('player_id', this.playerId)
         .eq('match.score_status', 'confirmed')
@@ -93,6 +94,7 @@ export class SeasonPassEvalContext {
             type: string | null;
             competitive: boolean;
             score_confirmed_at: string;
+            sets: unknown;
             booking: {
               start_at: string | null;
               timezone: string | null;
@@ -100,6 +102,7 @@ export class SeasonPassEvalContext {
             } | null;
           };
         };
+        const rawSets = Array.isArray(r.match?.sets) ? (r.match.sets as Array<{ a?: unknown; b?: unknown }>) : null;
         return {
           match_id: r.match_id,
           team: r.team,
@@ -110,6 +113,9 @@ export class SeasonPassEvalContext {
           start_at: r.match?.booking?.start_at ?? null,
           booking_timezone: r.match?.booking?.timezone ?? null,
           club_id: r.match?.booking?.court?.club_id ?? null,
+          sets: rawSets
+            ? rawSets.map((s) => ({ a: Number(s.a ?? 0), b: Number(s.b ?? 0) }))
+            : null,
         };
       });
     });
@@ -162,6 +168,83 @@ export class SeasonPassEvalContext {
         q.eq('player_id', this.playerId).gte('completed_at', p.start_iso).lt('completed_at', p.end_iso)
       )
     );
+  }
+
+  /** Sesiones de lección del período con su acierto (correct/total). */
+  private lessonSessions(p: MissionPeriod): Promise<Array<{ correct: number; total: number }>> {
+    return this.memo(`lessonSess:${p.start_iso}`, async () => {
+      const { data, error } = await this.supabase
+        .from('learning_sessions')
+        .select('correct_count, total_count')
+        .eq('player_id', this.playerId)
+        .gte('completed_at', p.start_iso)
+        .lt('completed_at', p.end_iso);
+      if (error) throw new Error(`[season-pass eval lessonSess] ${error.message}`);
+      return (data ?? []).map((r) => ({
+        correct: Number((r as { correct_count: unknown }).correct_count ?? 0),
+        total: Number((r as { total_count: unknown }).total_count ?? 5),
+      }));
+    });
+  }
+
+  /** Lecciones del período con acierto ≥ minPct%. */
+  async lessonScoreCount(p: MissionPeriod, minPct: number): Promise<number> {
+    const rows = await this.lessonSessions(p);
+    return rows.filter((r) => r.total > 0 && (r.correct / r.total) * 100 >= minPct).length;
+  }
+
+  /** Lecciones perfectas del período (todas correctas). */
+  async lessonPerfectCount(p: MissionPeriod): Promise<number> {
+    const rows = await this.lessonSessions(p);
+    return rows.filter((r) => r.total > 0 && r.correct >= r.total).length;
+  }
+
+  /** Lecciones de curso (academia) completadas en el período. */
+  courseLessonsCount(p: MissionPeriod): Promise<number> {
+    return this.memo(`courseLessons:${p.start_iso}`, () =>
+      this.countRows('learning_course_progress', (q: any) =>
+        q.eq('player_id', this.playerId).gte('completed_at', p.start_iso).lt('completed_at', p.end_iso)
+      )
+    );
+  }
+
+  /** Publicaciones del jugador en el feed de comunidad en el período. */
+  communityPostsCount(p: MissionPeriod): Promise<number> {
+    return this.memo(`posts:${p.start_iso}`, () =>
+      this.countRows('community_posts', (q: any) =>
+        q.eq('player_id', this.playerId).gte('created_at', p.start_iso).lt('created_at', p.end_iso)
+      )
+    );
+  }
+
+  /** Reservas del período en un club donde el jugador no había reservado antes. */
+  bookingsNewClubCount(p: MissionPeriod): Promise<number> {
+    return this.memo(`newClub:${p.start_iso}`, async () => {
+      const clubIdsOf = (rows: unknown): Set<string> =>
+        new Set(
+          ((rows as Array<{ court?: { club_id?: string | null } | null }>) ?? [])
+            .map((r) => r.court?.club_id)
+            .filter((c): c is string => !!c)
+        );
+      const base = () =>
+        this.supabase
+          .from('bookings')
+          .select('court:courts!inner(club_id)')
+          .eq('organizer_player_id', this.playerId)
+          .in('source_channel', ['app', 'mobile', 'web'])
+          .neq('status', 'cancelled');
+      const [{ data: prev }, { data: cur }] = await Promise.all([
+        base().lt('created_at', p.start_iso),
+        base().gte('created_at', p.start_iso).lt('created_at', p.end_iso),
+      ]);
+      const prevClubs = clubIdsOf(prev);
+      const curClubs = clubIdsOf(cur);
+      let n = 0;
+      curClubs.forEach((c) => {
+        if (!prevClubs.has(c)) n += 1;
+      });
+      return n;
+    });
   }
 
   activeDaysCount(p: MissionPeriod): Promise<number> {
@@ -312,6 +395,13 @@ function applyMatchFilters(
   return out;
 }
 
+/** Victoria sin ceder ningún set (2-0 / 3-0): el equipo del jugador ganó todos. */
+function isStraightWin(m: ConfirmedMatch): boolean {
+  if (m.result !== 'win' || !m.sets || m.sets.length === 0) return false;
+  const isA = m.team === 'A';
+  return m.sets.every((s) => (isA ? s.a > s.b : s.b > s.a));
+}
+
 function longestWinStreak(rows: ConfirmedMatch[]): number {
   const ordered = rows
     .filter((r) => r.result === 'win' || r.result === 'loss' || r.result === 'draw')
@@ -369,14 +459,30 @@ export async function evaluateMissionCondition(
     }
     case 'match_victory': {
       const rows = applyMatchFilters(await ctx.confirmedMatches(period), params, ctx.tz);
-      current = rows.filter((r) => r.result === 'win').length;
+      const wins = rows.filter((r) => r.result === 'win');
+      current = params.straight === true ? wins.filter(isStraightWin).length : wins.length;
       break;
     }
     case 'victory_streak':
       current = longestWinStreak(await ctx.confirmedMatches(period));
       break;
+    case 'lesson_score':
+      current = await ctx.lessonScoreCount(period, Number(params.min ?? 60));
+      break;
+    case 'lesson_perfect':
+      current = await ctx.lessonPerfectCount(period);
+      break;
+    case 'course_lesson':
+      current = await ctx.courseLessonsCount(period);
+      break;
+    case 'community_post':
+      current = await ctx.communityPostsCount(period);
+      break;
     case 'booking_created':
-      current = await ctx.bookingsCreatedCount(period);
+      current =
+        params.new_club === true
+          ? await ctx.bookingsNewClubCount(period)
+          : await ctx.bookingsCreatedCount(period);
       break;
     case 'class_booking':
       current = await ctx.classBookingsCount(period);
