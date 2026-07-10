@@ -15,6 +15,7 @@ import {
   type PlayerStats,
 } from '../api/profileStats';
 import { fetchPlayerPublicCustomization, type PublicProfileCustomization } from '../api/profileCustomization';
+import { PlayerName } from '../components/profile/PlayerName';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 import { AnimatedTitle } from '../components/profile/AnimatedTitle';
 import { LigaChip } from '../components/profile/LigaChip';
@@ -197,7 +198,11 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
                     <AnimatedTitle titleId={customization.titleId} />
                   </View>
                 ) : null}
-                <Text style={styles.profileName}>{displayName}</Text>
+                <PlayerName
+                  name={displayName}
+                  nameColor={customization?.nameColor}
+                  style={styles.profileName}
+                />
                 {usernameLine ? <Text style={styles.usernameText}>{usernameLine}</Text> : null}
                 {pinnedBadges.length > 0 ? (
                   <View style={styles.pinnedRow}>

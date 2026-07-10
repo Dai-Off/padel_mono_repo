@@ -145,7 +145,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1',  8, 'free', 'sp', null, 250, '{"label":"+250 SP"}'),
   ('s1',  9, 'free', 'unlockable', 'sp_b_saque', null, '{}'),
   ('s1', 10, 'free', 'unlockable', 'sp_f_ascua', null, '{}'),             -- hito
-  ('s1', 11, 'free', 'sp', null, 300, '{"label":"+300 SP"}'),
+  ('s1', 11, 'free', 'unlockable', 'nc_brasa', null, '{}'),                -- color de nombre (097)
   ('s1', 12, 'free', 'unlockable', 'sp_t_peloteo', null, '{}'),
   ('s1', 13, 'free', 'sp', null, 300, '{"label":"+300 SP"}'),
   -- 14 free -> booster (093)
@@ -208,7 +208,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 18, 'elite', 'sp', null, 550, '{"label":"+550 SP"}'),
   -- 19 elite -> booster (093)
   ('s1', 20, 'elite', 'unlockable', 'sp_b_veterano', null, '{}'),         -- hito grande
-  ('s1', 21, 'elite', 'sp', null, 650, '{"label":"+650 SP"}'),
+  ('s1', 21, 'elite', 'unlockable', 'nc_aurora', null, '{}'),              -- color de nombre (097)
   ('s1', 22, 'elite', 'unlockable', 'sp_t_virtuoso', null, '{}'),
   ('s1', 23, 'elite', 'sp', null, 650, '{"label":"+650 SP"}'),
   ('s1', 24, 'elite', 'unlockable', 'sp_b_mitad', null, '{}'),

@@ -39,6 +39,8 @@ import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { AuthButton } from '../components/auth/AuthButton';
 import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
 import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
+import { PlayerName } from '../components/profile/PlayerName';
+import type { AchievementRarity } from '../design/rarity';
 
 type Props = { onBack: () => void };
 
@@ -346,6 +348,16 @@ function RewardThumb({
           {`×${n}`}
         </Text>
       </View>
+    );
+  } else if (d.kind === 'name_color') {
+    // Color de nombre: muestra "Aa" con la paleta real.
+    const cols = Array.isArray(d.colors) ? (d.colors as string[]) : null;
+    inner = (
+      <PlayerName
+        name="Aa"
+        nameColor={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols } : null}
+        style={{ fontSize: 20, fontWeight: '900', color: rarity.color }}
+      />
     );
   } else {
     // trophy / badge / title: preset de icono del catálogo con color de rareza.

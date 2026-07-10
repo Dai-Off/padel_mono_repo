@@ -1,6 +1,6 @@
 import { API_URL } from '../config';
 import { mapAchievements, type AchievementsResponse } from './unlockables';
-import { mapUnlockables, type CatalogItem, type ProfileCustomization } from './profileCustomization';
+import { asNameColor, mapUnlockables, type CatalogItem, type ProfileCustomization } from './profileCustomization';
 import type { Achievement } from '../design/achievements';
 
 /**
@@ -17,7 +17,7 @@ export type ProfileBundle = {
 
 type ProfileBundleResponse = {
   ok?: boolean;
-  customization?: ProfileCustomization;
+  customization?: ProfileCustomization & { nameColor?: unknown };
   frames?: Record<string, unknown>[];
   achievements?: AchievementsResponse['achievements'];
 };
@@ -36,6 +36,8 @@ export async function fetchProfileBundle(
       customization: {
         titleId: json.customization?.titleId ?? null,
         frameId: json.customization?.frameId ?? null,
+        nameColorId: json.customization?.nameColorId ?? null,
+        nameColor: asNameColor(json.customization?.nameColor),
         pinnedBadgeIds: json.customization?.pinnedBadgeIds ?? [],
       },
       frames: mapUnlockables(json.frames ?? []),

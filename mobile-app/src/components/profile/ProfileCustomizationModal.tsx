@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { AvatarWithFrame, type FrameAttrs } from './AvatarWithFrame';
 import { AnimatedTitle } from './AnimatedTitle';
+import { PlayerName } from './PlayerName';
 import { RarityBadge } from './RarityBadge';
 import { RARITY_CONFIG, RARITY_ORDER, type AchievementRarity } from '../../design/rarity';
 import { describeUnlock } from '../../design/frames';
@@ -11,12 +12,13 @@ import {
   fetchUnlockables,
   saveCustomization,
   type CatalogItem,
+  type NameColorAttrs,
   type ProfileCustomization,
 } from '../../api/profileCustomization';
 import { fetchAchievements } from '../../api/unlockables';
 import type { Achievement } from '../../design/achievements';
 
-type Tab = 'title' | 'frame' | 'badges';
+type Tab = 'title' | 'frame' | 'name_color' | 'badges';
 const MAX_PINNED = 4;
 
 // Iconos de título (clave del catálogo → glyph Ionicons; aproximaciones cosméticas).
@@ -37,6 +39,8 @@ interface Props {
   onClose: () => void;
   initials: string;
   avatarUrl?: string | null;
+  /** Nombre real para previsualizar el color de nombre. */
+  displayName?: string;
   current: ProfileCustomization;
   onSaved: (c: ProfileCustomization) => void;
 }
@@ -46,6 +50,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
   onClose,
   initials,
   avatarUrl,
+  displayName,
   current,
   onSaved,
 }) => {
@@ -55,12 +60,14 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
   const [tab, setTab] = useState<Tab>('title');
   const [titles, setTitles] = useState<CatalogItem[]>([]);
   const [frames, setFrames] = useState<CatalogItem[]>([]);
+  const [nameColors, setNameColors] = useState<CatalogItem[]>([]);
   const [badges, setBadges] = useState<Achievement[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [titleId, setTitleId] = useState<string | null>(current.titleId);
   const [frameId, setFrameId] = useState<string | null>(current.frameId);
+  const [nameColorId, setNameColorId] = useState<string | null>(current.nameColorId);
   const [pinned, setPinned] = useState<string[]>(current.pinnedBadgeIds);
 
   useEffect(() => {
@@ -68,6 +75,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
     setTab('title');
     setTitleId(current.titleId);
     setFrameId(current.frameId);
+    setNameColorId(current.nameColorId);
     setPinned(current.pinnedBadgeIds);
     if (!token) {
       setLoading(false);
@@ -75,11 +83,12 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
     }
     let cancelled = false;
     setLoading(true);
-    Promise.all([fetchUnlockables(token, ['title', 'frame']), fetchAchievements(token)])
+    Promise.all([fetchUnlockables(token, ['title', 'frame', 'name_color']), fetchAchievements(token)])
       .then(([catalog, achievements]) => {
         if (cancelled) return;
         setTitles(catalog.filter((c) => c.kind === 'title'));
         setFrames(catalog.filter((c) => c.kind === 'frame'));
+        setNameColors(catalog.filter((c) => c.kind === 'name_color'));
         setBadges(achievements.filter((a) => a.type !== 'course'));
       })
       .finally(() => {
@@ -96,6 +105,12 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
     return { rarity: f.rarity, style: f.style, animationType: f.animationType, colors: f.colors };
   }, [frames, frameId]);
 
+  const selectedNameColor = useMemo<NameColorAttrs | null>(() => {
+    const n = nameColors.find((x) => x.id === nameColorId);
+    if (!n) return null;
+    return { id: n.id, rarity: n.rarity, colors: n.colors };
+  }, [nameColors, nameColorId]);
+
   const togglePin = (id: string) => {
     setPinned((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
@@ -107,11 +122,12 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
   const handleSave = async () => {
     if (!token) return;
     setSaving(true);
-    const next: ProfileCustomization = { titleId, frameId, pinnedBadgeIds: pinned };
+    const next: ProfileCustomization = { titleId, frameId, nameColorId, pinnedBadgeIds: pinned };
     const result = await saveCustomization(token, next);
     setSaving(false);
     if (result) {
-      onSaved(result);
+      // El PUT devuelve ids; adjuntamos el color resuelto para pintar sin re-fetch.
+      onSaved({ ...result, nameColor: selectedNameColor });
       onClose();
     }
   };
@@ -145,6 +161,15 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
           {/* Preview */}
           <View style={styles.preview}>
             <AvatarWithFrame initials={initials} avatarUrl={avatarUrl} size={72} frame={selectedFrame} />
+            {displayName ? (
+              <View style={{ marginTop: 8 }}>
+                <PlayerName
+                  name={displayName}
+                  nameColor={selectedNameColor}
+                  style={styles.previewName}
+                />
+              </View>
+            ) : null}
             {titleId ? <View style={{ marginTop: 8 }}><AnimatedTitle titleId={titleId} /></View> : null}
             {pinned.length > 0 ? (
               <View style={styles.previewBadges}>
@@ -167,6 +192,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
             {([
               { key: 'title', label: 'Título', icon: 'ribbon-outline' },
               { key: 'frame', label: 'Marco', icon: 'sparkles-outline' },
+              { key: 'name_color', label: 'Color', icon: 'color-palette-outline' },
               { key: 'badges', label: 'Logros', icon: 'medal-outline' },
             ] as const).map((t) => (
               <Pressable key={t.key} onPress={() => setTab(t.key)} style={[styles.tab, tab === t.key && styles.tabActive]}>
@@ -247,6 +273,39 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
                 </>
               )}
 
+              {/* COLOR DE NOMBRE */}
+              {tab === 'name_color' && (
+                <>
+                  <NameColorRow
+                    label="Sin color"
+                    sample={displayName ?? 'Tu nombre'}
+                    nameColor={null}
+                    selected={nameColorId == null}
+                    onPress={() => setNameColorId(null)}
+                  />
+                  {byRarity(nameColors.filter((n) => n.unlocked)).map((g) => (
+                    <View key={g.rarity} style={styles.group}>
+                      <Text style={[styles.groupLabel, { color: RARITY_CONFIG[g.rarity].color }]}>
+                        {RARITY_CONFIG[g.rarity].label.toUpperCase()}
+                      </Text>
+                      {g.items.map((n) => (
+                        <NameColorRow
+                          key={n.id}
+                          label={n.title}
+                          sample={displayName ?? 'Tu nombre'}
+                          nameColor={{ id: n.id, rarity: n.rarity, colors: n.colors }}
+                          selected={nameColorId === n.id}
+                          onPress={() => setNameColorId(nameColorId === n.id ? null : n.id)}
+                        />
+                      ))}
+                    </View>
+                  ))}
+                  {nameColors.filter((n) => n.unlocked).length === 0 ? (
+                    <Text style={styles.empty}>Aún no tienes colores de nombre. Desbloquéalos en el Pase.</Text>
+                  ) : null}
+                </>
+              )}
+
               {/* INSIGNIAS */}
               {tab === 'badges' && (
                 <>
@@ -291,6 +350,27 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
     </Modal>
   );
 };
+
+// Fila de color de nombre: muestra el nombre real con el color/gradiente.
+const NameColorRow: React.FC<{
+  label: string;
+  sample: string;
+  nameColor: NameColorAttrs | null;
+  selected: boolean;
+  onPress: () => void;
+}> = ({ label, sample, nameColor, selected, onPress }) => (
+  <Pressable onPress={onPress} style={[styles.titleRow, selected && styles.titleRowSel]}>
+    <View style={styles.nameColorSwatch}>
+      <PlayerName name={sample} nameColor={nameColor} style={styles.nameColorSample} numberOfLines={1} />
+    </View>
+    <View style={{ flex: 1, minWidth: 0 }}>
+      <Text style={styles.titleName} numberOfLines={1}>{label}</Text>
+    </View>
+    {selected ? (
+      <View style={styles.titleCheck}><Ionicons name="checkmark" size={14} color="#fff" /></View>
+    ) : null}
+  </Pressable>
+);
 
 // Fila de título reutilizable
 const TitleRow: React.FC<{
@@ -340,6 +420,9 @@ const styles = StyleSheet.create({
   saveBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F18F34', paddingHorizontal: 14, height: 36, borderRadius: 12, minWidth: 96, justifyContent: 'center' },
   saveText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   preview: { alignItems: 'center', paddingVertical: 16, backgroundColor: 'rgba(255,255,255,0.02)' },
+  previewName: { fontSize: 16, fontWeight: '800', color: '#fff' },
+  nameColorSwatch: { width: 96, justifyContent: 'center' },
+  nameColorSample: { fontSize: 14, fontWeight: '800', color: '#fff' },
   previewBadges: { flexDirection: 'row', gap: 6, marginTop: 8 },
   previewBadge: { width: 28, height: 28, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   tabs: { flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },

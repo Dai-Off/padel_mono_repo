@@ -8,6 +8,7 @@ import { RARITY_CONFIG, type AchievementRarity } from '../../design/rarity';
 import { resolveUnlockableIcon } from '../../design/unlockableIcons';
 import { Pressable } from 'react-native';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
+import { PlayerName } from '../profile/PlayerName';
 import type { SeasonPassTrackRewardDto } from '../../api/seasonPass';
 
 export type RewardDetailTarget = {
@@ -33,6 +34,7 @@ const KIND_LABEL: Record<string, string> = {
   sp: 'Season Points',
   sp_boost: 'Boost de SP',
   reroll_token: 'Token de cambio',
+  name_color: 'Color de nombre',
 };
 
 /** Render fiel del cosmético/recompensa — tal como se verá en el perfil. */
@@ -118,6 +120,16 @@ function BigReward({
       >
         <Ionicons name="dice" size={44} color="#fff" />
       </LinearGradient>
+    );
+  }
+  if (d.kind === 'name_color') {
+    const cols = Array.isArray(d.colors) ? (d.colors as string[]) : null;
+    return (
+      <PlayerName
+        name="Nombre"
+        nameColor={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols } : null}
+        style={{ fontSize: 30, fontWeight: '900', color: rarity.color }}
+      />
     );
   }
   // badge / trophy: icono grande con anillo + glow de rareza.

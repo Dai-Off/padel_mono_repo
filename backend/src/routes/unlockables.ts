@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getEquippedFrames } from '../services/equippedFramesService';
+import { getEquippedNameColors } from '../services/equippedNameColorsService';
 import {
   getPlayerAchievements,
   getPlayerUnlockablesCatalog,
@@ -269,8 +270,9 @@ router.get('/:id/public-customization', async (req: Request, res: Response) => {
   const row = data as { title_id: string | null; frame_id: string | null; pinned_badge_ids: string[] } | null;
   const pinnedIds = row?.pinned_badge_ids ?? [];
 
-  // Marco resuelto vía helper compartido (mismo shape que las listas).
+  // Marco y color de nombre resueltos vía helpers compartidos (mismo shape que las listas).
   const frame = (await getEquippedFrames(supabase, [playerId])).get(playerId) ?? null;
+  const nameColor = (await getEquippedNameColors(supabase, [playerId])).get(playerId) ?? null;
 
   // Insignias fijadas: resolver aparte desde el catálogo.
   type CatRow = { id: string; kind: string; title: string; rarity: string; icon: string | null };
@@ -290,7 +292,7 @@ router.get('/:id/public-customization', async (req: Request, res: Response) => {
 
   return res.json({
     ok: true,
-    customization: { titleId: row?.title_id ?? null, frame, pinnedBadges },
+    customization: { titleId: row?.title_id ?? null, frame, nameColor, pinnedBadges },
   });
 });
 
@@ -306,9 +308,15 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
   const supabase = getSupabaseServiceRoleClient();
 
-  const body = (req.body ?? {}) as { titleId?: string | null; frameId?: string | null; pinnedBadgeIds?: unknown };
+  const body = (req.body ?? {}) as {
+    titleId?: string | null;
+    frameId?: string | null;
+    nameColorId?: string | null;
+    pinnedBadgeIds?: unknown;
+  };
   const titleId = body.titleId ?? null;
   const frameId = body.frameId ?? null;
+  const nameColorId = body.nameColorId ?? null;
   const pinned = Array.isArray(body.pinnedBadgeIds) ? [...new Set(body.pinnedBadgeIds.map(String))] : [];
   if (pinned.length > 4) return res.status(400).json({ ok: false, error: 'Máximo 4 insignias' });
 
@@ -319,7 +327,7 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
     .eq('player_id', playerId);
   const ownedSet = new Set((owned ?? []).map((o) => (o as { unlockable_id: string }).unlockable_id));
 
-  const idsToCheck = [titleId, frameId, ...pinned].filter(
+  const idsToCheck = [titleId, frameId, nameColorId, ...pinned].filter(
     (x): x is string => typeof x === 'string' && x.length > 0 && x !== 'none',
   );
   const catMap = new Map<string, { kind: string; unlock_type: string }>();
@@ -347,6 +355,12 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'Marco no válido o bloqueado' });
     }
   }
+  if (nameColorId != null && nameColorId !== 'none') {
+    const c = catMap.get(nameColorId);
+    if (!c || c.kind !== 'name_color' || !isUnlocked(nameColorId)) {
+      return res.status(400).json({ ok: false, error: 'Color de nombre no válido o bloqueado' });
+    }
+  }
   for (const id of pinned) {
     const c = catMap.get(id);
     if (!c || (c.kind !== 'trophy' && c.kind !== 'badge') || !ownedSet.has(id)) {
@@ -354,11 +368,13 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
     }
   }
 
+  const nameColorIdToStore = nameColorId && nameColorId !== 'none' ? nameColorId : null;
   const { error } = await supabase.from('player_profile_customization').upsert(
     {
       player_id: playerId,
       title_id: titleId,
       frame_id: frameId,
+      name_color_id: nameColorIdToStore,
       pinned_badge_ids: pinned,
       updated_at: new Date().toISOString(),
     },
@@ -366,7 +382,10 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
   );
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
-  return res.json({ ok: true, customization: { titleId, frameId, pinnedBadgeIds: pinned } });
+  return res.json({
+    ok: true,
+    customization: { titleId, frameId, nameColorId: nameColorIdToStore, pinnedBadgeIds: pinned },
+  });
 });
 
 export default router;
