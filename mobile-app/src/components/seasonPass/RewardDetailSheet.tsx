@@ -9,6 +9,7 @@ import { resolveUnlockableIcon } from '../../design/unlockableIcons';
 import { Pressable } from 'react-native';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
 import { PlayerName } from '../profile/PlayerName';
+import { ProfileThemeBackground } from '../profile/ProfileThemeBackground';
 import type { SeasonPassTrackRewardDto } from '../../api/seasonPass';
 
 export type RewardDetailTarget = {
@@ -35,6 +36,7 @@ const KIND_LABEL: Record<string, string> = {
   sp_boost: 'Boost de SP',
   reroll_token: 'Token de cambio',
   name_color: 'Color de nombre',
+  theme: 'Tema de perfil',
 };
 
 /** Render fiel del cosmético/recompensa — tal como se verá en el perfil. */
@@ -130,6 +132,17 @@ function BigReward({
         nameColor={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols } : null}
         style={{ fontSize: 30, fontWeight: '900', color: rarity.color }}
       />
+    );
+  }
+  if (d.kind === 'theme') {
+    const cols = Array.isArray(d.colors) ? (d.colors as string[]) : null;
+    return (
+      <View style={{ width: 168, height: 104, borderRadius: 16, overflow: 'hidden', borderWidth: 2, borderColor: rarity.color }}>
+        <ProfileThemeBackground
+          theme={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols, animationType: d.animation_type ?? null } : null}
+          scrim={false}
+        />
+      </View>
     );
   }
   // badge / trophy: icono grande con anillo + glow de rareza.

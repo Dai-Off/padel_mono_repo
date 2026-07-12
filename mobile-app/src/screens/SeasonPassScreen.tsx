@@ -40,6 +40,7 @@ import { AuthButton } from '../components/auth/AuthButton';
 import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
 import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
 import { PlayerName } from '../components/profile/PlayerName';
+import { ProfileThemeBackground } from '../components/profile/ProfileThemeBackground';
 import type { AchievementRarity } from '../design/rarity';
 
 type Props = { onBack: () => void };
@@ -358,6 +359,17 @@ function RewardThumb({
         nameColor={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols } : null}
         style={{ fontSize: 20, fontWeight: '900', color: rarity.color }}
       />
+    );
+  } else if (d.kind === 'theme') {
+    // Tema: mini muestra del fondo animado.
+    const cols = Array.isArray(d.colors) ? (d.colors as string[]) : null;
+    inner = (
+      <View style={{ width: size - 14, height: size - 14, borderRadius: 8, overflow: 'hidden' }}>
+        <ProfileThemeBackground
+          theme={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols, animationType: d.animation_type ?? null } : null}
+          scrim={false}
+        />
+      </View>
     );
   } else {
     // trophy / badge / title: preset de icono del catálogo con color de rareza.

@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { AvatarWithFrame, type FrameAttrs } from './AvatarWithFrame';
 import { AnimatedTitle } from './AnimatedTitle';
 import { PlayerName } from './PlayerName';
+import { ProfileThemeBackground } from './ProfileThemeBackground';
 import { RarityBadge } from './RarityBadge';
 import { RARITY_CONFIG, RARITY_ORDER, type AchievementRarity } from '../../design/rarity';
 import { describeUnlock } from '../../design/frames';
@@ -14,11 +15,12 @@ import {
   type CatalogItem,
   type NameColorAttrs,
   type ProfileCustomization,
+  type ThemeAttrs,
 } from '../../api/profileCustomization';
 import { fetchAchievements } from '../../api/unlockables';
 import type { Achievement } from '../../design/achievements';
 
-type Tab = 'title' | 'frame' | 'name_color' | 'badges';
+type Tab = 'title' | 'frame' | 'name_color' | 'theme' | 'badges';
 const MAX_PINNED = 4;
 
 // Iconos de título (clave del catálogo → glyph Ionicons; aproximaciones cosméticas).
@@ -61,6 +63,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
   const [titles, setTitles] = useState<CatalogItem[]>([]);
   const [frames, setFrames] = useState<CatalogItem[]>([]);
   const [nameColors, setNameColors] = useState<CatalogItem[]>([]);
+  const [themes, setThemes] = useState<CatalogItem[]>([]);
   const [badges, setBadges] = useState<Achievement[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -68,6 +71,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
   const [titleId, setTitleId] = useState<string | null>(current.titleId);
   const [frameId, setFrameId] = useState<string | null>(current.frameId);
   const [nameColorId, setNameColorId] = useState<string | null>(current.nameColorId);
+  const [themeId, setThemeId] = useState<string | null>(current.themeId);
   const [pinned, setPinned] = useState<string[]>(current.pinnedBadgeIds);
 
   useEffect(() => {
@@ -76,6 +80,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
     setTitleId(current.titleId);
     setFrameId(current.frameId);
     setNameColorId(current.nameColorId);
+    setThemeId(current.themeId);
     setPinned(current.pinnedBadgeIds);
     if (!token) {
       setLoading(false);
@@ -83,12 +88,13 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
     }
     let cancelled = false;
     setLoading(true);
-    Promise.all([fetchUnlockables(token, ['title', 'frame', 'name_color']), fetchAchievements(token)])
+    Promise.all([fetchUnlockables(token, ['title', 'frame', 'name_color', 'theme']), fetchAchievements(token)])
       .then(([catalog, achievements]) => {
         if (cancelled) return;
         setTitles(catalog.filter((c) => c.kind === 'title'));
         setFrames(catalog.filter((c) => c.kind === 'frame'));
         setNameColors(catalog.filter((c) => c.kind === 'name_color'));
+        setThemes(catalog.filter((c) => c.kind === 'theme'));
         setBadges(achievements.filter((a) => a.type !== 'course'));
       })
       .finally(() => {
@@ -111,6 +117,12 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
     return { id: n.id, rarity: n.rarity, colors: n.colors };
   }, [nameColors, nameColorId]);
 
+  const selectedTheme = useMemo<ThemeAttrs | null>(() => {
+    const th = themes.find((x) => x.id === themeId);
+    if (!th) return null;
+    return { id: th.id, rarity: th.rarity, colors: th.colors, animationType: th.animationType };
+  }, [themes, themeId]);
+
   const togglePin = (id: string) => {
     setPinned((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
@@ -122,12 +134,12 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
   const handleSave = async () => {
     if (!token) return;
     setSaving(true);
-    const next: ProfileCustomization = { titleId, frameId, nameColorId, pinnedBadgeIds: pinned };
+    const next: ProfileCustomization = { titleId, frameId, nameColorId, themeId, pinnedBadgeIds: pinned };
     const result = await saveCustomization(token, next);
     setSaving(false);
     if (result) {
-      // El PUT devuelve ids; adjuntamos el color resuelto para pintar sin re-fetch.
-      onSaved({ ...result, nameColor: selectedNameColor });
+      // El PUT devuelve ids; adjuntamos color y tema resueltos para pintar sin re-fetch.
+      onSaved({ ...result, nameColor: selectedNameColor, theme: selectedTheme });
       onClose();
     }
   };
@@ -160,6 +172,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
 
           {/* Preview */}
           <View style={styles.preview}>
+            <ProfileThemeBackground theme={selectedTheme} />
             <AvatarWithFrame initials={initials} avatarUrl={avatarUrl} size={72} frame={selectedFrame} />
             {displayName ? (
               <View style={{ marginTop: 8 }}>
@@ -193,6 +206,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
               { key: 'title', label: 'Título', icon: 'ribbon-outline' },
               { key: 'frame', label: 'Marco', icon: 'sparkles-outline' },
               { key: 'name_color', label: 'Color', icon: 'color-palette-outline' },
+              { key: 'theme', label: 'Tema', icon: 'image-outline' },
               { key: 'badges', label: 'Logros', icon: 'medal-outline' },
             ] as const).map((t) => (
               <Pressable key={t.key} onPress={() => setTab(t.key)} style={[styles.tab, tab === t.key && styles.tabActive]}>
@@ -302,6 +316,52 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
                   ))}
                   {nameColors.filter((n) => n.unlocked).length === 0 ? (
                     <Text style={styles.empty}>Aún no tienes colores de nombre. Desbloquéalos en el Pase.</Text>
+                  ) : null}
+                </>
+              )}
+
+              {/* TEMA */}
+              {tab === 'theme' && (
+                <>
+                  <View style={styles.themeGrid}>
+                    <Pressable
+                      onPress={() => setThemeId(null)}
+                      style={[styles.themeCell, themeId == null && styles.themeCellSel]}
+                    >
+                      <View style={[styles.themeThumb, styles.themeNone]}>
+                        <Ionicons name="ban-outline" size={20} color="#6B7280" />
+                      </View>
+                      <Text style={styles.themeName} numberOfLines={1}>Sin tema</Text>
+                    </Pressable>
+                  </View>
+                  {byRarity(themes.filter((th) => th.unlocked)).map((g) => (
+                    <View key={g.rarity} style={styles.group}>
+                      <Text style={[styles.groupLabel, { color: RARITY_CONFIG[g.rarity].color }]}>
+                        {RARITY_CONFIG[g.rarity].label.toUpperCase()}
+                      </Text>
+                      <View style={styles.themeGrid}>
+                        {g.items.map((th) => {
+                          const sel = themeId === th.id;
+                          const attrs: ThemeAttrs = { id: th.id, rarity: th.rarity, colors: th.colors, animationType: th.animationType };
+                          return (
+                            <Pressable
+                              key={th.id}
+                              onPress={() => setThemeId(sel ? null : th.id)}
+                              style={[styles.themeCell, sel && styles.themeCellSel]}
+                            >
+                              <View style={styles.themeThumb}>
+                                <ProfileThemeBackground theme={attrs} scrim={false} />
+                              </View>
+                              <Text style={styles.themeName} numberOfLines={1}>{th.title}</Text>
+                              {sel ? <View style={styles.selCheck}><Ionicons name="checkmark" size={12} color="#fff" /></View> : null}
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ))}
+                  {themes.filter((th) => th.unlocked).length === 0 ? (
+                    <Text style={styles.empty}>Aún no tienes temas. Desbloquéalos en el Pase.</Text>
                   ) : null}
                 </>
               )}
@@ -419,10 +479,17 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 15, fontWeight: '700', color: '#fff' },
   saveBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F18F34', paddingHorizontal: 14, height: 36, borderRadius: 12, minWidth: 96, justifyContent: 'center' },
   saveText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  preview: { alignItems: 'center', paddingVertical: 16, backgroundColor: 'rgba(255,255,255,0.02)' },
+  preview: { alignItems: 'center', paddingVertical: 16, backgroundColor: 'rgba(255,255,255,0.02)', overflow: 'hidden' },
   previewName: { fontSize: 16, fontWeight: '800', color: '#fff' },
   nameColorSwatch: { width: 96, justifyContent: 'center' },
   nameColorSample: { fontSize: 14, fontWeight: '800', color: '#fff' },
+  // tema
+  themeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  themeCell: { width: '47%', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(255,255,255,0.03)', padding: 6, gap: 6 },
+  themeCellSel: { borderColor: 'rgba(241,143,52,0.5)', backgroundColor: 'rgba(241,143,52,0.1)' },
+  themeThumb: { aspectRatio: 16 / 10, borderRadius: 10, overflow: 'hidden', backgroundColor: '#0a0807' },
+  themeNone: { alignItems: 'center', justifyContent: 'center' },
+  themeName: { fontSize: 11, color: '#d1d5db', fontWeight: '700', textAlign: 'center', paddingBottom: 2 },
   previewBadges: { flexDirection: 'row', gap: 6, marginTop: 8 },
   previewBadge: { width: 28, height: 28, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   tabs: { flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },

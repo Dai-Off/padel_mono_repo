@@ -16,6 +16,7 @@ import {
 } from '../api/profileStats';
 import { fetchPlayerPublicCustomization, type PublicProfileCustomization } from '../api/profileCustomization';
 import { PlayerName } from '../components/profile/PlayerName';
+import { ProfileThemeBackground } from '../components/profile/ProfileThemeBackground';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 import { AnimatedTitle } from '../components/profile/AnimatedTitle';
 import { LigaChip } from '../components/profile/LigaChip';
@@ -175,6 +176,9 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
           ) : (
             <LinearGradient colors={['#1a1a1a', '#0F0F0F', '#0F0F0F']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.coverImg} />
           )}
+          {!profile.coverUrl?.trim() && customization?.theme ? (
+            <ProfileThemeBackground theme={customization.theme} scrim={false} />
+          ) : null}
           <LinearGradient colors={['rgba(241,143,52,0.25)', 'transparent', '#0F0F0F']} style={StyleSheet.absoluteFill} />
         </View>
 
