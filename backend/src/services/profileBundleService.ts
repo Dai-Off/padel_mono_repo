@@ -1,6 +1,7 @@
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getEquippedNameColors } from './equippedNameColorsService';
+import { getEquippedThemes } from './equippedThemesService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lecturas puras de las piezas del perfil, reutilizadas por las rutas
@@ -108,7 +109,7 @@ export async function getPlayerUnlockablesCatalog(
 export async function getPlayerCustomization(supabase: SupabaseClient, playerId: string) {
   const { data, error } = await supabase
     .from('player_profile_customization')
-    .select('title_id, frame_id, name_color_id, pinned_badge_ids')
+    .select('title_id, frame_id, name_color_id, theme_id, pinned_badge_ids')
     .eq('player_id', playerId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -117,14 +118,20 @@ export async function getPlayerCustomization(supabase: SupabaseClient, playerId:
     title_id: string | null;
     frame_id: string | null;
     name_color_id: string | null;
+    theme_id: string | null;
     pinned_badge_ids: string[];
   } | null;
-  const nameColor = (await getEquippedNameColors(supabase, [playerId])).get(playerId) ?? null;
+  const [nameColor, theme] = await Promise.all([
+    getEquippedNameColors(supabase, [playerId]).then((m) => m.get(playerId) ?? null),
+    getEquippedThemes(supabase, [playerId]).then((m) => m.get(playerId) ?? null),
+  ]);
   return {
     titleId: row?.title_id ?? null,
     frameId: row?.frame_id ?? null,
     nameColorId: row?.name_color_id ?? null,
     nameColor,
+    themeId: row?.theme_id ?? null,
+    theme,
     pinnedBadgeIds: row?.pinned_badge_ids ?? [],
   };
 }

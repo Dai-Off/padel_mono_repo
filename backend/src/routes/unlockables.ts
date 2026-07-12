@@ -3,6 +3,7 @@ import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getEquippedFrames } from '../services/equippedFramesService';
 import { getEquippedNameColors } from '../services/equippedNameColorsService';
+import { getEquippedThemes } from '../services/equippedThemesService';
 import {
   getPlayerAchievements,
   getPlayerUnlockablesCatalog,
@@ -270,9 +271,12 @@ router.get('/:id/public-customization', async (req: Request, res: Response) => {
   const row = data as { title_id: string | null; frame_id: string | null; pinned_badge_ids: string[] } | null;
   const pinnedIds = row?.pinned_badge_ids ?? [];
 
-  // Marco y color de nombre resueltos vía helpers compartidos (mismo shape que las listas).
-  const frame = (await getEquippedFrames(supabase, [playerId])).get(playerId) ?? null;
-  const nameColor = (await getEquippedNameColors(supabase, [playerId])).get(playerId) ?? null;
+  // Marco, color de nombre y tema resueltos vía helpers compartidos (mismo shape que las listas).
+  const [frame, nameColor, theme] = await Promise.all([
+    getEquippedFrames(supabase, [playerId]).then((m) => m.get(playerId) ?? null),
+    getEquippedNameColors(supabase, [playerId]).then((m) => m.get(playerId) ?? null),
+    getEquippedThemes(supabase, [playerId]).then((m) => m.get(playerId) ?? null),
+  ]);
 
   // Insignias fijadas: resolver aparte desde el catálogo.
   type CatRow = { id: string; kind: string; title: string; rarity: string; icon: string | null };
@@ -292,7 +296,7 @@ router.get('/:id/public-customization', async (req: Request, res: Response) => {
 
   return res.json({
     ok: true,
-    customization: { titleId: row?.title_id ?? null, frame, nameColor, pinnedBadges },
+    customization: { titleId: row?.title_id ?? null, frame, nameColor, theme, pinnedBadges },
   });
 });
 
@@ -312,11 +316,13 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
     titleId?: string | null;
     frameId?: string | null;
     nameColorId?: string | null;
+    themeId?: string | null;
     pinnedBadgeIds?: unknown;
   };
   const titleId = body.titleId ?? null;
   const frameId = body.frameId ?? null;
   const nameColorId = body.nameColorId ?? null;
+  const themeId = body.themeId ?? null;
   const pinned = Array.isArray(body.pinnedBadgeIds) ? [...new Set(body.pinnedBadgeIds.map(String))] : [];
   if (pinned.length > 4) return res.status(400).json({ ok: false, error: 'Máximo 4 insignias' });
 
@@ -327,7 +333,7 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
     .eq('player_id', playerId);
   const ownedSet = new Set((owned ?? []).map((o) => (o as { unlockable_id: string }).unlockable_id));
 
-  const idsToCheck = [titleId, frameId, nameColorId, ...pinned].filter(
+  const idsToCheck = [titleId, frameId, nameColorId, themeId, ...pinned].filter(
     (x): x is string => typeof x === 'string' && x.length > 0 && x !== 'none',
   );
   const catMap = new Map<string, { kind: string; unlock_type: string }>();
@@ -361,6 +367,12 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'Color de nombre no válido o bloqueado' });
     }
   }
+  if (themeId != null && themeId !== 'none') {
+    const c = catMap.get(themeId);
+    if (!c || c.kind !== 'theme' || !isUnlocked(themeId)) {
+      return res.status(400).json({ ok: false, error: 'Tema no válido o bloqueado' });
+    }
+  }
   for (const id of pinned) {
     const c = catMap.get(id);
     if (!c || (c.kind !== 'trophy' && c.kind !== 'badge') || !ownedSet.has(id)) {
@@ -369,12 +381,14 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
   }
 
   const nameColorIdToStore = nameColorId && nameColorId !== 'none' ? nameColorId : null;
+  const themeIdToStore = themeId && themeId !== 'none' ? themeId : null;
   const { error } = await supabase.from('player_profile_customization').upsert(
     {
       player_id: playerId,
       title_id: titleId,
       frame_id: frameId,
       name_color_id: nameColorIdToStore,
+      theme_id: themeIdToStore,
       pinned_badge_ids: pinned,
       updated_at: new Date().toISOString(),
     },
@@ -384,7 +398,13 @@ router.put('/me/profile-customization', async (req: Request, res: Response) => {
 
   return res.json({
     ok: true,
-    customization: { titleId, frameId, nameColorId: nameColorIdToStore, pinnedBadgeIds: pinned },
+    customization: {
+      titleId,
+      frameId,
+      nameColorId: nameColorIdToStore,
+      themeId: themeIdToStore,
+      pinnedBadgeIds: pinned,
+    },
   });
 });
 
