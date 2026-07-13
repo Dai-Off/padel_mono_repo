@@ -9,6 +9,7 @@ import Animated, {
   useSharedValue,
   withDelay,
   withRepeat,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import type { ThemeAttrs } from '../../api/profileCustomization';
@@ -111,21 +112,58 @@ function ApproachLines({ color }: { color: string }) {
   );
 }
 
-/** Giro holográfico (prisma). */
+/** Giro holográfico + brillo que barre (prisma). */
+function Prisma({ accent }: { accent: string }) {
+  return (
+    <>
+      <Holo accent={accent} />
+      <Sheen />
+    </>
+  );
+}
+
 function Holo({ accent }: { accent: string }) {
-  const p = useSharedValue(0);
+  const spin = useSharedValue(0);
+  const pulse = useSharedValue(0);
   useEffect(() => {
-    p.value = withRepeat(withTiming(1, { duration: 9000, easing: Easing.linear }), -1, false);
-    return () => cancelAnimation(p);
-  }, [p]);
-  const st = useAnimatedStyle(() => ({ transform: [{ rotate: `${p.value * 360}deg` }, { scale: 1.6 }] }));
+    spin.value = withRepeat(withTiming(1, { duration: 6000, easing: Easing.linear }), -1, false);
+    pulse.value = withRepeat(withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.ease) }), -1, true);
+    return () => {
+      cancelAnimation(spin);
+      cancelAnimation(pulse);
+    };
+  }, [spin, pulse]);
+  const st = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${spin.value * 360}deg` }, { scale: 1.5 + pulse.value * 0.35 }],
+    opacity: 0.42 + pulse.value * 0.28,
+  }));
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }, st]}>
       <LinearGradient
         colors={['#ff5db1', '#ff8a3a', '#ffe14d', '#57e7a2', '#4ab8ff', accent, '#ff5db1']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={{ width: '140%', height: '140%', opacity: 0.5 }}
+        style={{ width: '150%', height: '150%' }}
+      />
+    </Animated.View>
+  );
+}
+
+/** Brillo diagonal que barre (holo/prisma). */
+function Sheen() {
+  const p = useSharedValue(0);
+  useEffect(() => {
+    p.value = withRepeat(withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.ease) }), -1, false);
+    return () => cancelAnimation(p);
+  }, [p]);
+  const st = useAnimatedStyle(() => ({ transform: [{ translateX: (p.value - 0.5) * 500 }, { rotate: '18deg' }] }));
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, { alignItems: 'center' }, st]} pointerEvents="none">
+      <LinearGradient
+        colors={['transparent', 'rgba(255,255,255,0.22)', 'transparent']}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={{ width: '55%', height: '170%', top: '-35%' }}
       />
     </Animated.View>
   );
@@ -168,12 +206,7 @@ function Effect({ type, accent, bottom }: { type: string | null; accent: string;
     case 'smoke':
       return <Drift colors={[accent + '2b', accent + '22']} dur={13000} dx={40} dy={22} />;
     case 'aurora':
-      return (
-        <>
-          <Drift colors={['#3cffaa55', '#7850ff44']} dur={8000} dx={70} dy={10} angle={1} />
-          <Drift colors={['#4ab8ff44', '#3cffaa33']} dur={11000} dx={-60} dy={14} angle={1} />
-        </>
-      );
+      return <Aurora />;
     case 'court':
       return <ApproachLines color={accent} />;
     case 'neon':
@@ -186,16 +219,9 @@ function Effect({ type, accent, bottom }: { type: string | null; accent: string;
     case 'waves':
       return <WaveField accent={accent} />;
     case 'cosmos':
-      return (
-        <>
-          <NebulaSvg accent={accent} />
-          {STAR_POS.map(([x, y], i) => (
-            <Twinkle key={i} leftPct={x} topPct={y} size={i % 3 === 0 ? 2.4 : 1.6} dur={2600 + (i % 5) * 500} delay={i * 260} />
-          ))}
-        </>
-      );
+      return <Cosmos accent={accent} />;
     case 'prisma':
-      return <Holo accent={accent} />;
+      return <Prisma accent={accent} />;
     default:
       // Sin motor conocido: un resplandor sutil desde abajo con el acento.
       return (
@@ -204,43 +230,146 @@ function Effect({ type, accent, bottom }: { type: string | null; accent: string;
   }
 }
 
-/** Nebulosa radial (cosmos), SVG. */
-function NebulaSvg({ accent }: { accent: string }) {
+/** Aurora: cortinas verticales difusas que ondulan (sin bloques duros). */
+function AuroraBand({ color, dur, delay, left, width, base }: {
+  color: string; dur: number; delay: number; left: number; width: `${number}%`; base: number;
+}) {
+  const p = useSharedValue(0);
+  useEffect(() => {
+    p.value = withDelay(delay, withRepeat(withTiming(1, { duration: dur, easing: Easing.inOut(Easing.ease) }), -1, true));
+    return () => cancelAnimation(p);
+  }, [p, dur, delay]);
+  const st = useAnimatedStyle(() => ({
+    transform: [{ translateX: (p.value - 0.5) * 44 }, { scaleY: 0.85 + p.value * 0.5 }, { rotate: `${(p.value - 0.5) * 18}deg` }],
+    opacity: base + p.value * 0.45,
+  }));
   return (
-    <Svg style={StyleSheet.absoluteFill}>
-      <Defs>
-        <RadialGradient id="neb" cx="30%" cy="70%" r="70%">
-          <Stop offset="0" stopColor={accent} stopOpacity="0.45" />
-          <Stop offset="1" stopColor={accent} stopOpacity="0" />
-        </RadialGradient>
-      </Defs>
-      <Circle cx="30%" cy="70%" r="60%" fill="url(#neb)" />
-    </Svg>
+    <Animated.View style={[{ position: 'absolute', top: '-30%', height: '160%', left: `${left}%`, width }, st]}>
+      <LinearGradient colors={['transparent', color, 'transparent']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={{ flex: 1 }} />
+    </Animated.View>
   );
 }
 
-/** Olas (SVG paths desplazándose). */
+function Aurora() {
+  return (
+    <>
+      <AuroraBand color="rgba(60,255,170,0.55)" dur={7000} delay={0} left={2} width="46%" base={0.28} />
+      <AuroraBand color="rgba(74,184,255,0.5)" dur={9000} delay={1200} left={32} width="52%" base={0.26} />
+      <AuroraBand color="rgba(168,108,255,0.5)" dur={8200} delay={600} left={58} width="44%" base={0.24} />
+    </>
+  );
+}
+
+/** Olas en capas + burbujas + brillo (océano). */
 function WaveField({ accent }: { accent: string }) {
   const p = useSharedValue(0);
   useEffect(() => {
-    p.value = withRepeat(withTiming(1, { duration: 7000, easing: Easing.inOut(Easing.ease) }), -1, true);
+    p.value = withRepeat(withTiming(1, { duration: 6000, easing: Easing.inOut(Easing.ease) }), -1, true);
     return () => cancelAnimation(p);
   }, [p]);
-  const s1 = useAnimatedStyle(() => ({ transform: [{ translateX: (p.value - 0.5) * 40 }] }));
-  const s2 = useAnimatedStyle(() => ({ transform: [{ translateX: (0.5 - p.value) * 50 }] }));
+  const back = useAnimatedStyle(() => ({ transform: [{ translateX: (p.value - 0.5) * 34 }, { translateY: (0.5 - p.value) * 4 }] }));
+  const mid = useAnimatedStyle(() => ({ transform: [{ translateX: (0.5 - p.value) * 48 }, { translateY: (p.value - 0.5) * 5 }] }));
+  const front = useAnimatedStyle(() => ({ transform: [{ translateX: (p.value - 0.5) * 62 }] }));
+  const wave = (y: number) => `M-40 ${y} q 20 -9 40 0 t 40 0 t 40 0 t 40 0 t 40 0 t 40 0 V100 H-40 Z`;
   return (
     <>
-      <Animated.View style={[StyleSheet.absoluteFill, s1]}>
+      <Animated.View style={[StyleSheet.absoluteFill, back]}>
         <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none" viewBox="0 0 100 100">
-          <Path d="M-20 62 Q 25 52 60 62 T 140 62 V100 H-20 Z" fill={accent} opacity={0.28} />
+          <Path d={wave(50)} fill={accent} opacity={0.18} />
         </Svg>
       </Animated.View>
-      <Animated.View style={[StyleSheet.absoluteFill, s2]}>
+      <Animated.View style={[StyleSheet.absoluteFill, mid]}>
         <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none" viewBox="0 0 100 100">
-          <Path d="M-20 76 Q 30 68 65 76 T 140 76 V100 H-20 Z" fill={accent} opacity={0.22} />
+          <Path d={wave(64)} fill={accent} opacity={0.26} />
         </Svg>
       </Animated.View>
+      <Animated.View style={[StyleSheet.absoluteFill, front]}>
+        <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none" viewBox="0 0 100 100">
+          <Path d={wave(78)} fill={accent} opacity={0.34} />
+        </Svg>
+      </Animated.View>
+      {[14, 30, 46, 62, 78, 90].map((x, i) => (
+        <Rising key={i} leftPct={x} size={i % 2 === 0 ? 2.5 : 1.8} color="rgba(200,240,255,0.9)" dur={5200 + (i % 3) * 1100} delay={i * 520} rise={100} />
+      ))}
+      <LinearGradient colors={['rgba(180,235,255,0.16)', 'transparent']} start={{ x: 0.5, y: 0.4 }} end={{ x: 0.5, y: 0.78 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
     </>
+  );
+}
+
+/** Cosmos: nebulosa animada + starfield con deriva + estrella fugaz. */
+function Cosmos({ accent }: { accent: string }) {
+  const drift = useSharedValue(0);
+  useEffect(() => {
+    drift.value = withRepeat(withTiming(1, { duration: 20000, easing: Easing.inOut(Easing.ease) }), -1, true);
+    return () => cancelAnimation(drift);
+  }, [drift]);
+  const driftSt = useAnimatedStyle(() => ({ transform: [{ translateX: (drift.value - 0.5) * 16 }, { translateY: (drift.value - 0.5) * 12 }] }));
+  return (
+    <>
+      <Nebula accent={accent} />
+      <Animated.View style={[StyleSheet.absoluteFill, driftSt]}>
+        {STAR_POS.map(([x, y], i) => (
+          <Twinkle key={`a${i}`} leftPct={x} topPct={y} size={i % 3 === 0 ? 2.4 : 1.5} dur={2200 + (i % 5) * 500} delay={i * 240} />
+        ))}
+        {STAR_POS.map(([x, y], i) => (
+          <Twinkle key={`b${i}`} leftPct={(x + 9) % 100} topPct={(y + 43) % 100} size={i % 4 === 0 ? 2 : 1.2} dur={2600 + (i % 4) * 600} delay={i * 320 + 500} />
+        ))}
+      </Animated.View>
+      <ShootingStar />
+    </>
+  );
+}
+
+/** Nebulosa que respira y deriva. */
+function Nebula({ accent }: { accent: string }) {
+  const p = useSharedValue(0);
+  useEffect(() => {
+    p.value = withRepeat(withTiming(1, { duration: 9000, easing: Easing.inOut(Easing.ease) }), -1, true);
+    return () => cancelAnimation(p);
+  }, [p]);
+  const st = useAnimatedStyle(() => ({ opacity: 0.6 + p.value * 0.4, transform: [{ scale: 1 + p.value * 0.12 }, { translateX: (p.value - 0.5) * 10 }] }));
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, st]}>
+      <Svg style={StyleSheet.absoluteFill}>
+        <Defs>
+          <RadialGradient id="neb" cx="30%" cy="68%" r="70%">
+            <Stop offset="0" stopColor={accent} stopOpacity="0.5" />
+            <Stop offset="1" stopColor={accent} stopOpacity="0" />
+          </RadialGradient>
+          <RadialGradient id="neb2" cx="78%" cy="30%" r="55%">
+            <Stop offset="0" stopColor="#4ab8ff" stopOpacity="0.32" />
+            <Stop offset="1" stopColor="#4ab8ff" stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        <Circle cx="30%" cy="68%" r="62%" fill="url(#neb)" />
+        <Circle cx="78%" cy="30%" r="50%" fill="url(#neb2)" />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+/** Estrella fugaz que cruza ocasionalmente. */
+function ShootingStar() {
+  const p = useSharedValue(0);
+  useEffect(() => {
+    p.value = withDelay(
+      1500,
+      withRepeat(
+        withSequence(withTiming(1, { duration: 1100, easing: Easing.in(Easing.quad) }), withDelay(5200, withTiming(0, { duration: 0 }))),
+        -1,
+        false,
+      ),
+    );
+    return () => cancelAnimation(p);
+  }, [p]);
+  const st = useAnimatedStyle(() => ({
+    transform: [{ translateX: -40 + p.value * 220 }, { translateY: -20 + p.value * 150 }, { rotate: '30deg' }],
+    opacity: Math.sin(p.value * Math.PI) * 0.9,
+  }));
+  return (
+    <Animated.View style={[{ position: 'absolute', top: '8%', left: '6%', width: 60, height: 2, borderRadius: 2 }, st]} pointerEvents="none">
+      <LinearGradient colors={['transparent', '#ffffff']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
+    </Animated.View>
   );
 }
 
