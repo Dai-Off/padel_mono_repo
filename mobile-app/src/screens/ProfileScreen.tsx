@@ -432,8 +432,8 @@ export function ProfileScreen({
               style={styles.coverImg}
             />
           )}
-          {/* Tema equipado como fondo del cover (si no hay imagen propia). */}
-          {!coverUrl?.trim() && customization?.theme ? (
+          {/* Tema equipado: cubre el cover (foto o gradiente). Vuelve al elegir "Sin tema". */}
+          {customization?.theme ? (
             <ProfileThemeBackground theme={customization.theme} scrim={false} />
           ) : null}
           <LinearGradient
