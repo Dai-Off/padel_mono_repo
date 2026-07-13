@@ -10,6 +10,7 @@ export interface CommunityPlayer {
   avatar_url: string | null;
   /** Marco equipado del autor (para pintar el pack). */
   frame?: FrameAttrs | null;
+  is_following?: boolean;
 }
 
 export interface CommunityPostImage {

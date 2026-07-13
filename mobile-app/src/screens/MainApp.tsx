@@ -1050,6 +1050,8 @@ export function MainApp() {
             setSelectedPublicPlayerId(pid);
             setShowPublicProfile(true);
           }}
+          myPlayerId={profile?.id}
+          onNavigateToTab={handleTabChange}
         />
       );
     }

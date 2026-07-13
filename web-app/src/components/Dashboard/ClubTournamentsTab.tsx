@@ -410,6 +410,32 @@ function formatMatchScheduleLabel(m: CompetitionMatch): string {
   return `${court} · ${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
+function formatTournamentDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const weekday = d.toLocaleDateString('es-ES', { weekday: 'short' }).replace('.', '');
+  const datePart = d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+  const timePart = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${weekday}, ${datePart}, ${timePart}`;
+}
+
+function formatTournamentPrice(cents: number): string {
+  return `${(cents / 100).toFixed(2).replace('.', ',')}€`;
+}
+
+function tournamentStatusLabel(status: TournamentListItem['status']): string {
+  if (status === 'open') return 'Pendiente';
+  if (status === 'closed') return 'Finalizado';
+  return 'Cancelado';
+}
+
+function tournamentStatusClass(status: TournamentListItem['status']): string {
+  if (status === 'open') return 'bg-amber-100 text-amber-900 border-amber-200';
+  if (status === 'closed') return 'bg-green-50 text-green-700 border-green-100';
+  return 'bg-red-50 text-red-600 border-red-100';
+}
+
 function MatchResultEditor({
   tournamentId,
   m,
@@ -1665,58 +1691,78 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
       {!isDetailRoute && (
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-          <div className="divide-y divide-gray-100">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[960px] text-left border-collapse">
+              <thead className="bg-white border-b border-gray-100">
+                <tr>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-gray-500">Nombre</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-gray-500 whitespace-nowrap">Fin de inscripción</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-gray-500 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => setFilterSort((s) => (s === 'newest' ? 'oldest' : 'newest'))}
+                      className="inline-flex items-center gap-1 hover:text-gray-800"
+                    >
+                      Fecha de inicio
+                      <ArrowDownUp className="w-3 h-3" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-gray-500">Precio</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-gray-500">Jugadores</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-gray-500 hidden lg:table-cell">Organizadores</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-gray-500">Deporte</th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-gray-500">Estado</th>
+                  <th className="px-4 py-3 w-28" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
             {paginatedItems.map((row) => {
               const confirmed = row.confirmed_count ?? 0;
               const pending = row.pending_count ?? 0;
               const hasPendingEntryRequests = (row.pending_entry_requests_count ?? 0) > 0;
               const hasUnreadChat = Boolean(chatUnread[row.id]);
               const hasChatAlert = Boolean(chatUnread[row.id]) || hasPendingEntryRequests;
-              const statusLabel = row.status === 'open' ? 'Próximo' : row.status === 'closed' ? 'Cerrado' : 'Cancelado';
-              const statusClass =
-                row.status === 'open'
-                  ? 'bg-blue-50 text-blue-700 border-blue-100'
-                  : row.status === 'closed'
-                    ? 'bg-green-50 text-green-700 border-green-100'
-                    : 'bg-red-50 text-red-600 border-red-100';
               const menuOpen = rowMenuOpenId === row.id;
               return (
-                <div key={row.id} className="relative flex items-center px-4 py-3 hover:bg-gray-50 transition">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelected(row);
-                      navigate(`/torneos/${row.id}`);
-                    }}
-                    className="flex-1 min-w-0 text-left"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-[#1A1A1A] truncate">{row.name || row.description || 'Torneo sin nombre'}</p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-                          <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleDateString()}</span>
-                          <span className="inline-flex items-center gap-1"><Clock3 className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                          <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {confirmed + pending}/{row.max_players}</span>
-                          {hasPendingEntryRequests && (
-                            <span className="inline-flex items-center gap-1 text-amber-800 font-semibold">
-                              <Inbox className="w-3.5 h-3.5" />
-                              {row.pending_entry_requests_count} solicitud{(row.pending_entry_requests_count ?? 0) === 1 ? '' : 'es'}
-                            </span>
-                          )}
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-700 font-medium">
-                            {tournamentGenderLabel(row.gender)}
-                          </span>
-                          {(row.price_cents ?? 0) > 0 && (
-                            <span className="inline-flex items-center gap-1" title="Precio inscripción"><DollarSign className="w-3.5 h-3.5" /> Inscripción €{((row.price_cents ?? 0) / 100).toFixed(0)}</span>
-                          )}
-                          <span className="inline-flex items-center gap-1" title="Premios totales"><Award className="w-3.5 h-3.5" /> Premios €{(((row.prize_total_cents ?? 0)) / 100).toFixed(0)}</span>
-                        </div>
-                      </div>
-                      <span className={`shrink-0 text-[10px] px-2.5 py-1 rounded-full border font-semibold ${statusClass}`}>{statusLabel}</span>
-                    </div>
-                  </button>
-
-                  <div className="shrink-0 flex items-center gap-1 ml-2">
+                <tr key={row.id} className="hover:bg-gray-50/80 transition-colors">
+                  <td className="px-4 py-3 align-middle">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelected(row);
+                        navigate(`/torneos/${row.id}`);
+                      }}
+                      className="text-left min-w-0"
+                    >
+                      <p className="text-sm font-bold text-[#1A1A1A] truncate max-w-[220px]">{row.name || row.description || 'Torneo sin nombre'}</p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">Torneo</p>
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 align-middle text-[11px] text-gray-600 whitespace-nowrap">
+                    {formatTournamentDateTime(row.registration_closed_at)}
+                  </td>
+                  <td className="px-4 py-3 align-middle text-[11px] text-gray-600 whitespace-nowrap">
+                    {formatTournamentDateTime(row.start_at)}
+                  </td>
+                  <td className="px-4 py-3 align-middle text-[11px] font-medium text-gray-800 whitespace-nowrap">
+                    {formatTournamentPrice(row.price_cents ?? 0)}
+                  </td>
+                  <td className="px-4 py-3 align-middle text-[11px] text-gray-600 whitespace-nowrap">
+                    {confirmed + pending} / {row.max_players}
+                  </td>
+                  <td className="px-4 py-3 align-middle text-[11px] text-gray-400 hidden lg:table-cell">
+                    —
+                  </td>
+                  <td className="px-4 py-3 align-middle text-[11px] text-gray-600 whitespace-nowrap">
+                    Pádel
+                  </td>
+                  <td className="px-4 py-3 align-middle">
+                    <span className={`inline-flex text-[10px] px-2.5 py-1 rounded-full border font-semibold whitespace-nowrap ${tournamentStatusClass(row.status)}`}>
+                      {tournamentStatusLabel(row.status)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 align-middle relative">
+                  <div className="flex items-center justify-end gap-1">
                     <button
                       type="button"
                       title="Chat del torneo"
@@ -1789,7 +1835,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   {menuOpen && (
                     <>
                       <div className="fixed inset-0 z-30" onClick={() => setRowMenuOpenId(null)} />
-                      <div className="absolute right-4 top-10 z-40 w-48 bg-white rounded-xl border border-gray-200 shadow-lg py-1 text-xs">
+                      <div className="absolute right-0 top-full mt-1 z-40 w-48 bg-white rounded-xl border border-gray-200 shadow-lg py-1 text-xs">
                         <button
                           type="button"
                           className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
@@ -1869,15 +1915,22 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       </div>
                     </>
                   )}
-                </div>
+                  </td>
+                </tr>
               );
             })}
             {filteredItems.length === 0 && items.length > 0 && (
-              <div className="py-10 text-center text-xs text-gray-400">No hay torneos que coincidan con los filtros.</div>
+              <tr>
+                <td colSpan={9} className="py-10 text-center text-xs text-gray-400">No hay torneos que coincidan con los filtros.</td>
+              </tr>
             )}
             {items.length === 0 && (
-              <div className="py-10 text-center text-xs text-gray-400">No hay torneos creados todavía.</div>
+              <tr>
+                <td colSpan={9} className="py-10 text-center text-xs text-gray-400">No hay torneos creados todavía.</td>
+              </tr>
             )}
+              </tbody>
+            </table>
           </div>
           {filteredItems.length > 0 && (
             <div className="flex flex-wrap items-center justify-end gap-4 px-4 py-3 border-t border-gray-100 bg-gray-50/50">

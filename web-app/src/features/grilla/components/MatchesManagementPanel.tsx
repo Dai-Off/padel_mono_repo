@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { apiFetchWithAuth } from '../../../services/api';
 import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
 import { CreateMatchModal } from './CreateMatchModal';
+import { PopoverMonthCalendar } from './PopoverMonthCalendar';
 import { PlayerSearch, ReservationModal } from './ReservationModal';
 import { CashRefundModal, type CashRefundConfirmPayload } from './CashRefundModal';
 import type { Court, Reservation } from '../types';
@@ -94,6 +95,8 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
     const [inlineLoading, setInlineLoading] = useState(false);
 
     const filterPanelRef = useRef<HTMLDivElement>(null);
+    const datePickerRef = useRef<HTMLDivElement>(null);
+    const [calendarOpen, setCalendarOpen] = useState(false);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -519,12 +522,25 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                 </div>
                 <div className="flex items-center gap-2 min-w-0">
 
-                    <div className="hidden sm:flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                    <div className="flex items-center border border-gray-200 rounded-lg overflow-visible bg-white shadow-sm relative">
                         <button onClick={handlePrevDay} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200 transition-colors">
                             <ChevronLeft className="w-4 h-4" />
                         </button>
-                        <div className="px-4 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[100px] justify-center">
-                            {getDisplayDate()} <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                        <div ref={datePickerRef} className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setCalendarOpen((o) => !o)}
+                                className="px-3 sm:px-4 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[90px] sm:min-w-[100px] justify-center hover:bg-gray-50 transition-colors"
+                            >
+                                {getDisplayDate()} <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                            </button>
+                            <PopoverMonthCalendar
+                                anchorRef={datePickerRef}
+                                open={calendarOpen}
+                                onClose={() => setCalendarOpen(false)}
+                                value={currentDate}
+                                onChange={setCurrentDate}
+                            />
                         </div>
                         <button onClick={handleNextDay} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-l border-gray-200 transition-colors">
                             <ChevronRight className="w-4 h-4" />
@@ -716,21 +732,6 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                     </button>
                     <button className="p-1.5 border border-gray-200 text-[#005bc5] bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
                         <Settings className="w-4 h-4" />
-                    </button>
-                </div>
-            </div>
-
-            {/* Sub-header row for mobile date selector */}
-            <div className="flex sm:hidden items-center justify-center py-2 px-4 border-b bg-gray-50/50 gap-2 shrink-0">
-                <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
-                    <button onClick={handlePrevDay} className="px-2.5 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200 transition-colors">
-                        <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <div className="px-5 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[110px] justify-center">
-                        {getDisplayDate()} <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                    </div>
-                    <button onClick={handleNextDay} className="px-2.5 py-1.5 text-gray-400 hover:bg-gray-50 border-l border-gray-200 transition-colors">
-                        <ChevronRight className="w-4 h-4" />
                     </button>
                 </div>
             </div>

@@ -62,4 +62,6 @@ export const community: CommunityTranslationKeys = {
   postLikesMany: 'Me gustas',
   viewComments: 'Ver los {count} comentarios',
   storyTextPlaceholder: 'Escribe algo...',
+  searchPlaceholder: 'Buscar jugadores...',
+  searchNoResults: 'No se encontraron jugadores',
 };

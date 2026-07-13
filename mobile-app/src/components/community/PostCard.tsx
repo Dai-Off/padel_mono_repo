@@ -8,6 +8,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTranslation } from '../../i18n';
 import { formatPlayerLabel } from '../../lib/username';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
+import { toggleFollow } from '../../api/playerFollows';
+import { fetchMyPlayerId } from '../../api/players';
+import { useEffect } from 'react';
 
 /** Iniciales (máx 2) del autor para el avatar. */
 function authorInitials(p: { first_name?: string | null; last_name?: string | null; username?: string | null }): string {
@@ -32,6 +35,28 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments, onPre
   const [isLiked, setIsLiked] = useState(post.has_liked);
   const [likesCount, setLikesCount] = useState(post.likes_count);
   const [isBookmarked, setIsBookmarked] = useState(post.has_bookmarked);
+  const [isFollowing, setIsFollowing] = useState(!!post.player.is_following);
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (token) {
+      fetchMyPlayerId(token).then(setMyPlayerId);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    setIsFollowing(!!post.player.is_following);
+  }, [post.player.is_following]);
+
+  const handleFollow = async () => {
+    if (!token || !post.player.id) return;
+    const prev = isFollowing;
+    setIsFollowing(!prev);
+    const res = await toggleFollow(token, post.player.id);
+    if (!res.ok) {
+      setIsFollowing(prev);
+    }
+  };
 
   const handleLike = async () => {
     if (!token) return;
@@ -64,29 +89,42 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments, onPre
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.userInfo}
-          activeOpacity={0.7}
-          onPress={() => post.player.id && onPressAuthor?.(post.player.id)}
-        >
-          <View style={styles.avatar}>
-            <AvatarWithFrame
-              avatarUrl={post.player.avatar_url}
-              initials={authorInitials(post.player)}
-              size={32}
-              frame={post.player.frame ?? null}
-              animate={false}
-            />
-          </View>
-          <View style={styles.textInfo}>
-            <Text style={styles.username}>
-              {formatPlayerLabel(post.player, t('common.playerFallback'))}
-            </Text>
-            {post.location && (
-              <Text style={styles.location}>{post.location}</Text>
-            )}
-          </View>
-        </TouchableOpacity>
+        <View style={styles.userInfo}>
+          <TouchableOpacity
+            style={styles.profileClickArea}
+            activeOpacity={0.7}
+            onPress={() => post.player.id && onPressAuthor?.(post.player.id)}
+          >
+            <View style={styles.avatar}>
+              <AvatarWithFrame
+                avatarUrl={post.player.avatar_url}
+                initials={authorInitials(post.player)}
+                size={32}
+                frame={post.player.frame ?? null}
+                animate={false}
+              />
+            </View>
+            <View style={styles.textInfo}>
+              <Text style={styles.username}>
+                {formatPlayerLabel(post.player, t('common.playerFallback'))}
+              </Text>
+              {post.location && (
+                <Text style={styles.location}>{post.location}</Text>
+              )}
+            </View>
+          </TouchableOpacity>
+
+          {post.player.id !== myPlayerId && token ? (
+            <View style={styles.followHeaderContainer}>
+              <Text style={styles.dot}>•</Text>
+              <TouchableOpacity onPress={handleFollow} activeOpacity={0.7}>
+                <Text style={[styles.followBtnText, isFollowing ? styles.followingBtnText : styles.followBtnTextActive]}>
+                  {isFollowing ? t('profile.unfollowBtn') : t('profile.followBtn')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </View>
         <TouchableOpacity>
           <Ionicons name="ellipsis-horizontal" size={20} color="#FFF" />
         </TouchableOpacity>
@@ -168,6 +206,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  profileClickArea: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  followHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   avatar: {
     marginRight: 10,
   },
@@ -180,10 +226,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: 'Outfit_600SemiBold',
   },
+  authorNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dot: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    marginHorizontal: 6,
+    fontSize: 12,
+  },
+  followBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: 'Outfit_700Bold',
+  },
+  followBtnTextActive: {
+    color: '#F18F34',
+  },
+  followingBtnText: {
+    color: 'rgba(255, 255, 255, 0.4)',
+  },
   location: {
     color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 11,
     fontFamily: 'Outfit_400Regular',
+    marginTop: 1,
   },
   actions: {
     flexDirection: 'row',

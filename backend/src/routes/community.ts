@@ -9,20 +9,34 @@ import { evaluateMissionsAndBuildDelta } from '../services/seasonPassEngine';
 const router = Router();
 
 /**
- * Adjunta el marco equipado (`frame`) a cada objeto `player` de comunidad
- * (autores de posts/clips/stories/comentarios). Muta los objetos en sitio,
- * batcheando todos los ids en una sola llamada a getEquippedFrames.
+ * Adjunta el marco equipado (`frame`) y el estado de seguimiento (`is_following`)
+ * a cada objeto `player` de comunidad. Muta los objetos en sitio de forma eficiente.
  */
 async function attachFramesToCommunityPlayers(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
-  players: Array<{ id?: string | null; frame?: unknown } | null | undefined>,
+  players: Array<{ id?: string | null; frame?: unknown; is_following?: boolean } | null | undefined>,
+  currentUserId?: string | null
 ): Promise<void> {
-  const list = players.filter((p): p is { id?: string | null; frame?: unknown } => !!p);
-  const ids = list.map((p) => p.id).filter((x): x is string => typeof x === 'string' && x.length > 0);
+  const list = players.filter((p): p is { id: string; frame?: unknown; is_following?: boolean } => !!p && typeof p.id === 'string' && p.id.length > 0);
+  const ids = list.map((p) => p.id);
   if (!ids.length) return;
-  const frames = await getEquippedFrames(supabase, ids);
+
+  const [frames, follows] = await Promise.all([
+    getEquippedFrames(supabase, ids),
+    currentUserId
+      ? supabase
+          .from('player_follows')
+          .select('following_id')
+          .eq('follower_id', currentUserId)
+          .in('following_id', ids)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const followSet = new Set((follows.data ?? []).map((f: any) => f.following_id));
+
   for (const p of list) {
-    if (p.id) p.frame = frames.get(p.id) ?? null;
+    p.frame = frames.get(p.id) ?? null;
+    p.is_following = followSet.has(p.id);
   }
 }
 
@@ -103,7 +117,7 @@ router.get('/feed', async (req: Request, res: Response) => {
       has_liked: myLikes.includes(p.id),
       has_bookmarked: myBookmarks.includes(p.id),
     }));
-    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player));
+    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player), playerId);
 
     return res.json({ ok: true, posts: enriched, next_cursor: nextCursor });
   } catch (err) {
@@ -156,7 +170,7 @@ router.get('/reels', async (req: Request, res: Response) => {
     }
 
     const enriched = items.map(p => ({ ...p, has_liked: myLikes.includes(p.id) }));
-    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player));
+    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player), playerId);
     return res.json({ ok: true, reels: enriched, next_cursor: nextCursor });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -253,7 +267,7 @@ router.get('/reels/feed', async (req: Request, res: Response) => {
       myLikes = (likes ?? []).map(l => l.post_id);
     }
     const enriched = result.map(p => ({ ...p, has_liked: myLikes.includes(p.id) }));
-    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player));
+    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player), playerId);
 
     return res.json({ ok: true, reels: enriched, next_cursor: nextCursor });
   } catch (err) {

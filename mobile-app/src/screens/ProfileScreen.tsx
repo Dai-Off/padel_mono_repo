@@ -44,6 +44,8 @@ import {
   uploadPlayerCoverToStorage,
   type PickedImage,
 } from '../api/playerAvatar';
+import { fetchFollowCounts } from '../api/playerFollows';
+import { FollowListModal } from '../components/profile/FollowListModal';
 
 import type { InfoScreenId } from '../content/infoContent';
 
@@ -142,6 +144,23 @@ export function ProfileScreen({
   const [showCustomize, setShowCustomize] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(homeProfile?.coverUrl ?? null);
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [localFollowersCount, setLocalFollowersCount] = useState(0);
+  const [localFollowingCount, setLocalFollowingCount] = useState(0);
+  const [followListVisible, setFollowListVisible] = useState(false);
+  const [followListTab, setFollowListTab] = useState<'followers' | 'following'>('followers');
+
+  // Cargar contadores de follow
+  useEffect(() => {
+    const token = session?.access_token;
+    if (token) {
+      fetchFollowCounts(token).then((res) => {
+        if (res.ok) {
+          setLocalFollowersCount(res.followers_count);
+          setLocalFollowingCount(res.following_count);
+        }
+      });
+    }
+  }, [session?.access_token]);
 
   // Auto-abrir el modal del cuestionario de nivelación cuando el padre lo pide
   // (p.ej. el usuario viene desde la pantalla bloqueada de Daily Lesson). Una
@@ -512,15 +531,27 @@ export function ProfileScreen({
                 <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
               </View>
               <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>--</Text>
+              <Pressable
+                style={styles.statItem}
+                onPress={() => {
+                  setFollowListTab('followers');
+                  setFollowListVisible(true);
+                }}
+              >
+                <Text style={styles.statValue}>{localFollowersCount}</Text>
                 <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
-              </View>
+              </Pressable>
               <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>--</Text>
+              <Pressable
+                style={styles.statItem}
+                onPress={() => {
+                  setFollowListTab('following');
+                  setFollowListVisible(true);
+                }}
+              >
+                <Text style={styles.statValue}>{localFollowingCount}</Text>
                 <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
-              </View>
+              </Pressable>
             </View>
 
             {/* Action Buttons */}
@@ -667,6 +698,21 @@ export function ProfileScreen({
           displayName={displayName}
           current={customization}
           onSaved={(c) => setCustomization(c)}
+        />
+      ) : null}
+
+      {profile ? (
+        <FollowListModal
+          isVisible={followListVisible}
+          onClose={() => setFollowListVisible(false)}
+          playerId={profile.id}
+          token={session?.access_token}
+          initialTab={followListTab}
+          currentUserId={profile.id}
+          onOpenPlayer={onOpenPublicProfile}
+          onFollowChange={(targetPlayerId, isFollowingNow) => {
+            setLocalFollowingCount(prev => Math.max(0, isFollowingNow ? prev + 1 : prev - 1));
+          }}
         />
       ) : null}
     </View>

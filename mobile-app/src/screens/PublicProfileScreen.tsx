@@ -29,6 +29,9 @@ import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
 import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
 import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { RARITY_CONFIG } from '../design/rarity';
+import { toggleFollow } from '../api/playerFollows';
+import { fetchMyPlayerId } from '../api/players';
+import { FollowListModal } from '../components/profile/FollowListModal';
 import { isFeatureHidden } from '../config';
 
 type PublicProfileScreenProps = {
@@ -61,6 +64,16 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
   const [frequentClubs, setFrequentClubs] = useState<FrequentClub[]>([]);
   const [frequentPartners, setFrequentPartners] = useState<FrequentPartner[]>([]);
   const [socialLoading, setSocialLoading] = useState(true);
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+  const [followListVisible, setFollowListVisible] = useState(false);
+  const [followListTab, setFollowListTab] = useState<'followers' | 'following'>('followers');
+
+  // Cargar mi ID de jugador
+  useEffect(() => {
+    if (token) {
+      fetchMyPlayerId(token).then(setMyPlayerId);
+    }
+  }, [token]);
 
   // Datos base + personalización (gate del spinner)
   useEffect(() => {
@@ -232,26 +245,72 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
               {!isFeatureHidden('profile.followCounts') && (
                 <>
                   <View style={styles.statDivider} />
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>--</Text>
+                  <Pressable
+                    style={styles.statItem}
+                    onPress={() => {
+                      setFollowListTab('followers');
+                      setFollowListVisible(true);
+                    }}
+                  >
+                    <Text style={styles.statValue}>{profile.followersCount ?? 0}</Text>
                     <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
-                  </View>
+                  </Pressable>
                   <View style={styles.statDivider} />
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>--</Text>
+                  <Pressable
+                    style={styles.statItem}
+                    onPress={() => {
+                      setFollowListTab('following');
+                      setFollowListVisible(true);
+                    }}
+                  >
+                    <Text style={styles.statValue}>{profile.followingCount ?? 0}</Text>
                     <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
-                  </View>
+                  </Pressable>
                 </>
               )}
             </View>
 
-            {/* Acciones: Seguir (placeholder) + Mensaje (chat) */}
+            {/* Acciones: Seguir + Mensaje (chat) */}
             <View style={styles.actionButtonsRow}>
-              {!isFeatureHidden('profile.follow') && (
-                <Pressable style={styles.followBtn} onPress={() => {}}>
-                  <Text style={styles.followText}>{t('profile.followBtn')}</Text>
+              {!isFeatureHidden('profile.follow') && myPlayerId !== profile.id ? (
+                <Pressable
+                  style={[
+                    styles.followBtn,
+                    profile.isFollowing ? styles.followingBtnActive : styles.followBtnActive,
+                  ]}
+                  onPress={async () => {
+                    if (!token) return;
+                    const prevFollowing = profile.isFollowing;
+                    const prevCount = profile.followersCount ?? 0;
+
+                    // Optimistic update
+                    setProfile({
+                      ...profile,
+                      isFollowing: !prevFollowing,
+                      followersCount: prevFollowing ? prevCount - 1 : prevCount + 1,
+                    });
+
+                    const res = await toggleFollow(token, profile.id);
+                    if (!res.ok) {
+                      // Revertir si falla
+                      setProfile({
+                        ...profile,
+                        isFollowing: prevFollowing,
+                        followersCount: prevCount,
+                      });
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.followText,
+                      profile.isFollowing ? styles.followingTextActive : styles.followTextActive,
+                    ]}
+                  >
+                    {profile.isFollowing ? t('profile.unfollowBtn') : t('profile.followBtn')}
+                  </Text>
                 </Pressable>
-              )}
+              ) : null}
               <Pressable style={styles.messageBtn} onPress={() => onChatPress?.(profile.id, displayName)}>
                 <Ionicons name="chatbubble-outline" size={14} color="#F18F34" />
                 <Text style={styles.messageText}>{t('profile.messageBtn')}</Text>
@@ -306,6 +365,31 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
           loading={socialLoading}
         />
       </ScrollView>
+
+      {/* Modal de Seguidores / Siguiendo */}
+      <FollowListModal
+        isVisible={followListVisible}
+        onClose={() => setFollowListVisible(false)}
+        playerId={profile.id}
+        token={token}
+        initialTab={followListTab}
+        currentUserId={myPlayerId}
+        onOpenPlayer={onOpenPlayer}
+        onFollowChange={(targetPlayerId, isFollowingNow) => {
+          // Si el targetPlayerId es el dueño del perfil que estamos viendo
+          if (targetPlayerId === profile.id) {
+            setProfile(prev => {
+              if (!prev) return null;
+              const prevCount = prev.followersCount ?? 0;
+              return {
+                ...prev,
+                isFollowing: isFollowingNow,
+                followersCount: isFollowingNow ? prevCount + 1 : Math.max(0, prevCount - 1),
+              };
+            });
+          }
+        }}
+      />
     </View>
   );
 }
@@ -366,11 +450,20 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#F18F34',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  followText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  followBtnActive: {
+    backgroundColor: '#F18F34',
+  },
+  followingBtnActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  followText: { fontSize: 14, fontWeight: '700' },
+  followTextActive: { color: '#fff' },
+  followingTextActive: { color: 'rgba(255, 255, 255, 0.8)' },
   messageBtn: {
     flex: 1,
     height: 40,

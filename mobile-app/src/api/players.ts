@@ -448,6 +448,7 @@ export type PlayerSearchHit = {
   last_name?: string | null;
   username?: string | null;
   avatar_url?: string | null;
+  frame?: any | null;
   onboarding_completed?: boolean;
 };
 
@@ -503,6 +504,9 @@ export type PublicPlayerProfile = {
   preferredSide: "right" | "left" | "both";
   preferredPlayStyle: "competitive" | "social" | "learning" | "balanced";
   dominantHand: "left" | "right" | null;
+  followersCount: number;
+  followingCount: number;
+  isFollowing: boolean;
   coachAssessment: any | null; // Reuse types if needed, but any for simplicity here
   recentMatches: any[];
 };
@@ -547,6 +551,9 @@ export async function fetchPublicPlayerProfile(
           ? p.preferred_play_style
           : "balanced",
       dominantHand: p.dominant_hand === "left" || p.dominant_hand === "right" ? p.dominant_hand : null,
+      followersCount: p.followers_count ?? 0,
+      followingCount: p.following_count ?? 0,
+      isFollowing: !!p.is_following,
       coachAssessment: p.coach_assessment ?? null,
       recentMatches: p.recent_matches ?? [],
     };

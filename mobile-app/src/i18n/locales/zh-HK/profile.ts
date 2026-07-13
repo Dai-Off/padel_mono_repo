@@ -142,4 +142,11 @@ export const profile: ProfileTranslationKeys = {
   coachLoadFail: '無法載入 AI 教練分析。',
   partnersTitleOwn: '你的球友',
   clubsTitleOwn: '你常去的球會',
+  unfollowBtn: '追蹤中',
+  unfollowConfirmTitle: '取消追蹤',
+  unfollowConfirmBody: '確定要取消追蹤 {name} 嗎？',
+  followersTitle: '粉絲',
+  followingTitle: '追蹤中',
+  followersEmpty: '還沒有粉絲',
+  followingEmpty: '還沒有追蹤任何人',
 };
