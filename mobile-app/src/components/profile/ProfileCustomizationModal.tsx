@@ -421,7 +421,7 @@ const NameColorRow: React.FC<{
 }> = ({ label, sample, nameColor, selected, onPress }) => (
   <Pressable onPress={onPress} style={[styles.titleRow, selected && styles.titleRowSel]}>
     <View style={styles.nameColorSwatch}>
-      <PlayerName name={sample} nameColor={nameColor} style={styles.nameColorSample} numberOfLines={1} />
+      <PlayerName name={sample} nameColor={nameColor} style={styles.nameColorSample} numberOfLines={1} animate={false} />
     </View>
     <View style={{ flex: 1, minWidth: 0 }}>
       <Text style={styles.titleName} numberOfLines={1}>{label}</Text>

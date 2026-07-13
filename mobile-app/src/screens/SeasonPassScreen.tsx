@@ -358,6 +358,7 @@ function RewardThumb({
         name="Aa"
         nameColor={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols } : null}
         style={{ fontSize: 20, fontWeight: '900', color: rarity.color }}
+        animate={false}
       />
     );
   } else if (d.kind === 'theme') {
