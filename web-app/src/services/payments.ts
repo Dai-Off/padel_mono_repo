@@ -156,6 +156,39 @@ export const paymentsService = {
     return res.transactions ?? [];
   },
 
+  exportClubTransactionsCsv: async (
+    clubId: string,
+    dateFrom?: string,
+    dateTo?: string,
+    timezone?: string,
+  ): Promise<Blob> => {
+    const q = new URLSearchParams({ club_id: clubId });
+    if (dateFrom) q.set('date_from', dateFrom);
+    if (dateTo) q.set('date_to', dateTo);
+    if (timezone) q.set('timezone', timezone);
+
+    const { getApiBase } = await import('./api');
+
+    // Hacemos fetch manual usando la URL base correcta del API y el token del almacenamiento de padel
+    const apiBase = getApiBase();
+    const token = localStorage.getItem('padel_session') 
+      ? JSON.parse(localStorage.getItem('padel_session')!).access_token 
+      : null;
+
+    const headers: Record<string, string> = {
+      'Authorization': token ? `Bearer ${token}` : '',
+    };
+    const response = await fetch(`${apiBase}/payments/club-transactions/export?${q}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Error al exportar transacciones');
+    }
+    return response.blob();
+  },
+
   getCashClosingExpected: async (clubId: string, date?: string, timezone?: string): Promise<CashClosingExpected> => {
     const q = new URLSearchParams({ club_id: clubId });
     if (date) q.set('date', date);

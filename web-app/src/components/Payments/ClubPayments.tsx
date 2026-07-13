@@ -417,31 +417,32 @@ export function ClubPaymentsTab({
     setDateTo(todayYmd);
   };
 
-  const exportCsv = () => {
-    if (!filteredPayments.length) {
-      toast.error(t('payments_no_data_export'));
-      return;
+  const exportCsv = async () => {
+    if (!clubId) return;
+    const toastId = toast.loading('Generando exportación de transacciones...');
+    try {
+      const dFrom = dateMode === 'all' ? undefined : (dateMode === 'day' ? selectedDate : dateFrom);
+      const dTo = dateMode === 'all' ? undefined : (dateMode === 'day' ? selectedDate : dateTo);
+
+      // Usar la zona horaria predeterminada o del club si es necesario.
+      const blob = await paymentsService.exportClubTransactionsCsv(
+        clubId,
+        dFrom,
+        dTo,
+        'Europe/Madrid'
+      );
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transacciones_${clubId}_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Exportación descargada correctamente', { id: toastId });
+    } catch (e) {
+      console.error(e);
+      toast.error((e as Error).message || 'Error al descargar la exportación', { id: toastId });
     }
-    const header = ['id', 'fecha', 'hora', 'cliente', 'concepto', 'metodo', 'importe', 'estado', 'pista'];
-    const rows = filteredPayments.map((p) => [
-      p.id,
-      p.dateLabel,
-      p.time,
-      p.client,
-      p.concept,
-      p.method,
-      String(p.amount),
-      p.status,
-      p.courtName ?? '',
-    ]);
-    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `payments_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   if (!clubResolved) {

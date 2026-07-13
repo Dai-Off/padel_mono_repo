@@ -91,6 +91,8 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const [bookingsMin, setBookingsMin] = useState('');
   const [currentBookingFilter, setCurrentBookingFilter] = useState<'any' | 'yes' | 'no'>('any');
   const [tournamentFilter, setTournamentFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [bonusFilter, setBonusFilter] = useState<string>('all');
+  const [bonuses, setBonuses] = useState<any[]>([]);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualForm, setManualForm] = useState({ first_name: '', last_name: '', phone: '', email: '', username: '' });
@@ -107,6 +109,18 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const [emailBody, setEmailBody] = useState('');
   const [emailSubmitting, setEmailSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (!clubId) {
+      setBonuses([]);
+      return;
+    }
+    apiFetchWithAuth<any>(`/bonuses?club_id=${clubId}`)
+      .then((res) => {
+        if (res.ok) setBonuses(res.data ?? []);
+      })
+      .catch((e) => console.error('Error fetching bonuses for filter', e));
+  }, [clubId]);
+
   const fetchPlayers = useCallback(async () => {
     if (!clubId) {
       setPlayers([]);
@@ -118,6 +132,8 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     try {
       const balanceMin = balanceMinEur.trim() ? Math.round(Number(balanceMinEur) * 100) : undefined;
       const balanceMax = balanceMaxEur.trim() ? Math.round(Number(balanceMaxEur) * 100) : undefined;
+      const hasClassBono = bonusFilter === 'class_bono' ? true : undefined;
+      const bonusId = (bonusFilter !== 'all' && bonusFilter !== 'class_bono') ? bonusFilter : undefined;
       const list = await clubClientService.list(clubId, {
         q: searchQuery.trim() || undefined,
         tier: tierFilter === 'all' ? undefined : tierFilter,
@@ -133,6 +149,8 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
         bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
         has_current_booking: currentBookingFilter === 'any' ? undefined : currentBookingFilter === 'yes',
         has_tournament: tournamentFilter === 'any' ? undefined : tournamentFilter === 'yes',
+        has_class_bono: hasClassBono,
+        bonus_id: bonusId,
       });
       setPlayers(list ?? []);
     } catch (e) {
@@ -143,7 +161,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
       setLoading(false);
       setRefreshing(false);
     }
-  }, [t, clubId, searchQuery, tierFilter, eloMin, eloMax, createdFrom, createdTo, walletFilter, walletMoneyFilter, balanceMinEur, balanceMaxEur, schoolFilter, bookingsMin, currentBookingFilter, tournamentFilter]);
+  }, [t, clubId, searchQuery, tierFilter, eloMin, eloMax, createdFrom, createdTo, walletFilter, walletMoneyFilter, balanceMinEur, balanceMaxEur, schoolFilter, bookingsMin, currentBookingFilter, tournamentFilter, bonusFilter]);
 
   useEffect(() => {
     fetchPlayers();
@@ -609,6 +627,24 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
             </div>
           </div>
 
+          <div className="flex flex-col gap-1">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Tipo de bono</span>
+            <select
+              value={bonusFilter}
+              onChange={(e) => setBonusFilter(e.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A] outline-none"
+              aria-label="Filtrar por bono"
+            >
+              <option value="all">Todos los bonos</option>
+              <option value="class_bono">Con bono de clases activo</option>
+              {bonuses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({b.category === 'monedero' ? 'Monedero' : 'Clases'})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <button
             type="button"
             onClick={() => {
@@ -625,6 +661,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
               setBookingsMin('');
               setCurrentBookingFilter('any');
               setTournamentFilter('any');
+              setBonusFilter('all');
             }}
             className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50 h-fit self-end"
           >

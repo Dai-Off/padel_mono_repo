@@ -108,14 +108,6 @@ function buildSections(isAdmin: boolean): NavSection[] {
       ],
     },
     {
-      id: 'informes',
-      label: 'Informes',
-      icon: BarChart3,
-      children: [
-        { id: 'cierreCaja', path: '/cierreCaja', label: 'Cierre de caja' },
-      ],
-    },
-    {
       id: 'chats',
       label: 'Chats',
       icon: MessageCircle,
