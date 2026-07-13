@@ -87,13 +87,15 @@ export const BookedCourseCard: React.FC<BookedCourseCardProps> = ({ enrollment, 
 
           {/* Action Buttons */}
           <View style={styles.actions}>
-            <TouchableOpacity 
-              style={styles.cancelButton}
-              onPress={onCancel}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.cancelButtonText}>{t('learning.schoolCancel')}</Text>
-            </TouchableOpacity>
+            {onCancel && (
+              <TouchableOpacity 
+                style={styles.cancelButton}
+                onPress={onCancel}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelButtonText}>{t('learning.schoolCancel')}</Text>
+              </TouchableOpacity>
+            )}
             
             <TouchableOpacity 
               style={styles.detailsButton}

@@ -111,6 +111,28 @@ function rawPlayerCount(b: {
     return b.organizer_player_id || b.players ? 1 : 0;
 }
 
+/** Jugadores anotados en partido abierto (match_players o participantes del booking). */
+export function countRegisteredOpenMatchPlayers(b: {
+    booking_participants?: Array<{ player_id?: string | null }>;
+    organizer_player_id?: string | null;
+    players?: unknown;
+    matches?: unknown;
+}): number {
+    const raw = b.matches;
+    const match = raw
+        ? (Array.isArray(raw) ? raw[0] : raw) as { match_players?: Array<{ player_id?: string | null }> }
+        : null;
+    const mps = match?.match_players;
+    if (Array.isArray(mps) && mps.length > 0) {
+        const ids = new Set<string>();
+        for (const mp of mps) {
+            if (mp?.player_id) ids.add(String(mp.player_id));
+        }
+        if (ids.size > 0) return ids.size;
+    }
+    return rawPlayerCount(b);
+}
+
 type RawBookingPaymentInput = {
     payment_transactions?: Array<{
         status?: string;

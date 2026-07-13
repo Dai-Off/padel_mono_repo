@@ -30,6 +30,7 @@ import { RARITY_CONFIG } from '../design/rarity';
 import { toggleFollow } from '../api/playerFollows';
 import { fetchMyPlayerId } from '../api/players';
 import { FollowListModal } from '../components/profile/FollowListModal';
+import { isFeatureHidden } from '../config';
 
 type PublicProfileScreenProps = {
   playerId: string;
@@ -232,33 +233,37 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
                 <Text style={styles.statValue}>{profile.matchesPlayedTotal ?? 0}</Text>
                 <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
               </View>
-              <View style={styles.statDivider} />
-              <Pressable
-                style={styles.statItem}
-                onPress={() => {
-                  setFollowListTab('followers');
-                  setFollowListVisible(true);
-                }}
-              >
-                <Text style={styles.statValue}>{profile.followersCount ?? 0}</Text>
-                <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
-              </Pressable>
-              <View style={styles.statDivider} />
-              <Pressable
-                style={styles.statItem}
-                onPress={() => {
-                  setFollowListTab('following');
-                  setFollowListVisible(true);
-                }}
-              >
-                <Text style={styles.statValue}>{profile.followingCount ?? 0}</Text>
-                <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
-              </Pressable>
+              {!isFeatureHidden('profile.followCounts') && (
+                <>
+                  <View style={styles.statDivider} />
+                  <Pressable
+                    style={styles.statItem}
+                    onPress={() => {
+                      setFollowListTab('followers');
+                      setFollowListVisible(true);
+                    }}
+                  >
+                    <Text style={styles.statValue}>{profile.followersCount ?? 0}</Text>
+                    <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
+                  </Pressable>
+                  <View style={styles.statDivider} />
+                  <Pressable
+                    style={styles.statItem}
+                    onPress={() => {
+                      setFollowListTab('following');
+                      setFollowListVisible(true);
+                    }}
+                  >
+                    <Text style={styles.statValue}>{profile.followingCount ?? 0}</Text>
+                    <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
+                  </Pressable>
+                </>
+              )}
             </View>
 
             {/* Acciones: Seguir + Mensaje (chat) */}
             <View style={styles.actionButtonsRow}>
-              {myPlayerId !== profile.id ? (
+              {!isFeatureHidden('profile.follow') && myPlayerId !== profile.id ? (
                 <Pressable
                   style={[
                     styles.followBtn,
@@ -267,7 +272,7 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
                   onPress={async () => {
                     if (!token) return;
                     const prevFollowing = profile.isFollowing;
-                    const prevCount = profile.followersCount;
+                    const prevCount = profile.followersCount ?? 0;
 
                     // Optimistic update
                     setProfile({

@@ -55,7 +55,7 @@ import {
   resolveBookingGridLabel,
   resolveOrganizerFromBooking,
 } from './utils/bookingDisplay';
-import { shouldShowRawBookingInGrid } from './utils/reservationListFilters';
+import { shouldShowRawBookingInGrid, isPublicOpenMatchBooking, countRegisteredOpenMatchPlayers } from './utils/reservationListFilters';
 import { normalizeReservationTypeSlug } from './utils/reservationTypeSlug';
 import {
   pixelsToTime,
@@ -676,6 +676,9 @@ function mapBookings(
             txByPlayer.set(t.payer_player_id, { amount: prev.amount + (t.amount_cents ?? 0), method: prev.method ?? method });
         }
 
+        const isPublicOpenMatch = isPublicOpenMatchBooking(b);
+        const registeredPlayerCount = isPublicOpenMatch ? countRegisteredOpenMatchPlayers(b) : 0;
+
         return {
             id: b.id,
             courtId: b.court_id,
@@ -746,6 +749,8 @@ function mapBookings(
                     return { name, isMember: false, level: pl?.elo_rating ?? 0, paidAmount, paymentMethod };
                 });
             })(),
+            isPublicOpenMatch,
+            registeredPlayerCount,
             tournamentId: bookingType === 'tournament' ? (tournamentId ?? undefined) : undefined,
         };
     });
@@ -2645,10 +2650,12 @@ function resolveManualBookingTotalCents(
               dateStr={toDateStr(selectedDate)}
               onRefreshGrid={refresh}
               onBackToGrid={() => setActiveView('grid')}
-              onEditBooking={(bookingId) => {
-                void openBookingForEdit(bookingId);
-                setActiveView('grid');
-              }}
+              courts={courts}
+              weeklySchedule={weeklySchedule}
+              gridReservations={reservations}
+              onUpdateBooking={handleUpdateBooking}
+              onDeleteBooking={handleDeleteBooking}
+              onMarkPaid={handleMarkPaid}
             />
           ) : isReservationsListView ? (
             <ReservationsListPanel

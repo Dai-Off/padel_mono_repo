@@ -24,15 +24,25 @@ import { theme } from './src/theme';
 import { I18nProvider } from './src/i18n';
 import { isRecoveryDeepLink, parseSupabaseRecoveryFromUrl } from './src/lib/parseAuthRecoveryUrl';
 import { parseTournamentInviteUrl } from './src/lib/parseTournamentInviteUrl';
+import { parseMatchDeepLink } from './src/lib/parseMatchDeepLink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
+const PENDING_MATCH_DEEPLINK_KEY = 'pending_match_deeplink';
 
 async function stashTournamentInviteFromUrl(url: string | null) {
   if (!url) return;
   const parsed = parseTournamentInviteUrl(url);
   if (parsed) {
     await AsyncStorage.setItem(PENDING_TOURNAMENT_INVITE_KEY, JSON.stringify(parsed));
+  }
+}
+
+async function stashMatchDeepLinkFromUrl(url: string | null) {
+  if (!url) return;
+  const parsed = parseMatchDeepLink(url);
+  if (parsed) {
+    await AsyncStorage.setItem(PENDING_MATCH_DEEPLINK_KEY, JSON.stringify(parsed));
   }
 }
 
@@ -46,6 +56,7 @@ function AuthFlowWrapper() {
   const consumeDeepLink = useCallback((url: string | null) => {
     if (!url) return;
     void stashTournamentInviteFromUrl(url);
+    void stashMatchDeepLinkFromUrl(url);
 
     if (url.includes('email-confirmed')) {
       setRecovery(null);

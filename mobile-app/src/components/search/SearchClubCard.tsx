@@ -54,15 +54,17 @@ export function SearchClubCard({ group, onPress, onFavoritePress }: SearchClubCa
       accessibilityLabel={`${c.clubName}, desde ${c.minPriceFormatted}`}
     >
       <View style={styles.cardInner}>
-        <Pressable
-          onPress={() => onFavoritePress?.()}
-          style={({ pressed: p }) => [styles.favButton, p && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel={t('common.addToFavorites')}
-          hitSlop={8}
-        >
-          <Ionicons name="heart-outline" size={14} color="#fff" />
-        </Pressable>
+        {onFavoritePress && (
+          <Pressable
+            onPress={() => onFavoritePress()}
+            style={({ pressed: p }) => [styles.favButton, p && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.addToFavorites')}
+            hitSlop={8}
+          >
+            <Ionicons name="heart-outline" size={14} color="#fff" />
+          </Pressable>
+        )}
 
         <View style={styles.row}>
         <View style={styles.imageCol}>

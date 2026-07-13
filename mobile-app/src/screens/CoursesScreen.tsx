@@ -27,6 +27,7 @@ import { PublicCourseCard } from "../components/schoolCourses/PublicCourseCard";
 import { BookedCourseCard } from "../components/schoolCourses/BookedCourseCard";
 import { OnboardingInlineBanner } from "../components/onboarding/OnboardingInlineBanner";
 import { useTranslation } from "../i18n";
+import { isFeatureHidden } from "../config";
 
 const { width } = Dimensions.get("window");
 
@@ -175,9 +176,11 @@ export function CoursesScreen({
               onChangeText={setSearchQuery}
             />
           </View>
-          <Pressable style={styles.filterButton}>
-            <Ionicons name="options-outline" size={20} color="#fff" />
-          </Pressable>
+          {!isFeatureHidden("courses.headerFilter") && (
+            <Pressable style={styles.filterButton}>
+              <Ionicons name="options-outline" size={20} color="#fff" />
+            </Pressable>
+          )}
         </View>
 
         {/* Tabs Premium */}
@@ -289,10 +292,12 @@ export function CoursesScreen({
                 </Text>
               </Pressable>
 
-              <Pressable style={styles.filterPill}>
-                <Ionicons name="location-outline" size={16} color="#fff" />
-                <Text style={styles.filterText}>{t("learning.coursesFilterNearMe")}</Text>
-              </Pressable>
+              {!isFeatureHidden("courses.nearMeFilter") && (
+                <Pressable style={styles.filterPill}>
+                  <Ionicons name="location-outline" size={16} color="#fff" />
+                  <Text style={styles.filterText}>{t("learning.coursesFilterNearMe")}</Text>
+                </Pressable>
+              )}
             </ScrollView>
           </View>
         )}
@@ -458,9 +463,13 @@ export function CoursesScreen({
                       onPress={() => {
                         if (enrollment.course) onCoursePress(enrollment.course, true);
                       }}
-                      onCancel={() => {
-                        console.log("Cancel enrollment placeholder");
-                      }}
+                      onCancel={
+                        isFeatureHidden("courses.cancelEnrollment")
+                          ? undefined
+                          : () => {
+                              console.log("Cancel enrollment placeholder");
+                            }
+                      }
                     />
                   ))}
                 </View>

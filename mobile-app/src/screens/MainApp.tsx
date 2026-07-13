@@ -62,8 +62,9 @@ import {
 import { SeasonTransitionModal } from '../components/matchmaking/SeasonTransitionModal';
 import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
-import { fetchReceivedMatchInvites, type ReceivedMatchInvite } from '../api/matchInvites';
+import { fetchReceivedMatchInvites, acceptMatchInviteByToken, type ReceivedMatchInvite } from '../api/matchInvites';
 import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
+import { parseMatchDeepLink, type ParsedMatchDeepLink } from '../lib/parseMatchDeepLink';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { isPlayerInPartido } from '../lib/partidoPlayerUtils';
 import { CommunityScreen } from './CommunityScreen';
@@ -87,6 +88,7 @@ import type { PublicCourse } from '../api/schoolCourses';
  * vez de dejarlo en el perfil.
  */
 const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
+const PENDING_MATCH_DEEPLINK_KEY = 'pending_match_deeplink';
 
 type PostOnboardingReturn =
   | 'home'
@@ -133,7 +135,6 @@ export function MainApp() {
   const [showDailyLesson, setShowDailyLesson] = useState(false);
   /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
   const [streakRefreshKey, setStreakRefreshKey] = useState(0);
-  const [showCourses, setShowCourses] = useState(false);
   const [selectedEducationalCourse, setSelectedEducationalCourse] = useState<EducationalCourse | null>(null);
   const [selectedPublicCourse, setSelectedPublicCourse] = useState<{ course: PublicCourse; isReserved: boolean } | null>(null);
   const [coursesTab, setCoursesTab] = useState<'apuntate' | 'cursos' | 'tusclases'>('apuntate');
@@ -388,16 +389,55 @@ export function MainApp() {
     [session?.access_token, profile?.id, upsertMisPartido, t],
   );
 
+  const processMatchDeepLink = useCallback(
+    async (link: ParsedMatchDeepLink) => {
+      const accessToken = session?.access_token;
+      if (!accessToken) return;
+
+      if (link.kind === 'invite') {
+        const result = await acceptMatchInviteByToken(link.token, accessToken);
+        if (result.ok) {
+          if (!result.already_accepted) {
+            Alert.alert(t('alerts.matchInvite.accepted'), t('alerts.matchInvite.acceptedBody'));
+          }
+        } else {
+          Alert.alert(t('alerts.matchInvite.title'), result.error);
+        }
+      }
+
+      const viewerId = profile?.id ?? null;
+      const loaded = await reloadMatchPartido(link.matchId, accessToken, {
+        viewerPlayerId: viewerId,
+      });
+      if (loaded) {
+        setActiveTab('partidos');
+        setSelectedPartido(loaded);
+        if (viewerId && isPlayerInPartido(loaded, viewerId)) {
+          upsertMisPartido(loaded);
+        }
+      } else {
+        Alert.alert(t('alerts.error.title'), t('partidos.matchInviteOpenFail'));
+      }
+    },
+    [session?.access_token, profile?.id, upsertMisPartido, t],
+  );
+
   const consumeInviteUrl = useCallback(
     async (url: string | null) => {
       if (!url) return;
+      const matchParsed = parseMatchDeepLink(url);
+      if (matchParsed) {
+        await AsyncStorage.removeItem(PENDING_MATCH_DEEPLINK_KEY);
+        await processMatchDeepLink(matchParsed);
+        return;
+      }
       const tournamentParsed = parseTournamentInviteUrl(url);
       if (tournamentParsed) {
         await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
         await processTournamentInvite(tournamentParsed.token, tournamentParsed.tournamentId);
       }
     },
-    [processTournamentInvite],
+    [processMatchDeepLink, processTournamentInvite],
   );
 
   useEffect(() => {
@@ -416,6 +456,19 @@ export function MainApp() {
           await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
         }
       }
+      const rawMatch = await AsyncStorage.getItem(PENDING_MATCH_DEEPLINK_KEY);
+      if (rawMatch) {
+        try {
+          const parsed = JSON.parse(rawMatch) as ParsedMatchDeepLink;
+          if (parsed.matchId) {
+            await AsyncStorage.removeItem(PENDING_MATCH_DEEPLINK_KEY);
+            await processMatchDeepLink(parsed);
+            return;
+          }
+        } catch {
+          await AsyncStorage.removeItem(PENDING_MATCH_DEEPLINK_KEY);
+        }
+      }
       const initial = await Linking.getInitialURL();
       if (initial) await consumeInviteUrl(initial);
     })();
@@ -423,7 +476,7 @@ export function MainApp() {
       void consumeInviteUrl(url);
     });
     return () => sub.remove();
-  }, [session?.access_token, consumeInviteUrl, processTournamentInvite]);
+  }, [session?.access_token, consumeInviteUrl, processTournamentInvite, processMatchDeepLink]);
 
   useEffect(() => {
     const token = session?.access_token ?? null;
@@ -473,7 +526,7 @@ export function MainApp() {
     if (target === 'daily-lesson') setShowDailyLesson(true);
     else if (target === 'matchmaking') setShowCompetitiveLeague(true);
     else if (target === 'torneos') setActiveTab('torneos');
-    else if (target === 'cursos') setShowCourses(true);
+    else if (target === 'cursos') setActiveTab('cursos');
     // partido-detail: no podemos reabrirlo automáticamente sin el objeto del
     // partido (se perdería en el ciclo de perfil). El usuario lo verá al volver.
   };
@@ -533,7 +586,6 @@ export function MainApp() {
     showSeasonPass ||
     crearPartidoFlow.open ||
     showDailyLesson ||
-    showCourses ||
     selectedEducationalCourse != null ||
     selectedPublicCourse != null ||
     showMessages ||
@@ -607,11 +659,6 @@ export function MainApp() {
       // Detalle de curso público
       if (selectedPublicCourse) {
         setSelectedPublicCourse(null);
-        return true;
-      }
-      // Listado de cursos
-      if (showCourses) {
-        setShowCourses(false);
         return true;
       }
       // Lección diaria
@@ -777,7 +824,6 @@ export function MainApp() {
     showCart,
     selectedEducationalCourse,
     selectedPublicCourse,
-    showCourses,
     showDailyLesson,
     crearPartidoFlow.open,
     showChangePassword,
@@ -825,10 +871,7 @@ export function MainApp() {
           course={selectedEducationalCourse}
           onBack={() => setSelectedEducationalCourse(null)}
           onOpenProfileForOnboarding={() => {
-            // Cerramos también `showCourses` (listado): en `renderContent` se
-            // Cierra el listado de cursos antes de ir al tab Perfil (onboarding).
             setSelectedEducationalCourse(null);
-            setShowCourses(false);
             openOnboardingFromSection('cursos');
           }}
         />
@@ -839,26 +882,6 @@ export function MainApp() {
         <PublicCourseDetailScreen
           course={selectedPublicCourse.course}
           onBack={() => setSelectedPublicCourse(null)}
-        />
-      );
-    }
-    if (showCourses) {
-      return (
-        <CoursesScreen
-          onBack={() => setShowCourses(false)}
-          initialTab={coursesTab}
-          onCoursePress={(course, isReserved) => {
-            setCoursesTab('apuntate');
-            setSelectedPublicCourse({ course, isReserved });
-          }}
-          onEducationalCoursePress={(course) => {
-            setCoursesTab('cursos');
-            setSelectedEducationalCourse(course);
-          }}
-          onOpenProfileForOnboarding={() => {
-            setShowCourses(false);
-            openOnboardingFromSection('cursos');
-          }}
         />
       );
     }
@@ -1226,7 +1249,7 @@ export function MainApp() {
             onPartidoPress={(p) => setSelectedPartido(p)}
             onCourtReservationPress={(reservation) => setSelectedCourtReservation(reservation)}
             onDailyLessonPress={() => setShowDailyLesson(true)}
-            onCoursesPress={() => setShowCourses(true)}
+            onCoursesPress={() => setActiveTab('cursos')}
             onOpenCompetitiveLeague={openCompetitiveLeagueFromHome}
             matchmakingBannerState={matchmakingHomeBannerState}
             pairInvites={pairInvites}
@@ -1287,6 +1310,24 @@ export function MainApp() {
             partidosRefreshNonce={partidosRefreshNonce}
           />
         );
+      case 'cursos':
+        return (
+          <CoursesScreen
+            onBack={() => setActiveTab('inicio')}
+            initialTab={coursesTab}
+            onCoursePress={(course, isReserved) => {
+              setCoursesTab('apuntate');
+              setSelectedPublicCourse({ course, isReserved });
+            }}
+            onEducationalCoursePress={(course) => {
+              setCoursesTab('cursos');
+              setSelectedEducationalCourse(course);
+            }}
+            onOpenProfileForOnboarding={() => {
+              openOnboardingFromSection('cursos');
+            }}
+          />
+        );
       case 'perfil':
         return (
           <ProfileScreen
@@ -1333,6 +1374,18 @@ export function MainApp() {
 
   const showMainTabs = !fullscreenOverlayOpen;
 
+  const profileBtn = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t('nav.userProfileA11y')}
+      hitSlop={8}
+      onPress={() => setActiveTab('perfil')}
+      style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.75 }]}
+    >
+      <Ionicons name="person-circle-outline" size={22} color="#fff" />
+    </Pressable>
+  );
+
   const customHeader =
     fullscreenOverlayOpen || showCart
       ? undefined
@@ -1343,25 +1396,28 @@ export function MainApp() {
                 tone="dark"
                 onBack={() => setActiveTab('inicio')}
                 rightSlot={(
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t('nav.tiendaCart')}
-                    hitSlop={8}
-                    onPress={() => setShowCart(true)}
-                    style={({ pressed }) => [
-                      styles.tiendaHeaderCart,
-                      pressed && { opacity: 0.85 },
-                    ]}
-                  >
-                    <Ionicons name="cart-outline" size={18} color="#fff" />
-                    {cartCount > 0 ? (
-                      <View style={styles.tiendaCartBadge}>
-                        <Text style={styles.tiendaCartBadgeText}>
-                          {cartCount > 99 ? '99+' : cartCount}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </Pressable>
+                  <>
+                    {profileBtn}
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t('nav.tiendaCart')}
+                      hitSlop={8}
+                      onPress={() => setShowCart(true)}
+                      style={({ pressed }) => [
+                        styles.tiendaHeaderCart,
+                        pressed && { opacity: 0.85 },
+                      ]}
+                    >
+                      <Ionicons name="cart-outline" size={18} color="#fff" />
+                      {cartCount > 0 ? (
+                        <View style={styles.tiendaCartBadge}>
+                          <Text style={styles.tiendaCartBadgeText}>
+                            {cartCount > 99 ? '99+' : cartCount}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  </>
                 )}
               />
             )
@@ -1371,6 +1427,7 @@ export function MainApp() {
                     title={t('nav.tabPartidos')}
                     tone="dark"
                     onBack={() => setActiveTab('inicio')}
+                    rightSlot={profileBtn}
                   />
                 )
               : activeTab === 'inicio'
@@ -1380,6 +1437,7 @@ export function MainApp() {
                       onMessagesPress={() => setShowMessages(true)}
                       onNotificationsPress={() => setShowNotifications(true)}
                       onGroupsPress={() => setShowCommunity(true)}
+                      onProfilePress={() => setActiveTab('perfil')}
                     />
                   )
                 : undefined;
@@ -1409,7 +1467,7 @@ export function MainApp() {
                   ? '#0F0F0F'
                   : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
                   ? '#000000'
-                  : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
+                  : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos' || activeTab === 'cursos')
                     ? '#0F0F0F'
                     : '#ffffff';
 
@@ -1471,6 +1529,7 @@ export function MainApp() {
               showCart ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos') ||
+              (showMainTabs && activeTab === 'cursos') ||
               (showMainTabs && activeTab === 'perfil')
             }
             layoutBackgroundColor={layoutBackgroundColor}
@@ -1537,6 +1596,16 @@ export function MainApp() {
 }
 
 const styles = StyleSheet.create({
+  headerIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
   tiendaHeaderCart: {
     width: 36,
     height: 36,
