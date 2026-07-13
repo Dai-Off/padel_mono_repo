@@ -62,4 +62,6 @@ export const community: CommunityTranslationKeys = {
   postLikesMany: '個讚',
   viewComments: '查看全部 {count} 則留言',
   storyTextPlaceholder: '寫點什麼...',
+  searchPlaceholder: '搜尋玩家...',
+  searchNoResults: '未找到玩家',
 };

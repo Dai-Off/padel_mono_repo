@@ -60,4 +60,6 @@ export interface CommunityTranslationKeys {
   postLikesMany: string;
   viewComments: string;
   storyTextPlaceholder: string;
+  searchPlaceholder: string;
+  searchNoResults: string;
 }

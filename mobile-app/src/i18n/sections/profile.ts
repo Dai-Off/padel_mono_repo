@@ -139,4 +139,11 @@ export interface ProfileTranslationKeys {
   coachLoadFail: string;
   partnersTitleOwn: string;
   clubsTitleOwn: string;
+  unfollowBtn: string;
+  unfollowConfirmTitle: string;
+  unfollowConfirmBody: string;
+  followersTitle: string;
+  followingTitle: string;
+  followersEmpty: string;
+  followingEmpty: string;
 }

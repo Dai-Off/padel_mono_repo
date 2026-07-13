@@ -53,17 +53,17 @@ export function PrivateInvitePlayerPicker({
     { delay: 300, minChars: MIN_SEARCH_CHARS },
   );
 
-  // Sugerencias por defecto (hoy: compañeros frecuentes).
+  // Sugerencias por defecto (hoy: compañeros frecuentes + seguidos).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const s = await fetchInviteSuggestions(currentPlayerId, SUGGESTIONS_LIMIT);
+      const s = await fetchInviteSuggestions(currentPlayerId, SUGGESTIONS_LIMIT, accessToken);
       if (!cancelled) setSuggestions(s);
     })();
     return () => {
       cancelled = true;
     };
-  }, [currentPlayerId]);
+  }, [currentPlayerId, accessToken]);
 
   const excludedIds = useMemo(
     () => new Set([...excludePlayerIds, ...selected.map((p) => p.id)]),
