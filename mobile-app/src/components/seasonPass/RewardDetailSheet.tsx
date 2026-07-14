@@ -27,7 +27,10 @@ type Props = {
   onGetElite: () => void;
   onClaim?: (reward: SeasonPassTrackRewardDto) => void;
   claiming?: boolean;
+  onGoToProfile?: () => void;
 };
+
+const EQUIPPABLE = ['title', 'frame', 'badge', 'trophy', 'name_color', 'theme'];
 
 export const KIND_LABEL: Record<string, string> = {
   title: 'Título',
@@ -174,10 +177,12 @@ export function RewardDetailSheet({
   onGetElite,
   onClaim,
   claiming,
+  onGoToProfile,
 }: Props) {
   const { t } = useTranslation();
   const reward = target?.reward;
   const d = reward?.display;
+  const equippable = d ? EQUIPPABLE.includes(d.kind) : false;
   const rarity = d ? RARITY_CONFIG[(d.rarity as AchievementRarity) ?? 'common'] ?? RARITY_CONFIG.common : null;
 
   // Recompensa Elite bloqueada porque falta el pase (el nivel ya está alcanzado):
@@ -286,6 +291,19 @@ export function RewardDetailSheet({
             >
               <Ionicons name="ribbon" size={16} color="#fff" />
               <Text style={styles.eliteCtaTxt}>{t('alerts.seasonPass.getEliteCta')}</Text>
+            </Pressable>
+          ) : null}
+
+          {reward.status === 'claimed' && equippable && onGoToProfile ? (
+            <Pressable
+              onPress={() => {
+                onClose();
+                onGoToProfile();
+              }}
+              style={({ pressed }) => [styles.eliteCta, pressed && { opacity: 0.9 }]}
+            >
+              <Ionicons name="person-circle-outline" size={16} color="#fff" />
+              <Text style={styles.eliteCtaTxt}>{t('alerts.seasonPass.rewardGoToProfile')}</Text>
             </Pressable>
           ) : null}
         </View>

@@ -47,7 +47,7 @@ import { PlayerName } from '../components/profile/PlayerName';
 import { ProfileThemeBackground } from '../components/profile/ProfileThemeBackground';
 import type { AchievementRarity } from '../design/rarity';
 
-type Props = { onBack: () => void };
+type Props = { onBack: () => void; onGoToProfile?: () => void };
 
 type PassTab = 'rewards' | 'missions';
 type MissionPeriod = 'daily' | 'weekly' | 'monthly';
@@ -684,7 +684,7 @@ function MissionRow({
   );
 }
 
-export function SeasonPassScreen({ onBack }: Props) {
+export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const { session, isLoading: authLoading } = useAuth();
@@ -1208,28 +1208,6 @@ export function SeasonPassScreen({ onBack }: Props) {
         <Animated.View style={{ opacity: contentOp, paddingHorizontal: PAD, paddingTop: 8 }}>
           {tab === 'rewards' ? (
             <View>
-              {(me?.claimable_count ?? 0) > 0 ? (
-                <Pressable
-                  onPress={handleClaimAll}
-                  disabled={claiming}
-                  style={({ pressed }) => [
-                    styles.claimAllBtn,
-                    claiming && { opacity: 0.7 },
-                    pressed && !claiming && styles.pressed,
-                  ]}
-                >
-                  {claiming ? (
-                    <ActivityIndicator color="#0B1120" size="small" />
-                  ) : (
-                    <>
-                      <Ionicons name="gift" size={16} color="#0B1120" />
-                      <Text style={styles.claimAllBtnTxt}>
-                        {t('alerts.seasonPass.claimAll', { count: me?.claimable_count ?? 0 })}
-                      </Text>
-                    </>
-                  )}
-                </Pressable>
-              ) : null}
               {boostPct > 0 ? (
                 <View style={styles.boostBanner}>
                   <Ionicons name="flame" size={16} color={ACCENT} />
@@ -1275,6 +1253,29 @@ export function SeasonPassScreen({ onBack }: Props) {
                   );
                 })}
               </ScrollView>
+
+              {(me?.claimable_count ?? 0) > 0 ? (
+                <Pressable
+                  onPress={handleClaimAll}
+                  disabled={claiming}
+                  style={({ pressed }) => [
+                    styles.claimAllBtn,
+                    claiming && { opacity: 0.7 },
+                    pressed && !claiming && styles.pressed,
+                  ]}
+                >
+                  {claiming ? (
+                    <ActivityIndicator color="#0B1120" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="gift" size={16} color="#0B1120" />
+                      <Text style={styles.claimAllBtnTxt}>
+                        {t('alerts.seasonPass.claimAll', { count: me?.claimable_count ?? 0 })}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+              ) : null}
             </View>
           ) : (
             <View>
@@ -1506,6 +1507,7 @@ export function SeasonPassScreen({ onBack }: Props) {
         playerInitials={playerInitials}
         onClaim={handleClaim}
         claiming={claiming}
+        onGoToProfile={onGoToProfile}
         onGetElite={() => {
           setRewardDetail(null);
           setShowElite(true);
@@ -1516,6 +1518,7 @@ export function SeasonPassScreen({ onBack }: Props) {
         reward={celebrateReward}
         avatarUrl={profile?.avatarUrl ?? null}
         initials={playerInitials}
+        onGoToProfile={onGoToProfile}
         onClose={() => setCelebrateReward(null)}
       />
 
@@ -1535,21 +1538,28 @@ export function SeasonPassScreen({ onBack }: Props) {
               {t('alerts.seasonPass.claimAllDone', { count: claimAllRewards?.length ?? 0 })}
             </Text>
             <ScrollView style={styles.claimSummaryList} contentContainerStyle={styles.claimSummaryGrid}>
-              {(claimAllRewards ?? []).map((r) => (
-                <View key={r.reward_id} style={styles.claimSummaryItem}>
-                  <RewardThumb
-                    reward={{
-                      id: r.reward_id,
-                      tier: r.tier,
-                      reward_type: r.reward_type as SeasonPassTrackRewardDto['reward_type'],
-                      display: r.display,
-                      status: 'claimed',
-                    }}
-                    size={52}
-                    dimmed={false}
-                  />
-                </View>
-              ))}
+              {(claimAllRewards ?? []).map((r) => {
+                const reward: SeasonPassTrackRewardDto = {
+                  id: r.reward_id,
+                  tier: r.tier,
+                  reward_type: r.reward_type as SeasonPassTrackRewardDto['reward_type'],
+                  display: r.display,
+                  status: 'claimed',
+                };
+                return (
+                  <View key={r.reward_id} style={styles.claimSummaryItem}>
+                    <RewardThumb
+                      reward={reward}
+                      size={52}
+                      dimmed={false}
+                      onPress={() => {
+                        setClaimAllRewards(null);
+                        setRewardDetail({ level: r.level, reward });
+                      }}
+                    />
+                  </View>
+                );
+              })}
             </ScrollView>
             <Pressable onPress={() => setClaimAllRewards(null)} style={styles.claimSummaryCta}>
               <Text style={styles.claimSummaryCtaTxt}>{t('alerts.seasonPass.claimAllDoneCta')}</Text>
@@ -1938,7 +1948,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 14,
     backgroundColor: ACCENT,
-    marginBottom: 12,
+    marginTop: 16,
   },
   claimAllBtnTxt: { color: '#0B1120', fontSize: 14, fontWeight: '800' },
   claimSummaryBackdrop: {

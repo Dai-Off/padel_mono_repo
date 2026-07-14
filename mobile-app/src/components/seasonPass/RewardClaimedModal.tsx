@@ -38,15 +38,19 @@ function Sparkle({ angle, color, burst }: { angle: number; color: string; burst:
   return <Animated.View style={[styles.sparkle, { backgroundColor: color }, style]} />;
 }
 
+const EQUIPPABLE = ['title', 'frame', 'badge', 'trophy', 'name_color', 'theme'];
+
 type Props = {
   reward: SeasonPassTrackRewardDto | null;
   avatarUrl: string | null;
   initials: string;
   onClose: () => void;
+  /** Navega al perfil para equipar (solo cosméticos). */
+  onGoToProfile?: () => void;
 };
 
 /** Celebración al reclamar una recompensa del track (usa el render real del cosmético). */
-export function RewardClaimedModal({ reward, avatarUrl, initials, onClose }: Props) {
+export function RewardClaimedModal({ reward, avatarUrl, initials, onClose, onGoToProfile }: Props) {
   const { t } = useTranslation();
   const enter = useSharedValue(0);
   const ring = useSharedValue(0);
@@ -79,6 +83,7 @@ export function RewardClaimedModal({ reward, avatarUrl, initials, onClose }: Pro
   if (!reward) return null;
   const d = reward.display;
   const conf = RARITY_CONFIG[(d.rarity as AchievementRarity) ?? 'common'] ?? RARITY_CONFIG.common;
+  const equippable = EQUIPPABLE.includes(d.kind);
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -103,9 +108,26 @@ export function RewardClaimedModal({ reward, avatarUrl, initials, onClose }: Pro
             </Text>
           </View>
 
-          <Pressable style={styles.cta} onPress={onClose}>
-            <Text style={styles.ctaText}>{t('alerts.seasonPass.claimAllDoneCta')}</Text>
-          </Pressable>
+          {equippable && onGoToProfile ? (
+            <View style={styles.actions}>
+              <Pressable style={styles.btnGhost} onPress={onClose}>
+                <Text style={styles.btnGhostTxt}>{t('alerts.seasonPass.rewardSkip')}</Text>
+              </Pressable>
+              <Pressable
+                style={styles.btnPrimary}
+                onPress={() => {
+                  onClose();
+                  onGoToProfile();
+                }}
+              >
+                <Text style={styles.btnPrimaryTxt}>{t('alerts.seasonPass.rewardGoToProfile')}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable style={styles.cta} onPress={onClose}>
+              <Text style={styles.ctaText}>{t('alerts.seasonPass.rewardOk')}</Text>
+            </Pressable>
+          )}
         </Animated.View>
       </View>
     </Modal>
@@ -135,4 +157,25 @@ const styles = StyleSheet.create({
   rarityText: { fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
   cta: { alignSelf: 'stretch', paddingVertical: 13, borderRadius: 14, backgroundColor: '#F18F34', alignItems: 'center' },
   ctaText: { color: '#0B1120', fontSize: 15, fontWeight: '800' },
+  actions: { flexDirection: 'row', gap: 10, alignSelf: 'stretch' },
+  btnGhost: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnGhostTxt: { fontSize: 14, fontWeight: '700', color: '#9CA3AF' },
+  btnPrimary: {
+    flex: 1.5,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#F18F34',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnPrimaryTxt: { fontSize: 14, fontWeight: '800', color: '#0B1120' },
 });

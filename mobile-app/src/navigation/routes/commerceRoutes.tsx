@@ -107,7 +107,13 @@ export function SeasonPassRoute({
 }: NativeStackScreenProps<RootStackParamList, 'SeasonPass'>) {
   return (
     <RouteShell>
-      <SeasonPassScreen onBack={() => navigation.goBack()} />
+      <SeasonPassScreen
+        onBack={() => navigation.goBack()}
+        onGoToProfile={() => {
+          navigation.goBack();
+          mainAppActions.goToProfileTab();
+        }}
+      />
     </RouteShell>
   );
 }
