@@ -1,0 +1,193 @@
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { CartScreen } from '../../screens/CartScreen';
+import { DailyLessonScreen } from '../../screens/DailyLessonScreen';
+import { EducationalCourseDetailScreen } from '../../screens/EducationalCourseDetailScreen';
+import { PublicCourseDetailScreen } from '../../screens/PublicCourseDetailScreen';
+import { CourtReservationDetailScreen } from '../../screens/CourtReservationDetailScreen';
+import { SeasonPassScreen } from '../../screens/SeasonPassScreen';
+import { CrearPartidoLocationSheet } from '../../components/partido/CrearPartidoLocationSheet';
+import { useHomeData } from '../../contexts/HomeDataContext';
+import { useBookingSuccess } from '../../contexts/BookingSuccessContext';
+import { mainAppActions } from '../mainAppActions';
+import { RouteShell } from '../RouteShell';
+import type { RootStackParamList } from '../types';
+
+export function CartRoute({
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'Cart'>) {
+  return (
+    <RouteShell>
+      <CartScreen
+        onBack={() => navigation.goBack()}
+        onContinueShopping={() => navigation.goBack()}
+      />
+    </RouteShell>
+  );
+}
+
+export function DailyLessonRoute({
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'DailyLesson'>) {
+  return (
+    <RouteShell>
+      <DailyLessonScreen
+        onBack={() => navigation.goBack()}
+        onComplete={() => {
+          mainAppActions.bumpStreakRefresh();
+          navigation.goBack();
+        }}
+        onOpenOnboarding={() => {
+          navigation.popTo('Main');
+          mainAppActions.openOnboardingFromSection('daily-lesson');
+        }}
+        onOpenSeasonPass={() => {
+          mainAppActions.bumpStreakRefresh();
+          // replace: hoy la leccion se cierra al abrir el pase (el back del
+          // pase no vuelve a la leccion).
+          navigation.replace('SeasonPass');
+        }}
+      />
+    </RouteShell>
+  );
+}
+
+export function EducationalCourseDetailRoute({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, 'EducationalCourseDetail'>) {
+  return (
+    <RouteShell>
+      <EducationalCourseDetailScreen
+        course={route.params.course}
+        onBack={() => navigation.goBack()}
+        onOpenProfileForOnboarding={() => {
+          navigation.popTo('Main');
+          mainAppActions.openOnboardingFromSection('cursos');
+        }}
+      />
+    </RouteShell>
+  );
+}
+
+export function PublicCourseDetailRoute({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, 'PublicCourseDetail'>) {
+  return (
+    <RouteShell>
+      <PublicCourseDetailScreen
+        course={route.params.course}
+        onBack={() => navigation.goBack()}
+      />
+    </RouteShell>
+  );
+}
+
+export function CourtReservationDetailRoute({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, 'CourtReservationDetail'>) {
+  const { refreshCourtReservations } = useHomeData();
+  return (
+    <RouteShell>
+      <CourtReservationDetailScreen
+        reservation={route.params.reservation}
+        onBack={() => navigation.goBack()}
+        onCancelled={() => {
+          void refreshCourtReservations({ force: true });
+          navigation.goBack();
+        }}
+      />
+    </RouteShell>
+  );
+}
+
+export function SeasonPassRoute({
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'SeasonPass'>) {
+  return (
+    <RouteShell>
+      <SeasonPassScreen onBack={() => navigation.goBack()} />
+    </RouteShell>
+  );
+}
+
+export function CrearPartidoRoute({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, 'CrearPartido'>) {
+  const { organizerId, matchVisibility } = route.params;
+  const { profile, refreshMatches, upsertMisPartido, syncMisPartidoFromMatchId } = useHomeData();
+  const { show: showBookingSuccess } = useBookingSuccess();
+
+  const closeFlow = () => {
+    mainAppActions.bumpPartidosRefresh();
+    navigation.goBack();
+  };
+
+  return (
+    <RouteShell>
+      <CrearPartidoLocationSheet
+        presentation="fullscreen"
+        initialStep="clubs"
+        initialMatchVisibility={matchVisibility}
+        organizerPlayerId={organizerId}
+        onClose={closeFlow}
+        onSiguiente={closeFlow}
+        onNavigateToCompleteOnboarding={() => {
+          mainAppActions.bumpPartidosRefresh();
+          navigation.popTo('Main');
+          mainAppActions.goToProfileTab();
+        }}
+        onPartidoCreado={(data) => {
+          const resolvedOrganizerId = organizerId ?? profile?.id ?? null;
+          mainAppActions.bumpPartidosRefresh();
+          // La confirmacion vive por encima del navigator: se muestra antes
+          // del pop para cubrir la transicion de vuelta.
+          showBookingSuccess(data);
+          navigation.goBack();
+          if (data.matchId) {
+            upsertMisPartido({
+              id: data.matchId,
+              dateTime: data.dateTimeFormatted,
+              visibility: data.matchVisibility,
+              organizerPlayerId: resolvedOrganizerId,
+              matchPhase: 'upcoming',
+              mode: 'amistoso',
+              typeLabel: 'Todos los jugadores',
+              levelRange: 'Libre',
+              players: [
+                {
+                  name: profile?.firstName ?? 'Tú',
+                  level: '—',
+                  isFree: false,
+                  initial: profile?.firstName?.[0]?.toUpperCase() ?? 'T',
+                  avatar: profile?.avatarUrl ?? undefined,
+                },
+                { name: '', level: '', isFree: true },
+                { name: '', level: '', isFree: true },
+                { name: '', level: '', isFree: true },
+              ],
+              playerIds: resolvedOrganizerId ? [resolvedOrganizerId] : [],
+              playerIdsBySlot: [resolvedOrganizerId ?? null, null, null, null],
+              venue: data.clubName,
+              location: '—',
+              price: data.courtPriceFormatted ?? data.priceFormatted,
+              pricePerPlayer: data.priceFormatted,
+              duration: data.duration,
+              courtName: data.courtName,
+              clubId: data.clubId,
+              startAt: data.date,
+            });
+            void syncMisPartidoFromMatchId(data.matchId, {
+              organizerPlayerId: resolvedOrganizerId,
+              matchVisibility: data.matchVisibility,
+            });
+          } else {
+            void refreshMatches({ force: true, scope: 'mine' });
+          }
+        }}
+      />
+    </RouteShell>
+  );
+}

@@ -17,30 +17,18 @@ import { SidebarContent } from '../components/layout/SidebarContent';
 import { SidebarProvider } from '../contexts/SidebarContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { useSidebar } from '../hooks/useSidebar';
-import {
-  BookingConfirmationScreen,
-  type BookingConfirmationData,
-} from './BookingConfirmationScreen';
-import { PrivateReservationModal } from '../components/partido/PrivateReservationModal';
-import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
 import { ClubDetailScreen } from './ClubDetailScreen';
 import { CompeticionesScreen } from './CompeticionesScreen';
 import { HomeScreen, markAffinityModalPendingReopen } from './HomeScreen';
 import type { PartidoItem } from './PartidosScreen';
 import { PartidoDetailScreen } from './PartidoDetailScreen';
-import { CourtReservationDetailScreen } from './CourtReservationDetailScreen';
-import type { CourtReservation } from '../api/bookings';
 import { NotificationsScreen } from './NotificationsScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
 import { TuActividadFlow } from './TuActividadFlow';
 import type { TuActividadDestination } from './TuActividadScreen';
 import { TiendaScreen } from './TiendaScreen';
-import { CartScreen } from './CartScreen';
-import { DailyLessonScreen } from './DailyLessonScreen';
 import { CoursesScreen } from './CoursesScreen';
-import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
-import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
 import { ProfileScreen } from './ProfileScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
@@ -68,12 +56,12 @@ import { CommunityScreen } from './CommunityScreen';
 import { MessagesScreen, type MessagePeerNav } from './MessagesScreen';
 import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
 import { CompetitiveLeagueScreen } from './CompetitiveLeagueScreen';
-import { SeasonPassScreen } from './SeasonPassScreen';
 import { PublicProfileScreen } from './PublicProfileScreen';
-import { registerMainAppActions } from '../navigation/mainAppActions';
+import {
+  registerMainAppActions,
+  type PostOnboardingReturn,
+} from '../navigation/mainAppActions';
 import type { RootStackParamList } from '../navigation/types';
-import type { EducationalCourse } from '../api/dailyLessons';
-import type { PublicCourse } from '../api/schoolCourses';
 
 /**
  * Claves de retorno post-onboarding. Cuando el usuario llega al cuestionario
@@ -82,15 +70,6 @@ import type { PublicCourse } from '../api/schoolCourses';
  */
 const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
 const PENDING_MATCH_DEEPLINK_KEY = 'pending_match_deeplink';
-
-type PostOnboardingReturn =
-  | 'home'
-  | 'daily-lesson'
-  | 'ia-afinidad'
-  | 'matchmaking'
-  | 'partido-detail'
-  | 'torneos'
-  | 'cursos';
 
 type MatchmakingHomeBannerState = 'hidden' | 'searching' | 'matched' | 'timed_out';
 const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
@@ -125,34 +104,30 @@ export function MainApp() {
         setProfileRefreshKey((k) => k + 1);
         setPartidosRefreshNonce((n) => n + 1);
       },
+      bumpPartidosRefresh: () => setPartidosRefreshNonce((n) => n + 1),
+      bumpStreakRefresh: () => setStreakRefreshKey((k) => k + 1),
+      openOnboardingFromSection: (returnTo) => {
+        setPendingOnboardingReturn(returnTo);
+        setProfileAutoOpenOnboarding(true);
+        setActiveTab('perfil');
+      },
+      goToProfileTab: () => setActiveTab('perfil'),
     });
     return () => registerMainAppActions(null);
   }, []);
   const { session } = useAuth();
   const { totalCount: cartCount } = useCart();
-  const { profile, refreshMatches, refreshCourtReservations, syncMisPartidoFromMatchId, upsertMisPartido } = useHomeData();
+  const { profile, refreshMatches, upsertMisPartido } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   // Cada incremento pide a ProfileScreen hacer scroll a la Vitrina de Logros.
   const [vitrinaScrollNonce, setVitrinaScrollNonce] = useState(0);
-  const [showCart, setShowCart] = useState(false);
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
-  const [selectedCourtReservation, setSelectedCourtReservation] = useState<CourtReservation | null>(null);
   const [showTuActividad, setShowTuActividad] = useState(false);
   const [tuActividadSubView, setTuActividadSubView] = useState<TuActividadDestination | null>(null);
-  const [showDailyLesson, setShowDailyLesson] = useState(false);
   /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
   const [streakRefreshKey, setStreakRefreshKey] = useState(0);
-  const [selectedEducationalCourse, setSelectedEducationalCourse] = useState<EducationalCourse | null>(null);
-  const [selectedPublicCourse, setSelectedPublicCourse] = useState<{ course: PublicCourse; isReserved: boolean } | null>(null);
-  const [coursesTab, setCoursesTab] = useState<'apuntate' | 'cursos' | 'tusclases'>('apuntate');
-  const [crearPartidoFlow, setCrearPartidoFlow] = useState<{
-    open: boolean;
-    organizerId: string | null;
-    matchVisibility: 'public' | 'private';
-  }>({ open: false, organizerId: null, matchVisibility: 'public' });
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
-  const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [matchReceivedInvites, setMatchReceivedInvites] = useState<ReceivedMatchInvite[]>([]);
   const [matchInviteNonce, setMatchInviteNonce] = useState(0);
@@ -183,7 +158,6 @@ export function MainApp() {
   const [seasonTransition, setSeasonTransition] = useState<SeasonTransition | null>(null);
   const [matchmakingTimeoutNoticePending, setMatchmakingTimeoutNoticePending] = useState(false);
   const matchmakingTimeoutInFlightRef = useRef(false);
-  const [showSeasonPass, setShowSeasonPass] = useState(false);
   const [showPublicProfile, setShowPublicProfile] = useState(false);
   const [selectedPublicPlayerId, setSelectedPublicPlayerId] = useState<string | null>(null);
   // Si un partido se abrió DESDE el perfil ajeno (su gráfico de evolución), el detalle
@@ -524,7 +498,7 @@ export function MainApp() {
       setActiveTab('inicio');
       return;
     }
-    if (target === 'daily-lesson') setShowDailyLesson(true);
+    if (target === 'daily-lesson') navigation.navigate('DailyLesson');
     else if (target === 'matchmaking') setShowCompetitiveLeague(true);
     else if (target === 'torneos') setActiveTab('torneos');
     else if (target === 'cursos') setActiveTab('cursos');
@@ -534,7 +508,6 @@ export function MainApp() {
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
-  const showCourtReservationDetail = selectedCourtReservation != null;
 
   // Abre el detalle de un partido a partir de su id (desde el gráfico de
   // evolución del perfil). Carga el partido y lo normaliza a PartidoItem.
@@ -555,17 +528,10 @@ export function MainApp() {
   }, []);
 
   const fullscreenOverlayOpen =
-    bookingSuccessData != null ||
     showTuActividad ||
     showPartidoDetail ||
-    showCourtReservationDetail ||
     showClubDetail ||
     showCompetitiveLeague ||
-    showSeasonPass ||
-    crearPartidoFlow.open ||
-    showDailyLesson ||
-    selectedEducationalCourse != null ||
-    selectedPublicCourse != null ||
     showMessages ||
     showNotifications ||
     showCommunity ||
@@ -610,37 +576,6 @@ export function MainApp() {
       // Sidebar abierto → cerrar primero (cubre cualquier pantalla).
       if (sidebar.isOpen) {
         sidebar.close();
-        return true;
-      }
-      // Flujos modales por encima de todo
-      if (bookingSuccessData != null) {
-        setBookingSuccessData(null);
-        return true;
-      }
-      // Carrito de la tienda
-      if (showCart) {
-        setShowCart(false);
-        return true;
-      }
-      // Detalle de curso educativo
-      if (selectedEducationalCourse) {
-        setSelectedEducationalCourse(null);
-        return true;
-      }
-      // Detalle de curso público
-      if (selectedPublicCourse) {
-        setSelectedPublicCourse(null);
-        return true;
-      }
-      // Lección diaria
-      if (showDailyLesson) {
-        setShowDailyLesson(false);
-        return true;
-      }
-      // Flujo crear partido (cierra y refresca lista)
-      if (crearPartidoFlow.open) {
-        setCrearPartidoFlow({ open: false, organizerId: null, matchVisibility: 'public' });
-        setPartidosRefreshNonce((n) => n + 1);
         return true;
       }
       if (activeTab === 'perfil') {
@@ -692,16 +627,7 @@ export function MainApp() {
         setShowCompetitiveLeague(false);
         return true;
       }
-      // Season Pass
-      if (showSeasonPass) {
-        setShowSeasonPass(false);
-        return true;
-      }
       // Detalle de partido (prioridad sobre flujos padre, p. ej. Tu actividad)
-      if (selectedCourtReservation) {
-        setSelectedCourtReservation(null);
-        return true;
-      }
       if (selectedPartido) {
         setSelectedPartido(null);
         setMatchOpenedFromPublicProfile(false);
@@ -735,147 +661,20 @@ export function MainApp() {
     return () => sub.remove();
   }, [
     sidebar,
-    bookingSuccessData,
-    showCart,
-    selectedEducationalCourse,
-    selectedPublicCourse,
-    showDailyLesson,
-    crearPartidoFlow.open,
     showCommunity,
     showMessages,
     messagesPeer,
     affinityPublicProfileId,
     showPublicProfile,
     showCompetitiveLeague,
-    showSeasonPass,
     showTuActividad,
     tuActividadSubView,
     selectedPartido,
-    selectedCourtReservation,
     clubDetailCourt,
     activeTab,
   ]);
 
   const renderContent = () => {
-    if (showCart) {
-      return (
-        <CartScreen
-          onBack={() => setShowCart(false)}
-          onContinueShopping={() => {
-            setShowCart(false);
-            setActiveTab('tienda');
-          }}
-        />
-      );
-    }
-    if (selectedEducationalCourse) {
-      return (
-        <EducationalCourseDetailScreen
-          course={selectedEducationalCourse}
-          onBack={() => setSelectedEducationalCourse(null)}
-          onOpenProfileForOnboarding={() => {
-            setSelectedEducationalCourse(null);
-            openOnboardingFromSection('cursos');
-          }}
-        />
-      );
-    }
-    if (selectedPublicCourse) {
-      return (
-        <PublicCourseDetailScreen
-          course={selectedPublicCourse.course}
-          onBack={() => setSelectedPublicCourse(null)}
-        />
-      );
-    }
-    if (showDailyLesson) {
-      return (
-        <DailyLessonScreen
-          onBack={() => setShowDailyLesson(false)}
-          onComplete={() => {
-            setShowDailyLesson(false);
-            setStreakRefreshKey((k) => k + 1);
-          }}
-          onOpenOnboarding={() => {
-            setShowDailyLesson(false);
-            openOnboardingFromSection('daily-lesson');
-          }}
-          onOpenSeasonPass={() => {
-            setShowDailyLesson(false);
-            setStreakRefreshKey((k) => k + 1);
-            setShowSeasonPass(true);
-          }}
-        />
-      );
-    }
-    if (crearPartidoFlow.open) {
-      const bumpPartidos = () => setPartidosRefreshNonce((n) => n + 1);
-      const closeFlow = () => {
-        setCrearPartidoFlow({ open: false, organizerId: null, matchVisibility: 'public' });
-        bumpPartidos();
-      };
-      return (
-        <CrearPartidoLocationSheet
-          presentation="fullscreen"
-          initialStep="clubs"
-          initialMatchVisibility={crearPartidoFlow.matchVisibility}
-          organizerPlayerId={crearPartidoFlow.organizerId}
-          onClose={closeFlow}
-          onSiguiente={closeFlow}
-          onNavigateToCompleteOnboarding={() => {
-            setCrearPartidoFlow({ open: false, organizerId: null, matchVisibility: 'public' });
-            bumpPartidos();
-            setActiveTab('perfil');
-          }}
-          onPartidoCreado={(data) => {
-            const organizerId = crearPartidoFlow.organizerId ?? profile?.id ?? null;
-            setCrearPartidoFlow({ open: false, organizerId: null, matchVisibility: 'public' });
-            bumpPartidos();
-            setBookingSuccessData(data);
-            if (data.matchId) {
-              upsertMisPartido({
-                id: data.matchId,
-                dateTime: data.dateTimeFormatted,
-                visibility: data.matchVisibility,
-                organizerPlayerId: organizerId,
-                matchPhase: 'upcoming',
-                mode: 'amistoso',
-                typeLabel: 'Todos los jugadores',
-                levelRange: 'Libre',
-                players: [
-                  {
-                    name: profile?.firstName ?? 'Tú',
-                    level: '—',
-                    isFree: false,
-                    initial: profile?.firstName?.[0]?.toUpperCase() ?? 'T',
-                    avatar: profile?.avatarUrl ?? undefined,
-                  },
-                  { name: '', level: '', isFree: true },
-                  { name: '', level: '', isFree: true },
-                  { name: '', level: '', isFree: true },
-                ],
-                playerIds: organizerId ? [organizerId] : [],
-                playerIdsBySlot: [organizerId ?? null, null, null, null],
-                venue: data.clubName,
-                location: '—',
-                price: data.courtPriceFormatted ?? data.priceFormatted,
-                pricePerPlayer: data.priceFormatted,
-                duration: data.duration,
-                courtName: data.courtName,
-                clubId: data.clubId,
-                startAt: data.date,
-              });
-              void syncMisPartidoFromMatchId(data.matchId, {
-                organizerPlayerId: organizerId,
-                matchVisibility: data.matchVisibility,
-              });
-            } else {
-              void refreshMatches({ force: true, scope: 'mine' });
-            }
-          }}
-        />
-      );
-    }
     if (showNotifications) {
       return (
         <NotificationsScreen
@@ -998,21 +797,6 @@ export function MainApp() {
         />
       );
     }
-    if (showSeasonPass) {
-      return <SeasonPassScreen onBack={() => setShowSeasonPass(false)} />;
-    }
-    if (showCourtReservationDetail && selectedCourtReservation) {
-      return (
-        <CourtReservationDetailScreen
-          reservation={selectedCourtReservation}
-          onBack={() => setSelectedCourtReservation(null)}
-          onCancelled={() => {
-            setSelectedCourtReservation(null);
-            void refreshCourtReservations({ force: true });
-          }}
-        />
-      );
-    }
     if (showPartidoDetail && selectedPartido) {
       return (
         <PartidoDetailScreen
@@ -1082,8 +866,10 @@ export function MainApp() {
             streakRefreshKey={streakRefreshKey}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onPartidoPress={(p) => setSelectedPartido(p)}
-            onCourtReservationPress={(reservation) => setSelectedCourtReservation(reservation)}
-            onDailyLessonPress={() => setShowDailyLesson(true)}
+            onCourtReservationPress={(reservation) =>
+              navigation.navigate('CourtReservationDetail', { reservation })
+            }
+            onDailyLessonPress={() => navigation.navigate('DailyLesson')}
             onCoursesPress={() => setActiveTab('cursos')}
             onOpenCompetitiveLeague={openCompetitiveLeagueFromHome}
             matchmakingBannerState={matchmakingHomeBannerState}
@@ -1093,7 +879,7 @@ export function MainApp() {
             matchReceivedInvites={matchReceivedInvites}
             onMatchInvitesChanged={() => setMatchInviteNonce((n) => n + 1)}
             onViewMatchInvite={(invite) => openMatchFromInvite(invite)}
-            onOpenSeasonPass={() => setShowSeasonPass(true)}
+            onOpenSeasonPass={() => navigation.navigate('SeasonPass')}
             onOpenMessageThread={(peer) => {
               setMessagesReturnToProfile(false);
               setMessagesPeer(peer);
@@ -1135,8 +921,7 @@ export function MainApp() {
           <PartidosScreen
             onPartidoPress={(p) => setSelectedPartido(p)}
             onOpenWeMatchClubsFlow={(organizerId, matchVisibility) =>
-              setCrearPartidoFlow({
-                open: true,
+              navigation.navigate('CrearPartido', {
                 organizerId: organizerId ?? profile?.id ?? null,
                 matchVisibility,
               })
@@ -1149,14 +934,11 @@ export function MainApp() {
         return (
           <CoursesScreen
             onBack={() => setActiveTab('inicio')}
-            initialTab={coursesTab}
             onCoursePress={(course, isReserved) => {
-              setCoursesTab('apuntate');
-              setSelectedPublicCourse({ course, isReserved });
+              navigation.navigate('PublicCourseDetail', { course, isReserved });
             }}
             onEducationalCoursePress={(course) => {
-              setCoursesTab('cursos');
-              setSelectedEducationalCourse(course);
+              navigation.navigate('EducationalCourseDetail', { course });
             }}
             onOpenProfileForOnboarding={() => {
               openOnboardingFromSection('cursos');
@@ -1218,7 +1000,7 @@ export function MainApp() {
   );
 
   const customHeader =
-    fullscreenOverlayOpen || showCart
+    fullscreenOverlayOpen
       ? undefined
       : activeTab === 'tienda'
           ? (
@@ -1233,7 +1015,7 @@ export function MainApp() {
                       accessibilityRole="button"
                       accessibilityLabel={t('nav.tiendaCart')}
                       hitSlop={8}
-                      onPress={() => setShowCart(true)}
+                      onPress={() => navigation.navigate('Cart')}
                       style={({ pressed }) => [
                         styles.tiendaHeaderCart,
                         pressed && { opacity: 0.85 },
@@ -1274,23 +1056,15 @@ export function MainApp() {
                 : undefined;
 
   const layoutBackgroundColor =
-    bookingSuccessData != null
-      ? '#000000'
-      : showCart
+    showMessages
+      ? '#0A0A0A'
+      : showTuActividad
         ? '#0F0F0F'
-        : showMessages
-        ? '#0A0A0A'
-        : showTuActividad
+        : showCompetitiveLeague
           ? '#0F0F0F'
-        : showDailyLesson
-          ? '#0F0F0F'
-          : showCompetitiveLeague || showSeasonPass
-            ? '#0F0F0F'
-          : showPartidoDetail || showCourtReservationDetail
+          : showPartidoDetail
             ? '#0F0F0F'
             : showClubDetail
-            ? '#0F0F0F'
-            : crearPartidoFlow.open
               ? '#0F0F0F'
               : activeTab === 'perfil'
                 ? '#0F0F0F'
@@ -1304,11 +1078,9 @@ export function MainApp() {
 
   const handleTabChange = (tab: MainTabId) => {
     setActiveTab(tab);
-    setShowCart(false);
     setShowMessages(false);
     setMessagesPeer(null);
     setShowCompetitiveLeague(false);
-    setShowSeasonPass(false);
     setShowCommunity(false);
     setShowTuActividad(false);
     setTuActividadSubView(null);
@@ -1349,7 +1121,6 @@ export function MainApp() {
             customHeader={customHeader}
             hideHeader={
               fullscreenOverlayOpen ||
-              showCart ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos') ||
               (showMainTabs && activeTab === 'cursos') ||
@@ -1379,23 +1150,6 @@ export function MainApp() {
         transition={seasonTransition}
         onClose={handleSeasonTransitionClose}
       />
-
-      {bookingSuccessData != null &&
-      (bookingSuccessData.confirmationKind === 'reservation' ||
-        bookingSuccessData.matchVisibility === 'private') ? (
-        <PrivateReservationModal
-          visible
-          data={bookingSuccessData}
-          onClose={() => setBookingSuccessData(null)}
-        />
-      ) : bookingSuccessData != null ? (
-        <View style={styles.bookingSuccessOverlay} accessibilityViewIsModal>
-          <BookingConfirmationScreen
-            data={bookingSuccessData}
-            onClose={() => setBookingSuccessData(null)}
-          />
-        </View>
-      ) : null}
 
       {usernameCheckDone ? (
         <UsernameSetupModal
@@ -1474,11 +1228,5 @@ const styles = StyleSheet.create({
   bottomBar: {
     width: '100%',
     alignSelf: 'stretch',
-  },
-  /** Por encima de ScreenLayout y navbar: la confirmación no puede quedar recortada por el contenedor flex. */
-  bookingSuccessOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 2000,
-    elevation: 2000,
   },
 });

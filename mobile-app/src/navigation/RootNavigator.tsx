@@ -24,6 +24,17 @@ import {
   PreferencesRoute,
   TransaccionesRoute,
 } from './routes/settingsRoutes';
+import {
+  CartRoute,
+  CourtReservationDetailRoute,
+  CrearPartidoRoute,
+  DailyLessonRoute,
+  EducationalCourseDetailRoute,
+  PublicCourseDetailRoute,
+  SeasonPassRoute,
+} from './routes/commerceRoutes';
+import { BookingSuccessProvider } from '../contexts/BookingSuccessContext';
+import { GlobalOverlaysHost } from './GlobalOverlaysHost';
 import type { RootStackParamList } from './types';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
@@ -44,8 +55,9 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
   useAuthDeepLinks(!isAuthenticated);
 
   return (
-    <NavigationContainer ref={navigationRef} onReady={flushPendingNavActions}>
-      <RootStack.Navigator screenOptions={{ headerShown: false }}>
+    <BookingSuccessProvider>
+      <NavigationContainer ref={navigationRef} onReady={flushPendingNavActions}>
+        <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <RootStack.Group>
             <RootStack.Screen name="Main" component={MainRoute} />
@@ -61,6 +73,14 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="Preferences" component={PreferencesRoute} />
             <RootStack.Screen name="EditProfile" component={EditProfileRoute} />
             <RootStack.Screen name="ChangePassword" component={ChangePasswordRoute} />
+            {/* Cluster comercio / reservas / cursos */}
+            <RootStack.Screen name="Cart" component={CartRoute} />
+            <RootStack.Screen name="DailyLesson" component={DailyLessonRoute} />
+            <RootStack.Screen name="EducationalCourseDetail" component={EducationalCourseDetailRoute} />
+            <RootStack.Screen name="PublicCourseDetail" component={PublicCourseDetailRoute} />
+            <RootStack.Screen name="CrearPartido" component={CrearPartidoRoute} />
+            <RootStack.Screen name="CourtReservationDetail" component={CourtReservationDetailRoute} />
+            <RootStack.Screen name="SeasonPass" component={SeasonPassRoute} />
             {/* Las siguientes fases de la migracion registran aqui el resto
                 de overlays de MainApp. */}
           </RootStack.Group>
@@ -72,7 +92,10 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="ResetPassword" component={ResetPasswordRoute} />
           </RootStack.Group>
         )}
-      </RootStack.Navigator>
-    </NavigationContainer>
+        </RootStack.Navigator>
+        {/* Overlays por encima de cualquier ruta (confirmacion de reserva, etc.) */}
+        <GlobalOverlaysHost />
+      </NavigationContainer>
+    </BookingSuccessProvider>
   );
 }
