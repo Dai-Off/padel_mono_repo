@@ -1,4 +1,4 @@
-import { NavigationContainer } from '@react-navigation/native';
+import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RequireAuth } from '../components/auth';
 import { MainApp } from '../screens/MainApp';
@@ -46,9 +46,26 @@ import { CompetitiveLeagueRoute } from './routes/matchmakingRoutes';
 import { TuActividadNavigator } from './TuActividadNavigator';
 import { BookingSuccessProvider } from '../contexts/BookingSuccessContext';
 import { GlobalOverlaysHost } from './GlobalOverlaysHost';
+import { theme } from '../theme';
 import type { RootStackParamList } from './types';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
+
+/**
+ * Tema oscuro del navigator: sin el, las pantallas nativas animan sobre el
+ * fondo del tema por defecto (blanco) y cada transicion muestra un flash.
+ */
+const APP_NAV_THEME: Theme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: '#0F0F0F',
+    card: '#0F0F0F',
+  },
+};
+
+/** Fondo de las pantallas del stack durante las transiciones nativas. */
+const APP_CONTENT_STYLE = { backgroundColor: '#0F0F0F' } as const;
 
 function MainRoute() {
   return (
@@ -67,8 +84,10 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
 
   return (
     <BookingSuccessProvider>
-      <NavigationContainer ref={navigationRef} onReady={flushPendingNavActions}>
-        <RootStack.Navigator screenOptions={{ headerShown: false }}>
+      <NavigationContainer ref={navigationRef} theme={APP_NAV_THEME} onReady={flushPendingNavActions}>
+        <RootStack.Navigator
+          screenOptions={{ headerShown: false, contentStyle: APP_CONTENT_STYLE }}
+        >
         {isAuthenticated ? (
           <RootStack.Group>
             <RootStack.Screen name="Main" component={MainRoute} />
@@ -105,7 +124,9 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="TuActividad" component={TuActividadNavigator} />
           </RootStack.Group>
         ) : (
-          <RootStack.Group>
+          <RootStack.Group
+            screenOptions={{ contentStyle: { backgroundColor: theme.auth.bg } }}
+          >
             <RootStack.Screen name="Login" component={LoginRoute} />
             <RootStack.Screen name="Register" component={RegisterRoute} />
             <RootStack.Screen name="ForgotPassword" component={ForgotPasswordRoute} />
