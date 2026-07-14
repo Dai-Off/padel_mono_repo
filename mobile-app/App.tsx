@@ -8,6 +8,7 @@ import Constants from 'expo-constants';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
+import { MatchmakingProvider } from './src/contexts/MatchmakingContext';
 import { HomeDataProvider } from './src/contexts/HomeDataContext';
 import { ProfileDataProvider } from './src/contexts/ProfileDataContext';
 import { CartProvider } from './src/contexts/CartContext';
@@ -54,13 +55,15 @@ export default function App() {
           <SafeAreaProvider>
             <I18nProvider>
               <AuthProvider>
-                <HomeDataProvider>
-                  <ProfileDataProvider>
-                    <CartProvider>
-                      <AppContent />
-                    </CartProvider>
-                  </ProfileDataProvider>
-                </HomeDataProvider>
+                <MatchmakingProvider>
+                  <HomeDataProvider>
+                    <ProfileDataProvider>
+                      <CartProvider>
+                        <AppContent />
+                      </CartProvider>
+                    </ProfileDataProvider>
+                  </HomeDataProvider>
+                </MatchmakingProvider>
               </AuthProvider>
             </I18nProvider>
           </SafeAreaProvider>

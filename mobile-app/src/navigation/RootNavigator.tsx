@@ -42,6 +42,8 @@ import {
   PartidoDetailRoute,
   PublicProfileRoute,
 } from './routes/socialRoutes';
+import { CompetitiveLeagueRoute } from './routes/matchmakingRoutes';
+import { TuActividadNavigator } from './TuActividadNavigator';
 import { BookingSuccessProvider } from '../contexts/BookingSuccessContext';
 import { GlobalOverlaysHost } from './GlobalOverlaysHost';
 import type { RootStackParamList } from './types';
@@ -98,8 +100,9 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="Notifications" component={NotificationsRoute} />
             <RootStack.Screen name="Community" component={CommunityRoute} />
             <RootStack.Screen name="ClubDetail" component={ClubDetailRoute} />
-            {/* Las siguientes fases de la migracion registran aqui el resto
-                de overlays de MainApp. */}
+            {/* Matchmaking / actividad */}
+            <RootStack.Screen name="CompetitiveLeague" component={CompetitiveLeagueRoute} />
+            <RootStack.Screen name="TuActividad" component={TuActividadNavigator} />
           </RootStack.Group>
         ) : (
           <RootStack.Group>
