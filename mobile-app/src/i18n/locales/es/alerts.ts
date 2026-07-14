@@ -200,6 +200,7 @@ export const alerts: AlertsTranslationKeys = {
     claimAll: 'Reclamar todo ({count})',
     claimAllDone: '¡Has reclamado {count} recompensas!',
     claimAllDoneCta: 'Genial',
+    rewardClaimedKicker: '¡Reclamada!',
     rewardLocked: 'Alcanza el nivel {level} para desbloquearla',
     rewardNeedsElite: 'Incluida en el Pase Elite',
     passHelpTitle: '¿Cómo funciona el pase?',

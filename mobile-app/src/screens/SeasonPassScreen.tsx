@@ -41,6 +41,7 @@ import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { AuthButton } from '../components/auth/AuthButton';
 import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
 import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
+import { RewardClaimedModal } from '../components/seasonPass/RewardClaimedModal';
 import { PlayerName } from '../components/profile/PlayerName';
 import { ProfileThemeBackground } from '../components/profile/ProfileThemeBackground';
 import type { AchievementRarity } from '../design/rarity';
@@ -700,6 +701,7 @@ export function SeasonPassScreen({ onBack }: Props) {
   const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [claimAllCount, setClaimAllCount] = useState<number | null>(null);
+  const [celebrateReward, setCelebrateReward] = useState<SeasonPassTrackRewardDto | null>(null);
   const trackScrollRef = useRef<ScrollView>(null);
   const [me, setMe] = useState<SeasonPassMeOk | null>(null);
   const [loading, setLoading] = useState(true);
@@ -735,12 +737,9 @@ export function SeasonPassScreen({ onBack }: Props) {
       const res = await claimSeasonPassReward(token, reward.id);
       setClaiming(false);
       if (res.ok) {
-        // Confirma en el detalle (pasa a "Reclamada") y refresca el track.
-        setRewardDetail((prev) =>
-          prev && prev.reward.id === reward.id
-            ? { ...prev, reward: { ...prev.reward, status: 'claimed' } }
-            : prev
-        );
+        // Cierra el detalle, celebra la recompensa y refresca el track.
+        setRewardDetail(null);
+        setCelebrateReward({ ...reward, status: 'claimed' });
         load();
       }
     },
@@ -1510,6 +1509,13 @@ export function SeasonPassScreen({ onBack }: Props) {
           setRewardDetail(null);
           setShowElite(true);
         }}
+      />
+
+      <RewardClaimedModal
+        reward={celebrateReward}
+        avatarUrl={profile?.avatarUrl ?? null}
+        initials={playerInitials}
+        onClose={() => setCelebrateReward(null)}
       />
 
       <Modal

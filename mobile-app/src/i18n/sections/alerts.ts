@@ -191,6 +191,7 @@ export interface AlertsTranslationKeys {
     claimAll: string;
     claimAllDone: string;
     claimAllDoneCta: string;
+    rewardClaimedKicker: string;
     rewardLocked: string;
     rewardNeedsElite: string;
     passHelpTitle: string;

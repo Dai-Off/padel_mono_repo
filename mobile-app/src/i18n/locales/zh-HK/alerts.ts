@@ -193,6 +193,7 @@ export const alerts: AlertsTranslationKeys = {
     claimAll: '全部領取（{count}）',
     claimAllDone: '已領取 {count} 個獎勵！',
     claimAllDoneCta: '好',
+    rewardClaimedKicker: '已領取！',
     rewardLocked: '升到等級 {level} 即可解鎖',
     rewardNeedsElite: 'Elite 通行證專屬',
     passHelpTitle: '通行證怎麼運作？',

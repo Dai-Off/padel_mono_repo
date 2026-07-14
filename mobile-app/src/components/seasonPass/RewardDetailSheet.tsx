@@ -29,7 +29,7 @@ type Props = {
   claiming?: boolean;
 };
 
-const KIND_LABEL: Record<string, string> = {
+export const KIND_LABEL: Record<string, string> = {
   title: 'Título',
   frame: 'Marco',
   badge: 'Insignia',
@@ -42,7 +42,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 /** Render fiel del cosmético/recompensa — tal como se verá en el perfil. */
-function BigReward({
+export function BigReward({
   reward,
   avatarUrl,
   initials,

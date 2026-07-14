@@ -1,0 +1,138 @@
+import React, { useEffect } from 'react';
+import { Modal, View, Text, StyleSheet, Pressable } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
+import { RARITY_CONFIG, type AchievementRarity } from '../../design/rarity';
+import { useTranslation } from '../../i18n';
+import { BigReward, KIND_LABEL } from './RewardDetailSheet';
+import type { SeasonPassTrackRewardDto } from '../../api/seasonPass';
+
+const SPARKLE_COUNT = 8;
+const ANGLES = Array.from({ length: SPARKLE_COUNT }, (_, i) => (i * Math.PI * 2) / SPARKLE_COUNT);
+
+function Sparkle({ angle, color, burst }: { angle: number; color: string; burst: SharedValue<number> }) {
+  const R = 66;
+  const style = useAnimatedStyle(() => {
+    const d = burst.value;
+    const p = Math.min(d / 0.55, 1);
+    const opacity = interpolate(d, [0, 0.08, 0.55, 0.6], [0, 1, 0, 0], Extrapolation.CLAMP);
+    return {
+      opacity,
+      transform: [
+        { translateX: Math.cos(angle) * R * p },
+        { translateY: Math.sin(angle) * R * p },
+        { scale: 0.4 + p * 0.9 },
+      ],
+    };
+  });
+  return <Animated.View style={[styles.sparkle, { backgroundColor: color }, style]} />;
+}
+
+type Props = {
+  reward: SeasonPassTrackRewardDto | null;
+  avatarUrl: string | null;
+  initials: string;
+  onClose: () => void;
+};
+
+/** Celebración al reclamar una recompensa del track (usa el render real del cosmético). */
+export function RewardClaimedModal({ reward, avatarUrl, initials, onClose }: Props) {
+  const { t } = useTranslation();
+  const enter = useSharedValue(0);
+  const ring = useSharedValue(0);
+  const burst = useSharedValue(0);
+
+  useEffect(() => {
+    if (!reward) return;
+    enter.value = 0;
+    ring.value = 0;
+    burst.value = 0;
+    enter.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
+    ring.value = withRepeat(withTiming(1, { duration: 1700, easing: Easing.out(Easing.ease) }), -1, false);
+    burst.value = withDelay(120, withRepeat(withTiming(1, { duration: 1900, easing: Easing.out(Easing.cubic) }), -1, false));
+    return () => {
+      cancelAnimation(enter);
+      cancelAnimation(ring);
+      cancelAnimation(burst);
+    };
+  }, [reward, enter, ring, burst]);
+
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ scale: 0.94 + Math.min(enter.value, 1) * 0.06 }],
+  }));
+  const ringStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(ring.value, [0, 0.15, 1], [0, 0.45, 0], Extrapolation.CLAMP),
+    transform: [{ scale: 0.7 + ring.value * 1.05 }],
+  }));
+
+  if (!reward) return null;
+  const d = reward.display;
+  const conf = RARITY_CONFIG[(d.rarity as AchievementRarity) ?? 'common'] ?? RARITY_CONFIG.common;
+
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <View style={styles.backdrop}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Animated.View style={[styles.card, cardStyle]}>
+          <Text style={styles.kicker}>✦ {t('alerts.seasonPass.rewardClaimedKicker')} ✦</Text>
+
+          <View style={styles.iconArea}>
+            <Animated.View style={[styles.ring, { borderColor: conf.color }, ringStyle]} pointerEvents="none" />
+            {ANGLES.map((a, i) => (
+              <Sparkle key={i} angle={a} color={conf.color} burst={burst} />
+            ))}
+            <BigReward reward={reward} avatarUrl={avatarUrl} initials={initials} />
+          </View>
+
+          <Text style={styles.title}>{d.label || KIND_LABEL[d.kind] || '—'}</Text>
+          <View style={[styles.rarityChip, { backgroundColor: conf.bg, borderColor: conf.border }]}>
+            <Text style={[styles.rarityText, { color: conf.color }]}>
+              {conf.symbol ? `${conf.symbol} ` : ''}
+              {conf.label.toUpperCase()}
+            </Text>
+          </View>
+
+          <Pressable style={styles.cta} onPress={onClose}>
+            <Text style={styles.ctaText}>{t('alerts.seasonPass.claimAllDoneCta')}</Text>
+          </Pressable>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+const ICON_AREA = 140;
+
+const styles = StyleSheet.create({
+  backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.72)', padding: 32 },
+  card: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#17110d',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.3)',
+    padding: 24,
+    alignItems: 'center',
+  },
+  kicker: { fontSize: 12, fontWeight: '900', letterSpacing: 1, color: '#F18F34', marginBottom: 12, textTransform: 'uppercase' },
+  iconArea: { width: ICON_AREA, height: ICON_AREA, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  ring: { position: 'absolute', width: 96, height: 96, borderRadius: 24, borderWidth: 2 },
+  sparkle: { position: 'absolute', width: 7, height: 7, borderRadius: 4 },
+  title: { fontSize: 18, fontWeight: '800', color: '#fff', textAlign: 'center', marginBottom: 10 },
+  rarityChip: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, borderWidth: 1, marginBottom: 20 },
+  rarityText: { fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  cta: { alignSelf: 'stretch', paddingVertical: 13, borderRadius: 14, backgroundColor: '#F18F34', alignItems: 'center' },
+  ctaText: { color: '#0B1120', fontSize: 15, fontWeight: '800' },
+});
