@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
-import { Animated, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Animated, BackHandler, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
@@ -34,6 +34,18 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
       }),
     ]).start();
   }, [visible, slideAnim, backdropAnim, width]);
+
+  // Con el drawer abierto, el back de Android lo cierra antes de que ningun
+  // navigator toque la navegacion (el listener se registra al abrirse, asi
+  // que gana a los del arbol).
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
 
   const backdropOpacity = backdropAnim.interpolate({
     inputRange: [0, 1],

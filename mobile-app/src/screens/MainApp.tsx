@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, BackHandler, Pressable, Text, View, StyleSheet } from 'react-native';
-import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Pressable, Text, View, StyleSheet } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -8,11 +8,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from '../i18n';
 import { BackHeader } from '../components/layout/BackHeader';
-import { BottomNavbar, type MainTabId } from '../components/layout/BottomNavbar';
+import type { MainTabId } from '../components/layout/BottomNavbar';
 import { HomeHeader } from '../components/layout/HomeHeader';
 import { MobileSidebar } from '../components/layout/MobileSidebar';
-import { ScreenLayout } from '../components/layout/ScreenLayout';
 import { SidebarContent } from '../components/layout/SidebarContent';
+import {
+  MainTabsNavigator,
+  TabScreenShell,
+  tabRouteFor,
+} from '../navigation/MainTabsNavigator';
 import { SidebarProvider } from '../contexts/SidebarContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { useSidebar } from '../hooks/useSidebar';
@@ -72,20 +76,19 @@ const SEASON_TRANSITION_PREVIEW_DATA: SeasonTransition = {
 export function MainApp() {
   const { t } = useTranslation();
   const sidebar = useSidebar(false);
-  // MainApp es la ruta `Main` del stack raiz; cuando hay rutas pusheadas
-  // encima pierde el foco y su BackHandler debe inhibirse (via ref para no
-  // reinstalar el listener).
-  const isFocused = useIsFocused();
-  const isFocusedRef = useRef(isFocused);
-  useEffect(() => {
-    isFocusedRef.current = isFocused;
-  }, [isFocused]);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  /** Cambia el tab activo del navigator de tabs (antes setActiveTab). */
+  const goToTab = useCallback(
+    (tab: MainTabId) => {
+      navigation.navigate('Main', { screen: tabRouteFor(tab) });
+    },
+    [navigation],
+  );
 
   const { session } = useAuth();
   const { totalCount: cartCount } = useCart();
   const { profile, refreshMatches, upsertMisPartido } = useHomeData();
-  const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   // Cada incremento pide a ProfileScreen hacer scroll a la Vitrina de Logros.
   const [vitrinaScrollNonce, setVitrinaScrollNonce] = useState(0);
   /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
@@ -177,13 +180,13 @@ export function MainApp() {
       const result = await acceptTournamentInvite(accessToken, inviteToken, tournamentId);
       if (result.ok) {
         Alert.alert(t('alerts.tournamentInvite.accepted'), t('alerts.tournamentInvite.acceptedBody'));
-        setActiveTab('torneos');
         setOpenTournamentId(tournamentId);
+        goToTab('torneos');
       } else {
         Alert.alert(t('alerts.tournamentInvite.title'), result.error);
       }
     },
-    [session?.access_token, t],
+    [session?.access_token, goToTab, t],
   );
 
   const openMatchFromInvite = useCallback(
@@ -222,16 +225,16 @@ export function MainApp() {
       openOnboardingFromSection: (returnTo) => {
         setPendingOnboardingReturn(returnTo);
         setProfileAutoOpenOnboarding(true);
-        setActiveTab('perfil');
+        goToTab('perfil');
       },
-      goToProfileTab: () => setActiveTab('perfil'),
-      goToTab: (tab) => setActiveTab(tab),
-      goHome: () => setActiveTab('inicio'),
+      goToProfileTab: () => goToTab('perfil'),
+      goToTab: (tab) => goToTab(tab),
+      goHome: () => goToTab('inicio'),
       affinityProfileClosed: () => setAffinityReopenSignal((s) => s + 1),
       openMatchFromInvite: (invite) => void openMatchFromInvite(invite),
     });
     return () => registerMainAppActions(null);
-  }, [openMatchFromInvite, bumpMatchInvites]);
+  }, [openMatchFromInvite, bumpMatchInvites, goToTab]);
 
   const processMatchDeepLink = useCallback(
     async (link: ParsedMatchDeepLink) => {
@@ -254,7 +257,7 @@ export function MainApp() {
         viewerPlayerId: viewerId,
       });
       if (loaded) {
-        setActiveTab('partidos');
+        goToTab('partidos');
         navigation.push('PartidoDetail', { partido: loaded });
         if (viewerId && isPlayerInPartido(loaded, viewerId)) {
           upsertMisPartido(loaded);
@@ -263,7 +266,7 @@ export function MainApp() {
         Alert.alert(t('alerts.error.title'), t('partidos.matchInviteOpenFail'));
       }
     },
-    [session?.access_token, profile?.id, upsertMisPartido, navigation, t],
+    [session?.access_token, profile?.id, upsertMisPartido, navigation, goToTab, t],
   );
 
   const consumeInviteUrl = useCallback(
@@ -330,7 +333,7 @@ export function MainApp() {
   const openOnboardingFromSection = (returnTo: PostOnboardingReturn) => {
     setPendingOnboardingReturn(returnTo);
     setProfileAutoOpenOnboarding(true);
-    setActiveTab('perfil');
+    goToTab('perfil');
   };
 
   /**
@@ -342,13 +345,13 @@ export function MainApp() {
     setPendingOnboardingReturn(null);
     setProfileAutoOpenOnboarding(false);
     if (!target || target === 'home') {
-      setActiveTab('inicio');
+      goToTab('inicio');
       return;
     }
     if (target === 'daily-lesson') navigation.navigate('DailyLesson');
     else if (target === 'matchmaking') navigation.navigate('CompetitiveLeague', { entryIntent: 'default' });
-    else if (target === 'torneos') setActiveTab('torneos');
-    else if (target === 'cursos') setActiveTab('cursos');
+    else if (target === 'torneos') goToTab('torneos');
+    else if (target === 'cursos') goToTab('cursos');
     // partido-detail: no podemos reabrirlo automáticamente sin el objeto del
     // partido (se perdería en el ciclo de perfil). El usuario lo verá al volver.
   };
@@ -381,59 +384,22 @@ export function MainApp() {
     navigation.navigate('CompetitiveLeague', { entryIntent });
   }, [matchmakingBannerState, navigation]);
 
-  /**
-   * Botón hardware atrás (Android). La app no usa React Navigation, así que
-   * sin este listener Android cierra la activity por defecto.
-   *
-   * Cada `if` replica la acción de cierre del `onBack` de la pantalla
-   * correspondiente, en el MISMO orden de prioridad que `renderContent`.
-   * Devuelve `true` para consumir el evento, `false` para dejar a Android
-   * que cierre la app (solo en Inicio sin nada abierto).
-   */
-  useEffect(() => {
-    const onBack = (): boolean => {
-      // Con una ruta del stack encima (pantalla ya migrada a React
-      // Navigation), el pop lo gestiona el navigator, no esta cadena.
-      if (!isFocusedRef.current) {
-        return false;
-      }
-      // Sidebar abierto → cerrar primero (cubre cualquier pantalla).
-      if (sidebar.isOpen) {
-        sidebar.close();
-        return true;
-      }
-      if (activeTab === 'perfil') {
-        setActiveTab('inicio');
-        setProfileAutoOpenOnboarding(false);
-        return true;
-      }
-      // En otra pestaña sin nada abierto → volver a Inicio.
-      if (activeTab !== 'inicio') {
-        setActiveTab('inicio');
-        return true;
-      }
-      // Inicio sin nada abierto → Android cierra la app (comportamiento por
-      // defecto, sin confirmación).
-      return false;
-    };
+  // El back fisico ya no necesita cadena manual: las rutas del stack hacen
+  // pop nativo, el tab navigator vuelve a Inicio (backBehavior initialRoute)
+  // y el sidebar gestiona su propio cierre.
 
-    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
-    return () => sub.remove();
-  }, [sidebar, activeTab]);
-
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'inicio':
-        return (
-          <HomeScreen
+  const tabScreens = {
+    InicioTab: () => (
+      <TabScreenShell backgroundColor="#000000" header={homeHeader}>
+        <HomeScreen
             streakRefreshKey={streakRefreshKey}
-            onNavigateToTab={(tab) => setActiveTab(tab)}
+            onNavigateToTab={goToTab}
             onPartidoPress={(p) => navigation.push('PartidoDetail', { partido: p })}
             onCourtReservationPress={(reservation) =>
               navigation.navigate('CourtReservationDetail', { reservation })
             }
             onDailyLessonPress={() => navigation.navigate('DailyLesson')}
-            onCoursesPress={() => setActiveTab('cursos')}
+            onCoursesPress={() => goToTab('cursos')}
             onOpenCompetitiveLeague={openCompetitiveLeagueFromHome}
             matchmakingBannerState={matchmakingBannerState}
             pairInvites={pairInvites}
@@ -459,91 +425,91 @@ export function MainApp() {
             }}
             onOpenProfileForOnboarding={() => openOnboardingFromSection('home')}
           />
-        );
-      case 'pistas':
-        return (
-          <MatchSearchScreen
-            onCourtPress={(court) => navigation.navigate('ClubDetail', { court })}
-            onBack={() => setActiveTab('inicio')}
-          />
-        );
-      case 'tienda':
-        return <TiendaScreen />;
-      case 'torneos':
-        return (
-          <CompeticionesScreen
-            onBack={() => setActiveTab('inicio')}
-            initialOpenTournamentId={openTournamentId}
-            onInitialTournamentOpened={() => setOpenTournamentId(null)}
-            onOpenProfileForOnboarding={() => openOnboardingFromSection('torneos')}
-          />
-        );
-      case 'partidos':
-        return (
-          <PartidosScreen
-            onPartidoPress={(p) => navigation.push('PartidoDetail', { partido: p })}
-            onOpenWeMatchClubsFlow={(organizerId, matchVisibility) =>
-              navigation.navigate('CrearPartido', {
-                organizerId: organizerId ?? profile?.id ?? null,
-                matchVisibility,
-              })
-            }
-            onNavigateToCompleteOnboarding={() => setActiveTab('perfil')}
-            partidosRefreshNonce={partidosRefreshNonce}
-          />
-        );
-      case 'cursos':
-        return (
-          <CoursesScreen
-            onBack={() => setActiveTab('inicio')}
-            onCoursePress={(course, isReserved) => {
-              navigation.navigate('PublicCourseDetail', { course, isReserved });
-            }}
-            onEducationalCoursePress={(course) => {
-              navigation.navigate('EducationalCourseDetail', { course });
-            }}
-            onOpenProfileForOnboarding={() => {
-              openOnboardingFromSection('cursos');
-            }}
-          />
-        );
-      case 'perfil':
-        return (
-          <ProfileScreen
-            key={profileRefreshKey}
-            onBack={() => {
-              setActiveTab('inicio');
-              setProfileAutoOpenOnboarding(false);
-            }}
-            onMenuPress={sidebar.toggle}
-            onEditProfilePress={() => {
-              navigation.navigate('EditProfile');
-            }}
-            onPreferencesPress={() => {
-              navigation.navigate('Preferences');
-            }}
-            onNavigateToInfo={(screenId) => {
-              navigation.navigate('Info', { screenId });
-            }}
-            autoOpenOnboarding={profileAutoOpenOnboarding}
-            onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
-            onOnboardingCompleted={handleOnboardingCompleted}
-            onOpenMatch={openMatchById}
-            onOpenPublicProfile={(pid) => {
-              navigation.push('PublicProfile', { playerId: pid });
-            }}
-            scrollToVitrinaNonce={vitrinaScrollNonce}
-          />
-        );
-      default:
-        return (
-          <HomeScreen
-            streakRefreshKey={streakRefreshKey}
-            matchmakingBannerState={matchmakingBannerState}
-            onOpenCompetitiveLeague={openCompetitiveLeagueFromHome}
-          />
-        );
-    }
+      </TabScreenShell>
+    ),
+    PistasTab: () => (
+      <TabScreenShell>
+        <MatchSearchScreen
+          onCourtPress={(court) => navigation.navigate('ClubDetail', { court })}
+          onBack={() => goToTab('inicio')}
+        />
+      </TabScreenShell>
+    ),
+    TiendaTab: () => (
+      <TabScreenShell header={tiendaHeader}>
+        <TiendaScreen />
+      </TabScreenShell>
+    ),
+    TorneosTab: () => (
+      <TabScreenShell>
+        <CompeticionesScreen
+          onBack={() => goToTab('inicio')}
+          initialOpenTournamentId={openTournamentId}
+          onInitialTournamentOpened={() => setOpenTournamentId(null)}
+          onOpenProfileForOnboarding={() => openOnboardingFromSection('torneos')}
+        />
+      </TabScreenShell>
+    ),
+    PartidosTab: () => (
+      <TabScreenShell backgroundColor="#000000" header={partidosHeader}>
+        <PartidosScreen
+          onPartidoPress={(p) => navigation.push('PartidoDetail', { partido: p })}
+          onOpenWeMatchClubsFlow={(organizerId, matchVisibility) =>
+            navigation.navigate('CrearPartido', {
+              organizerId: organizerId ?? profile?.id ?? null,
+              matchVisibility,
+            })
+          }
+          onNavigateToCompleteOnboarding={() => goToTab('perfil')}
+          partidosRefreshNonce={partidosRefreshNonce}
+        />
+      </TabScreenShell>
+    ),
+    CursosTab: () => (
+      <TabScreenShell>
+        <CoursesScreen
+          onBack={() => goToTab('inicio')}
+          onCoursePress={(course, isReserved) => {
+            navigation.navigate('PublicCourseDetail', { course, isReserved });
+          }}
+          onEducationalCoursePress={(course) => {
+            navigation.navigate('EducationalCourseDetail', { course });
+          }}
+          onOpenProfileForOnboarding={() => {
+            openOnboardingFromSection('cursos');
+          }}
+        />
+      </TabScreenShell>
+    ),
+    PerfilTab: () => (
+      <TabScreenShell>
+        <ProfileScreen
+          key={profileRefreshKey}
+          onBack={() => {
+            goToTab('inicio');
+            setProfileAutoOpenOnboarding(false);
+          }}
+          onMenuPress={sidebar.toggle}
+          onEditProfilePress={() => {
+            navigation.navigate('EditProfile');
+          }}
+          onPreferencesPress={() => {
+            navigation.navigate('Preferences');
+          }}
+          onNavigateToInfo={(screenId) => {
+            navigation.navigate('Info', { screenId });
+          }}
+          autoOpenOnboarding={profileAutoOpenOnboarding}
+          onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
+          onOnboardingCompleted={handleOnboardingCompleted}
+          onOpenMatch={openMatchById}
+          onOpenPublicProfile={(pid) => {
+            navigation.push('PublicProfile', { playerId: pid });
+          }}
+          scrollToVitrinaNonce={vitrinaScrollNonce}
+        />
+      </TabScreenShell>
+    ),
   };
 
   const profileBtn = (
@@ -551,75 +517,63 @@ export function MainApp() {
       accessibilityRole="button"
       accessibilityLabel={t('nav.userProfileA11y')}
       hitSlop={8}
-      onPress={() => setActiveTab('perfil')}
+      onPress={() => goToTab('perfil')}
       style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.75 }]}
     >
       <Ionicons name="person-circle-outline" size={22} color="#fff" />
     </Pressable>
   );
 
-  const customHeader =
-    activeTab === 'tienda'
-          ? (
-              <BackHeader
-                title={t('nav.tabTienda')}
-                tone="dark"
-                onBack={() => setActiveTab('inicio')}
-                rightSlot={(
-                  <>
-                    {profileBtn}
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t('nav.tiendaCart')}
-                      hitSlop={8}
-                      onPress={() => navigation.navigate('Cart')}
-                      style={({ pressed }) => [
-                        styles.tiendaHeaderCart,
-                        pressed && { opacity: 0.85 },
-                      ]}
-                    >
-                      <Ionicons name="cart-outline" size={18} color="#fff" />
-                      {cartCount > 0 ? (
-                        <View style={styles.tiendaCartBadge}>
-                          <Text style={styles.tiendaCartBadgeText}>
-                            {cartCount > 99 ? '99+' : cartCount}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </Pressable>
-                  </>
-                )}
-              />
-            )
-          : activeTab === 'partidos'
-              ? (
-                  <BackHeader
-                    title={t('nav.tabPartidos')}
-                    tone="dark"
-                    onBack={() => setActiveTab('inicio')}
-                    rightSlot={profileBtn}
-                  />
-                )
-              : activeTab === 'inicio'
-                ? (
-                    <HomeHeader
-                      onMenuPress={sidebar.toggle}
-                      onMessagesPress={() => navigation.navigate('Messages')}
-                      onNotificationsPress={() => navigation.navigate('Notifications')}
-                      onGroupsPress={() => navigation.navigate('Community')}
-                      onProfilePress={() => setActiveTab('perfil')}
-                    />
-                  )
-                : undefined;
+  const homeHeader = (
+    <HomeHeader
+      onMenuPress={sidebar.toggle}
+      onMessagesPress={() => navigation.navigate('Messages')}
+      onNotificationsPress={() => navigation.navigate('Notifications')}
+      onGroupsPress={() => navigation.navigate('Community')}
+      onProfilePress={() => goToTab('perfil')}
+    />
+  );
 
-  const layoutBackgroundColor =
-    activeTab === 'inicio' || activeTab === 'partidos'
-      ? '#000000'
-      : '#0F0F0F';
+  const partidosHeader = (
+    <BackHeader
+      title={t('nav.tabPartidos')}
+      tone="dark"
+      onBack={() => goToTab('inicio')}
+      rightSlot={profileBtn}
+    />
+  );
 
-  const handleTabChange = (tab: MainTabId) => {
-    setActiveTab(tab);
-  };
+  const tiendaHeader = (
+    <BackHeader
+      title={t('nav.tabTienda')}
+      tone="dark"
+      onBack={() => goToTab('inicio')}
+      rightSlot={(
+        <>
+          {profileBtn}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('nav.tiendaCart')}
+            hitSlop={8}
+            onPress={() => navigation.navigate('Cart')}
+            style={({ pressed }) => [
+              styles.tiendaHeaderCart,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Ionicons name="cart-outline" size={18} color="#fff" />
+            {cartCount > 0 ? (
+              <View style={styles.tiendaCartBadge}>
+                <Text style={styles.tiendaCartBadgeText}>
+                  {cartCount > 99 ? '99+' : cartCount}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </>
+      )}
+    />
+  );
 
   return (
     <View style={styles.container}>
@@ -630,29 +584,10 @@ export function MainApp() {
         onNavigateToAjustes={() => navigation.navigate('Ajustes')}
         onNavigateToClubReviews={() => navigation.navigate('ClubReviews')}
         onNavigateToInfo={(screenId) => navigation.navigate('Info', { screenId })}
-        onProfilePress={() => setActiveTab('perfil')}
+        onProfilePress={() => goToTab('perfil')}
       >
         <View style={styles.mainColumn}>
-          <ScreenLayout
-            sidebar={sidebar}
-            customHeader={customHeader}
-            hideHeader={
-              activeTab === 'pistas' ||
-              activeTab === 'torneos' ||
-              activeTab === 'cursos' ||
-              activeTab === 'perfil'
-            }
-            layoutBackgroundColor={layoutBackgroundColor}
-            navbarActions={{
-              onMessagesPress: () => navigation.navigate('Messages'),
-              onGroupsPress: () => navigation.navigate('Community'),
-            }}
-          >
-            {renderContent()}
-          </ScreenLayout>
-          <View style={styles.bottomBar}>
-            <BottomNavbar activeTab={activeTab} onTabChange={handleTabChange} />
-          </View>
+          <MainTabsNavigator screens={tabScreens} />
         </View>
         <MobileSidebar visible={sidebar.isOpen} onClose={sidebar.close}>
           <SidebarContent />
@@ -678,7 +613,7 @@ export function MainApp() {
       {/* Modal global de desbloqueos: aparece esté donde esté el usuario. */}
       <UnlockModalHost
         onGoToVitrina={() => {
-          setActiveTab('perfil');
+          goToTab('perfil');
           setVitrinaScrollNonce((n) => n + 1);
         }}
       />
@@ -733,14 +668,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  /** Columna explícita: ScreenLayout + barra inferior compartidos en flex (evita barra invisible en Android). */
+  /** Columna explícita del navigator de tabs (evita barra invisible en Android). */
   mainColumn: {
     flex: 1,
     minHeight: 0,
-  },
-  /** Ancho completo del dispositivo (sin márgenes laterales). */
-  bottomBar: {
-    width: '100%',
-    alignSelf: 'stretch',
   },
 });
