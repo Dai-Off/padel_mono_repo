@@ -27,6 +27,8 @@ import { useTranslation } from '../i18n';
 import { useStripe } from '../stripe';
 import { confirmPaymentFromClient, createIntentForSeasonPassElite } from '../api/payments';
 import {
+  claimAllSeasonPassRewards,
+  claimSeasonPassReward,
   fetchSeasonPassMe,
   rerollSeasonPassMission,
   type SeasonPassMeOk,
@@ -286,7 +288,8 @@ function RewardThumb({
 
   const d = reward.display;
   const rarity = RARITY_CONFIG[d.rarity ?? 'common'] ?? RARITY_CONFIG.common;
-  const granted = reward.status === 'granted';
+  const claimed = reward.status === 'claimed';
+  const claimable = reward.status === 'claimable';
   const opacity = dimmed ? 0.5 : 1;
 
   let inner: ReactNode;
@@ -402,9 +405,13 @@ function RewardThumb({
       >
         {inner}
       </View>
-      {granted ? (
+      {claimed ? (
         <View style={styles.rewardGrantedBadge}>
           <Ionicons name="checkmark" size={9} color="#0B1120" />
+        </View>
+      ) : claimable ? (
+        <View style={styles.rewardClaimableBadge}>
+          <Ionicons name="gift" size={9} color="#0B1120" />
         </View>
       ) : null}
     </Pressable>
@@ -691,6 +698,8 @@ export function SeasonPassScreen({ onBack }: Props) {
   const [showHowTo, setShowHowTo] = useState(false);
   const [elitePaying, setElitePaying] = useState(false);
   const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
+  const [claiming, setClaiming] = useState(false);
+  const [claimAllCount, setClaimAllCount] = useState<number | null>(null);
   const trackScrollRef = useRef<ScrollView>(null);
   const [me, setMe] = useState<SeasonPassMeOk | null>(null);
   const [loading, setLoading] = useState(true);
@@ -716,6 +725,40 @@ export function SeasonPassScreen({ onBack }: Props) {
     }
     setLoading(false);
   }, [session?.access_token, t]);
+
+  // Reclama una recompensa concreta del track (claim manual).
+  const handleClaim = useCallback(
+    async (reward: SeasonPassTrackRewardDto) => {
+      const token = session?.access_token;
+      if (!token || claiming) return;
+      setClaiming(true);
+      const res = await claimSeasonPassReward(token, reward.id);
+      setClaiming(false);
+      if (res.ok) {
+        // Confirma en el detalle (pasa a "Reclamada") y refresca el track.
+        setRewardDetail((prev) =>
+          prev && prev.reward.id === reward.id
+            ? { ...prev, reward: { ...prev.reward, status: 'claimed' } }
+            : prev
+        );
+        load();
+      }
+    },
+    [session?.access_token, claiming, load]
+  );
+
+  // Reclama de una vez todas las recompensas disponibles.
+  const handleClaimAll = useCallback(async () => {
+    const token = session?.access_token;
+    if (!token || claiming) return;
+    setClaiming(true);
+    const res = await claimAllSeasonPassRewards(token);
+    setClaiming(false);
+    if (res.ok && res.count > 0) {
+      setClaimAllCount(res.count);
+      load();
+    }
+  }, [session?.access_token, claiming, load]);
 
   useEffect(() => {
     setLoading(true);
@@ -1165,6 +1208,28 @@ export function SeasonPassScreen({ onBack }: Props) {
         <Animated.View style={{ opacity: contentOp, paddingHorizontal: PAD, paddingTop: 8 }}>
           {tab === 'rewards' ? (
             <View>
+              {(me?.claimable_count ?? 0) > 0 ? (
+                <Pressable
+                  onPress={handleClaimAll}
+                  disabled={claiming}
+                  style={({ pressed }) => [
+                    styles.claimAllBtn,
+                    claiming && { opacity: 0.7 },
+                    pressed && !claiming && styles.pressed,
+                  ]}
+                >
+                  {claiming ? (
+                    <ActivityIndicator color="#0B1120" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="gift" size={16} color="#0B1120" />
+                      <Text style={styles.claimAllBtnTxt}>
+                        {t('alerts.seasonPass.claimAll', { count: me?.claimable_count ?? 0 })}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+              ) : null}
               {boostPct > 0 ? (
                 <View style={styles.boostBanner}>
                   <Ionicons name="flame" size={16} color={ACCENT} />
@@ -1439,11 +1504,34 @@ export function SeasonPassScreen({ onBack }: Props) {
         currentLevel={level}
         playerAvatarUrl={profile?.avatarUrl ?? null}
         playerInitials={playerInitials}
+        onClaim={handleClaim}
+        claiming={claiming}
         onGetElite={() => {
           setRewardDetail(null);
           setShowElite(true);
         }}
       />
+
+      <Modal
+        visible={claimAllCount !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setClaimAllCount(null)}
+      >
+        <Pressable style={styles.claimSummaryBackdrop} onPress={() => setClaimAllCount(null)}>
+          <View style={styles.claimSummaryCard}>
+            <View style={styles.claimSummaryIcon}>
+              <Ionicons name="gift" size={26} color={ACCENT} />
+            </View>
+            <Text style={styles.claimSummaryMsg}>
+              {t('alerts.seasonPass.claimAllDone', { count: claimAllCount ?? 0 })}
+            </Text>
+            <Pressable onPress={() => setClaimAllCount(null)} style={styles.claimSummaryCta}>
+              <Text style={styles.claimSummaryCtaTxt}>{t('alerts.seasonPass.claimAllDoneCta')}</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={showEliteSuccess}
@@ -1801,6 +1889,68 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rewardClaimableBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: ACCENT,
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+  claimAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: ACCENT,
+    marginBottom: 12,
+  },
+  claimAllBtnTxt: { color: '#0B1120', fontSize: 14, fontWeight: '800' },
+  claimSummaryBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  claimSummaryCard: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#17110d',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.3)',
+    alignItems: 'center',
+    padding: 24,
+  },
+  claimSummaryIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(241,143,52,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  claimSummaryMsg: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 18 },
+  claimSummaryCta: {
+    alignSelf: 'stretch',
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+  },
+  claimSummaryCtaTxt: { color: '#0B1120', fontSize: 15, fontWeight: '800' },
   boostBanner: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -186,6 +186,11 @@ export interface AlertsTranslationKeys {
     rewardDetailTitle: string;
     rewardGranted: string;
     rewardUnlocked: string;
+    rewardClaimable: string;
+    rewardClaim: string;
+    claimAll: string;
+    claimAllDone: string;
+    claimAllDoneCta: string;
     rewardLocked: string;
     rewardNeedsElite: string;
     passHelpTitle: string;

@@ -60,12 +60,23 @@ export type RewardDisplayDto = {
   style: string | null;
 };
 
+export type RewardStatus = 'locked' | 'claimable' | 'claimed';
+
 export type SeasonPassTrackRewardDto = {
   id: string;
   tier: 'free' | 'elite';
-  reward_type: 'unlockable' | 'sp_boost' | 'sp';
+  reward_type: 'unlockable' | 'sp_boost' | 'sp' | 'reroll_token';
   display: RewardDisplayDto;
-  status: 'locked' | 'unlocked' | 'granted';
+  status: RewardStatus;
+};
+
+/** Recompensa reclamada (respuesta de claim/claim-all), para la celebración. */
+export type ClaimedRewardDto = {
+  reward_id: string;
+  level: number;
+  tier: 'free' | 'elite';
+  reward_type: string;
+  display: RewardDisplayDto;
 };
 
 export type SeasonPassTrackLevelDto = {
@@ -124,6 +135,7 @@ export type SeasonPassMeOk = {
   sp_how?: SeasonPassSpHowRowDto[];
   track_levels?: number[];
   track_rewards?: SeasonPassTrackLevelDto[];
+  claimable_count?: number;
   boosts?: SeasonPassBoostsDto;
   next_milestone: unknown | null;
 };
@@ -157,6 +169,44 @@ export async function rerollSeasonPassMission(
     return { ok: data.ok === true, error: data.error };
   } catch {
     return { ok: false, error: 'network' };
+  }
+}
+
+/** Reclama una recompensa del track (claim manual). */
+export async function claimSeasonPassReward(
+  token: string,
+  rewardId: string
+): Promise<{ ok: boolean; reward?: ClaimedRewardDto; error?: string }> {
+  try {
+    const res = await fetch(
+      `${API_URL}/season-pass/rewards/${encodeURIComponent(rewardId)}/claim`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
+    );
+    const data = (await res.json()) as { ok?: boolean; reward?: ClaimedRewardDto; error?: string };
+    return { ok: data.ok === true, reward: data.reward, error: data.error };
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+}
+
+/** Reclama todas las recompensas reclamables de una. */
+export async function claimAllSeasonPassRewards(
+  token: string
+): Promise<{ ok: boolean; count: number; rewards: ClaimedRewardDto[]; error?: string }> {
+  try {
+    const res = await fetch(`${API_URL}/season-pass/rewards/claim-all`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = (await res.json()) as {
+      ok?: boolean;
+      count?: number;
+      rewards?: ClaimedRewardDto[];
+      error?: string;
+    };
+    return { ok: data.ok === true, count: data.count ?? 0, rewards: data.rewards ?? [], error: data.error };
+  } catch {
+    return { ok: false, count: 0, rewards: [], error: 'network' };
   }
 }
 

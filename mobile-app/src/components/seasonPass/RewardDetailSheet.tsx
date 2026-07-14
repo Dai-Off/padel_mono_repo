@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from '../../i18n';
@@ -25,6 +25,8 @@ type Props = {
   playerAvatarUrl: string | null;
   playerInitials: string;
   onGetElite: () => void;
+  onClaim?: (reward: SeasonPassTrackRewardDto) => void;
+  claiming?: boolean;
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -170,6 +172,8 @@ export function RewardDetailSheet({
   playerAvatarUrl,
   playerInitials,
   onGetElite,
+  onClaim,
+  claiming,
 }: Props) {
   const { t } = useTranslation();
   const reward = target?.reward;
@@ -184,14 +188,17 @@ export function RewardDetailSheet({
     !hasElite &&
     (target?.level ?? 0) <= currentLevel;
 
+  const isLocked = reward?.status === 'locked';
+  const isClaimable = reward?.status === 'claimable';
   const statusLabel =
-    reward?.status === 'granted'
+    reward?.status === 'claimed'
       ? t('alerts.seasonPass.rewardGranted')
-      : reward?.status === 'unlocked'
-        ? t('alerts.seasonPass.rewardUnlocked')
+      : isClaimable
+        ? t('alerts.seasonPass.rewardClaimable')
         : needsElite
           ? t('alerts.seasonPass.rewardNeedsElite')
           : t('alerts.seasonPass.rewardLocked', { level: target?.level ?? 0 });
+  const statusColor = isLocked ? '#9ca3af' : isClaimable ? '#F18F34' : '#34d399';
 
   return (
     <FilterBottomSheet
@@ -244,18 +251,33 @@ export function RewardDetailSheet({
           <View
             style={[
               styles.statusRow,
-              reward.status === 'locked' ? styles.statusLocked : styles.statusGranted,
+              isLocked ? styles.statusLocked : isClaimable ? styles.statusClaimable : styles.statusGranted,
             ]}
           >
             <Ionicons
-              name={reward.status === 'locked' ? 'lock-closed' : 'checkmark-circle'}
+              name={isLocked ? 'lock-closed' : isClaimable ? 'gift' : 'checkmark-circle'}
               size={16}
-              color={reward.status === 'locked' ? '#9ca3af' : '#34d399'}
+              color={statusColor}
             />
-            <Text style={[styles.statusTxt, { color: reward.status === 'locked' ? '#9ca3af' : '#34d399' }]}>
-              {statusLabel}
-            </Text>
+            <Text style={[styles.statusTxt, { color: statusColor }]}>{statusLabel}</Text>
           </View>
+
+          {isClaimable && onClaim ? (
+            <Pressable
+              onPress={() => onClaim(reward)}
+              disabled={claiming}
+              style={({ pressed }) => [styles.claimCta, claiming && { opacity: 0.7 }, pressed && !claiming && { opacity: 0.9 }]}
+            >
+              {claiming ? (
+                <ActivityIndicator color="#0B1120" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="gift" size={16} color="#0B1120" />
+                  <Text style={styles.claimCtaTxt}>{t('alerts.seasonPass.rewardClaim')}</Text>
+                </>
+              )}
+            </Pressable>
+          ) : null}
 
           {needsElite ? (
             <Pressable
@@ -319,8 +341,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   statusGranted: { backgroundColor: 'rgba(16,185,129,0.08)' },
+  statusClaimable: { backgroundColor: 'rgba(241,143,52,0.1)' },
   statusLocked: { backgroundColor: 'rgba(255,255,255,0.05)' },
   statusTxt: { fontSize: 13, fontWeight: '700' },
+  claimCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#F18F34',
+  },
+  claimCtaTxt: { color: '#0B1120', fontSize: 15, fontWeight: '800' },
   eliteCta: {
     flexDirection: 'row',
     alignItems: 'center',
