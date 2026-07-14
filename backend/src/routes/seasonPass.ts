@@ -11,7 +11,8 @@ import {
 import {
   ackRewardGrants,
   buildRewardDisplay,
-  grantLevelRewards,
+  claimAllRewards,
+  claimSingleReward,
   listGrantedRewardIds,
   loadSeasonRewards,
 } from '../services/seasonPassRewards';
@@ -45,19 +46,11 @@ router.get('/me', async (req: Request, res: Response) => {
     const sp_how = await listSpHowRows(season.slug);
     const track_levels = computeTrackLevels(c.level, season.max_level, season.track_radius);
 
-    // Rewards track (phase 2). Self-heal: grant anything pending up to the
-    // current level (covers players who leveled before rewards shipped and
-    // grants that crashed mid-way) — idempotent via the grant ledger.
+    // Rewards track. Claim manual (bloque C): NO se auto-otorga; cada nivel
+    // alcanzado y no reclamado queda `claimable` y el jugador lo reclama.
     const seasonRewards = await loadSeasonRewards(season.slug);
-    let grantedIds = await listGrantedRewardIds(playerId!);
+    const grantedIds = await listGrantedRewardIds(playerId!);
     const tiers: ('free' | 'elite')[] = row.has_elite ? ['free', 'elite'] : ['free'];
-    const hasPending = seasonRewards.some(
-      (r) => r.level <= c.level && tiers.includes(r.tier) && !grantedIds.has(r.id)
-    );
-    if (hasPending) {
-      await grantLevelRewards(playerId!, season, 0, c.level, tiers);
-      grantedIds = await listGrantedRewardIds(playerId!);
-    }
     // Active SP boost (phase 3): streak + consumable boosters + catch-up.
     const activeBoost = await getActiveSpBonus(playerId!, { tz, season });
     const boosts = {
@@ -68,6 +61,7 @@ router.get('/me', async (req: Request, res: Response) => {
     // Track completo 1..max_level (bloque C): el cliente pinta todos los
     // niveles y hace scroll; los que no tienen recompensa salen como nodo
     // simple. track_levels (radio) se mantiene por compatibilidad.
+    let claimable_count = 0;
     const allTrackLevels = Array.from({ length: season.max_level }, (_, i) => i + 1);
     const track_rewards = allTrackLevels.map((level) => ({
       level,
@@ -75,17 +69,18 @@ router.get('/me', async (req: Request, res: Response) => {
       unlocked: level <= c.level,
       rewards: seasonRewards
         .filter((r) => r.level === level)
-        .map((r) => ({
-          id: r.id,
-          tier: r.tier,
-          reward_type: r.reward_type,
-          display: buildRewardDisplay(r),
-          status: grantedIds.has(r.id)
-            ? 'granted'
-            : level <= c.level && (r.tier === 'free' || row.has_elite)
-              ? 'unlocked'
-              : 'locked',
-        })),
+        .map((r) => {
+          const reached = level <= c.level && (r.tier === 'free' || row.has_elite);
+          const status = grantedIds.has(r.id) ? 'claimed' : reached ? 'claimable' : 'locked';
+          if (status === 'claimable') claimable_count += 1;
+          return {
+            id: r.id,
+            tier: r.tier,
+            reward_type: r.reward_type,
+            display: buildRewardDisplay(r),
+            status,
+          };
+        }),
     }));
 
     return res.json({
@@ -110,6 +105,7 @@ router.get('/me', async (req: Request, res: Response) => {
       sp_how,
       track_levels,
       track_rewards,
+      claimable_count,
       boosts,
       next_milestone: null,
       ...c,
@@ -189,6 +185,46 @@ router.post('/rewards/ack', async (req: Request, res: Response) => {
   try {
     const acked = await ackRewardGrants(playerId!, ids);
     return res.json({ ok: true, acked });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /season-pass/rewards/claim-all
+ * Reclama todas las recompensas reclamables (nivel alcanzado, carril disponible,
+ * no reclamadas). Devuelve la lista reclamada para la celebración.
+ */
+router.post('/rewards/claim-all', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  try {
+    const season = await getActiveSeasonRow();
+    if (!season) return res.status(503).json({ ok: false, error: 'Sin temporada activa' });
+    const rewards = await claimAllRewards(playerId!, season);
+    return res.json({ ok: true, rewards, count: rewards.length });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /season-pass/rewards/:rewardId/claim
+ * Reclama una recompensa concreta del track ya alcanzada.
+ */
+router.post('/rewards/:rewardId/claim', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  try {
+    const season = await getActiveSeasonRow();
+    if (!season) return res.status(503).json({ ok: false, error: 'Sin temporada activa' });
+    const result = await claimSingleReward(playerId!, season, String(req.params.rewardId));
+    if (!result.ok) {
+      const status =
+        result.code === 'not_found' ? 404 : result.code === 'needs_elite' ? 403 : 409;
+      return res.status(status).json({ ok: false, error: result.code });
+    }
+    return res.json({ ok: true, reward: result.reward });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

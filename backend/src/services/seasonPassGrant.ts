@@ -1,6 +1,6 @@
 import { getActiveSeasonRow, SeasonPassSeasonRow } from './seasonPassSeasonConfig';
 import { addSeasonPassSp, computeSeasonPass, getOrCreateSeasonPassRow } from './seasonPassService';
-import { GrantedReward, grantLevelRewards } from './seasonPassRewards';
+import { GrantedReward } from './seasonPassRewards';
 import { consumeMissionBoosts, getActiveSpBonus } from './seasonPassBoosts';
 
 export type SeasonPassGrantResult = {
@@ -50,24 +50,12 @@ export async function grantSeasonPassSp(
   }
 
   const levelFrom = computeSeasonPass(before.sp, season.sp_per_level, season.max_level).level;
-  let levelTo = computeSeasonPass(spTotal, season.sp_per_level, season.max_level).level;
+  const levelTo = computeSeasonPass(spTotal, season.sp_per_level, season.max_level).level;
 
-  // Phase 2: crossing levels delivers the track rewards (free always, elite
-  // if purchased). Direct-SP rewards can push further levels — refresh after.
-  let rewardsGranted: GrantedReward[] = [];
-  if (levelTo > levelFrom) {
-    try {
-      const tiers: ('free' | 'elite')[] = before.has_elite ? ['free', 'elite'] : ['free'];
-      rewardsGranted = await grantLevelRewards(playerId, season, levelFrom, levelTo, tiers);
-      if (rewardsGranted.some((r) => r.reward_type === 'sp')) {
-        const refreshed = await getOrCreateSeasonPassRow(playerId);
-        spTotal = refreshed.sp;
-        levelTo = computeSeasonPass(spTotal, season.sp_per_level, season.max_level).level;
-      }
-    } catch (e) {
-      console.warn('[season-pass] level rewards failed:', (e as Error).message);
-    }
-  }
+  // Bloque C: los objetos del track ya NO se auto-otorgan al subir de nivel; se
+  // reclaman en el pase. El level-up solo reporta el cruce para la celebración
+  // "subiste de nivel". rewards_granted queda vacío (se conserva por contrato).
+  const rewardsGranted: GrantedReward[] = [];
 
   return {
     granted_sp: spTotal - before.sp,

@@ -81,19 +81,12 @@ export async function setSeasonPassEliteFlag(playerId: string, value: boolean): 
 }
 
 /**
- * Retroactivo Elite (plan §6.3.3): al activar Elite se otorgan las recompensas
- * `elite` de todos los niveles ya alcanzados. Dynamic import: seasonPassRewards
- * depende de este módulo (evita el ciclo estático). Nunca rompe la compra.
+ * Con el claim manual (bloque C) la compra de Elite ya NO auto-otorga lo
+ * retroactivo: los niveles elite alcanzados quedan `claimable` y el jugador los
+ * reclama en el pase. Se conserva como no-op (hook del flujo de compra).
  */
-async function grantEliteRetroactiveSafe(playerId: string): Promise<void> {
-  try {
-    const season = await getActiveSeasonRow();
-    if (!season) return;
-    const { grantEliteRetroactiveRewards } = await import('./seasonPassRewards');
-    await grantEliteRetroactiveRewards(playerId, season);
-  } catch (e) {
-    console.warn('[season-pass] elite retroactive rewards failed:', (e as Error).message);
-  }
+async function grantEliteRetroactiveSafe(_playerId: string): Promise<void> {
+  // no-op: las recompensas elite retroactivas se reclaman manualmente.
 }
 
 /** Tras pago Stripe confirmado (webhook o confirm-client): registro contable + activa Elite (idempotente por `paymentIntentId`). */

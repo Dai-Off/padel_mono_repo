@@ -99,110 +99,119 @@ export type GrantedReward = {
   display: RewardDisplay;
 };
 
-/**
- * Grant every reward in levels (fromLevel, toLevel] for the given tiers.
- * Idempotent: the grant ledger's unique key claims each reward exactly once
- * (concurrent evaluations skip already-claimed rows). Effects:
- * - unlockable → row in player_unlockables (UnlockModalHost picks it up)
- * - sp → direct SP without boosts (plan §6.3); if that SP crosses more
- *   levels, the loop grants those too (bounded)
- * - sp_boost → phase 3 (ignored with a warning until player_sp_boosts ships)
- */
-export async function grantLevelRewards(
+/** Aplica el efecto de una recompensa (sin tocar el ledger). */
+async function applyRewardEffect(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
   playerId: string,
   season: SeasonPassSeasonRow,
-  fromLevel: number,
-  toLevel: number,
-  tiers: SeasonPassRewardTier[]
-): Promise<GrantedReward[]> {
-  const supabase = getSupabaseServiceRoleClient();
-  const all = await loadSeasonRewards(season.slug);
-  const granted: GrantedReward[] = [];
-
-  let lo = fromLevel;
-  let hi = toLevel;
-  for (let iter = 0; iter < 5 && hi > lo; iter += 1) {
-    const candidates = all.filter(
-      (r) => r.level > lo && r.level <= hi && tiers.includes(r.tier)
+  r: SeasonPassRewardRow
+): Promise<void> {
+  if (r.reward_type === 'unlockable' && r.unlockable_id) {
+    const { error } = await supabase.from('player_unlockables').upsert(
+      { player_id: playerId, unlockable_id: r.unlockable_id },
+      { onConflict: 'player_id,unlockable_id', ignoreDuplicates: true }
     );
-    let grantedSp = 0;
-
-    for (const r of candidates) {
-      // Claim: empty result = someone else (or a past run) already granted it.
-      const { data: claimed, error: claimErr } = await supabase
-        .from('player_season_pass_reward_grants')
-        .upsert(
-          { player_id: playerId, reward_id: r.id },
-          { onConflict: 'player_id,reward_id', ignoreDuplicates: true }
-        )
-        .select('id');
-      if (claimErr) {
-        console.warn('[season-pass rewards] claim failed:', claimErr.message);
-        continue;
-      }
-      if (!claimed || claimed.length === 0) continue;
-
-      if (r.reward_type === 'unlockable' && r.unlockable_id) {
-        const { error: unlockErr } = await supabase.from('player_unlockables').upsert(
-          { player_id: playerId, unlockable_id: r.unlockable_id },
-          { onConflict: 'player_id,unlockable_id', ignoreDuplicates: true }
-        );
-        if (unlockErr) console.warn('[season-pass rewards] unlock failed:', unlockErr.message);
-      } else if (r.reward_type === 'sp' && r.sp_amount) {
-        try {
-          await addSeasonPassSp(playerId, r.sp_amount);
-          grantedSp += r.sp_amount;
-        } catch (e) {
-          console.warn('[season-pass rewards] sp grant failed:', (e as Error).message);
-        }
-      } else if (r.reward_type === 'sp_boost') {
-        // Auto-activated on grant with a time window (decided 2026-07-07).
-        const cfg = r.boost_config ?? {};
-        const bonus = Number(cfg.bonus ?? 0);
-        const hours = Number(cfg.expires_hours ?? 48);
-        if (bonus > 0) {
-          const expiresAt = new Date(Date.now() + hours * 3_600_000).toISOString();
-          const { error: boostErr } = await supabase.from('player_sp_boosts').insert({
-            player_id: playerId,
-            source: 'pass_reward',
-            bonus,
-            expires_at: expiresAt,
-          });
-          if (boostErr) console.warn('[season-pass rewards] boost grant failed:', boostErr.message);
-        }
-      } else if (r.reward_type === 'reroll_token' && r.reroll_tokens) {
-        await grantRerollTokens(playerId, season.slug, r.reroll_tokens, r.id);
-      }
-
-      granted.push({
-        reward_id: r.id,
-        level: r.level,
-        tier: r.tier,
-        reward_type: r.reward_type,
-        display: buildRewardDisplay(r),
-      });
+    if (error) console.warn('[season-pass claim] unlock failed:', error.message);
+  } else if (r.reward_type === 'sp' && r.sp_amount) {
+    try {
+      await addSeasonPassSp(playerId, r.sp_amount);
+    } catch (e) {
+      console.warn('[season-pass claim] sp grant failed:', (e as Error).message);
     }
-
-    if (grantedSp <= 0) break;
-    lo = hi;
-    const row = await getOrCreateSeasonPassRow(playerId);
-    hi = computeSeasonPass(row.sp, season.sp_per_level, season.max_level).level;
+  } else if (r.reward_type === 'sp_boost') {
+    // Se auto-activa al reclamar, con ventana temporal.
+    const cfg = r.boost_config ?? {};
+    const bonus = Number(cfg.bonus ?? 0);
+    const hours = Number(cfg.expires_hours ?? 48);
+    if (bonus > 0) {
+      const expiresAt = new Date(Date.now() + hours * 3_600_000).toISOString();
+      const { error } = await supabase.from('player_sp_boosts').insert({
+        player_id: playerId,
+        source: 'pass_reward',
+        bonus,
+        expires_at: expiresAt,
+      });
+      if (error) console.warn('[season-pass claim] boost grant failed:', error.message);
+    }
+  } else if (r.reward_type === 'reroll_token' && r.reroll_tokens) {
+    await grantRerollTokens(playerId, season.slug, r.reroll_tokens, r.id);
   }
-
-  return granted;
 }
 
 /**
- * Retroactive Elite grant (plan §6.3.3): on Elite purchase, deliver every
- * elite reward from level 1 up to the player's current level.
+ * Claim manual (bloque C): reclama UNA recompensa. Idempotente vía el ledger
+ * (unique player+reward): solo aplica el efecto si la fila se creó ahora.
+ * Devuelve el GrantedReward si se reclamó, null si ya estaba reclamada.
  */
-export async function grantEliteRetroactiveRewards(
+export async function claimReward(
+  playerId: string,
+  season: SeasonPassSeasonRow,
+  r: SeasonPassRewardRow
+): Promise<GrantedReward | null> {
+  const supabase = getSupabaseServiceRoleClient();
+  const { data: claimed, error } = await supabase
+    .from('player_season_pass_reward_grants')
+    .upsert(
+      { player_id: playerId, reward_id: r.id, notified_at: new Date().toISOString() },
+      { onConflict: 'player_id,reward_id', ignoreDuplicates: true }
+    )
+    .select('id');
+  if (error) {
+    console.warn('[season-pass claim] ledger failed:', error.message);
+    return null;
+  }
+  if (!claimed || claimed.length === 0) return null; // ya reclamada
+  await applyRewardEffect(supabase, playerId, season, r);
+  return {
+    reward_id: r.id,
+    level: r.level,
+    tier: r.tier,
+    reward_type: r.reward_type,
+    display: buildRewardDisplay(r),
+  };
+}
+
+export type ClaimResult =
+  | { ok: true; reward: GrantedReward }
+  | { ok: false; code: 'not_found' | 'locked' | 'needs_elite' | 'already_claimed' };
+
+/** Reclama una recompensa por id, validando nivel alcanzado y carril disponible. */
+export async function claimSingleReward(
+  playerId: string,
+  season: SeasonPassSeasonRow,
+  rewardId: string
+): Promise<ClaimResult> {
+  const all = await loadSeasonRewards(season.slug);
+  const r = all.find((x) => x.id === rewardId);
+  if (!r) return { ok: false, code: 'not_found' };
+  const row = await getOrCreateSeasonPassRow(playerId);
+  const level = computeSeasonPass(row.sp, season.sp_per_level, season.max_level).level;
+  if (r.level > level) return { ok: false, code: 'locked' };
+  if (r.tier === 'elite' && !row.has_elite) return { ok: false, code: 'needs_elite' };
+  const granted = await claimReward(playerId, season, r);
+  if (!granted) return { ok: false, code: 'already_claimed' };
+  return { ok: true, reward: granted };
+}
+
+/** Reclama TODAS las reclamables (nivel alcanzado, carril disponible, no reclamadas). */
+export async function claimAllRewards(
   playerId: string,
   season: SeasonPassSeasonRow
 ): Promise<GrantedReward[]> {
+  const all = await loadSeasonRewards(season.slug);
   const row = await getOrCreateSeasonPassRow(playerId);
   const level = computeSeasonPass(row.sp, season.sp_per_level, season.max_level).level;
-  return grantLevelRewards(playerId, season, 0, level, ['elite']);
+  const grantedIds = await listGrantedRewardIds(playerId);
+  const tiers: SeasonPassRewardTier[] = row.has_elite ? ['free', 'elite'] : ['free'];
+  const claimable = all
+    .filter((r) => r.level <= level && tiers.includes(r.tier) && !grantedIds.has(r.id))
+    .sort((a, b) => a.level - b.level);
+  const out: GrantedReward[] = [];
+  for (const r of claimable) {
+    const g = await claimReward(playerId, season, r);
+    if (g) out.push(g);
+  }
+  return out;
 }
 
 /** Reward ids already granted to the player (for track status in /me). */
