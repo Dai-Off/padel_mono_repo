@@ -11,6 +11,19 @@ import {
   RegisterRoute,
   ResetPasswordRoute,
 } from './authRoutes';
+import {
+  AjustesRoute,
+  AjustesSectionRoute,
+  ChangePasswordRoute,
+  ClubReviewsRoute,
+  EditProfileRoute,
+  InfoRoute,
+  MonederoRoute,
+  MovimientosMonederoRoute,
+  PagosPendientesRoute,
+  PreferencesRoute,
+  TransaccionesRoute,
+} from './routes/settingsRoutes';
 import type { RootStackParamList } from './types';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
@@ -36,8 +49,20 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
         {isAuthenticated ? (
           <RootStack.Group>
             <RootStack.Screen name="Main" component={MainRoute} />
-            {/* Las rutas de la app (antes overlays de MainApp) se registran
-                aqui por fases durante la migracion. */}
+            {/* Cluster ajustes/sidebar */}
+            <RootStack.Screen name="Monedero" component={MonederoRoute} />
+            <RootStack.Screen name="Transacciones" component={TransaccionesRoute} />
+            <RootStack.Screen name="PagosPendientes" component={PagosPendientesRoute} />
+            <RootStack.Screen name="MovimientosMonedero" component={MovimientosMonederoRoute} />
+            <RootStack.Screen name="Ajustes" component={AjustesRoute} />
+            <RootStack.Screen name="AjustesSection" component={AjustesSectionRoute} />
+            <RootStack.Screen name="Info" component={InfoRoute} />
+            <RootStack.Screen name="ClubReviews" component={ClubReviewsRoute} />
+            <RootStack.Screen name="Preferences" component={PreferencesRoute} />
+            <RootStack.Screen name="EditProfile" component={EditProfileRoute} />
+            <RootStack.Screen name="ChangePassword" component={ChangePasswordRoute} />
+            {/* Las siguientes fases de la migracion registran aqui el resto
+                de overlays de MainApp. */}
           </RootStack.Group>
         ) : (
           <RootStack.Group>

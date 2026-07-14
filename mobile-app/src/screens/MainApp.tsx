@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, BackHandler, Pressable, Text, View, StyleSheet } from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,12 +33,8 @@ import type { CourtReservation } from '../api/bookings';
 import { NotificationsScreen } from './NotificationsScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
-import { MonederoScreen } from './MonederoScreen';
-import { PagosPendientesScreen } from './PagosPendientesScreen';
-import { MovimientosMonederoScreen } from './MovimientosMonederoScreen';
 import { TuActividadFlow } from './TuActividadFlow';
 import type { TuActividadDestination } from './TuActividadScreen';
-import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
 import { CartScreen } from './CartScreen';
 import { DailyLessonScreen } from './DailyLessonScreen';
@@ -45,8 +42,6 @@ import { CoursesScreen } from './CoursesScreen';
 import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
 import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
 import { ProfileScreen } from './ProfileScreen';
-import { EditProfileScreen } from './EditProfileScreen';
-import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
 import { fetchMyPlayerProfile } from '../api/players';
@@ -74,13 +69,9 @@ import { MessagesScreen, type MessagePeerNav } from './MessagesScreen';
 import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
 import { CompetitiveLeagueScreen } from './CompetitiveLeagueScreen';
 import { SeasonPassScreen } from './SeasonPassScreen';
-import { PreferencesScreen } from './PreferencesScreen';
 import { PublicProfileScreen } from './PublicProfileScreen';
-import { AjustesScreen } from './AjustesScreen';
-import { ClubReviewsScreen } from './ClubReviewsScreen';
-import { InfoContentScreen } from './InfoContentScreen';
-import type { InfoScreenId } from '../content/infoContent';
-import { consumeOverlayNestedBack, registerOverlayNestedBack } from '../navigation/overlayBackRef';
+import { registerMainAppActions } from '../navigation/mainAppActions';
+import type { RootStackParamList } from '../navigation/types';
 import type { EducationalCourse } from '../api/dailyLessons';
 import type { PublicCourse } from '../api/schoolCourses';
 
@@ -125,6 +116,18 @@ export function MainApp() {
   useEffect(() => {
     isFocusedRef.current = isFocused;
   }, [isFocused]);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  // Puente temporal: rutas ya migradas disparan estado que sigue viviendo aqui.
+  useEffect(() => {
+    registerMainAppActions({
+      profileSaved: () => {
+        setProfileRefreshKey((k) => k + 1);
+        setPartidosRefreshNonce((n) => n + 1);
+      },
+    });
+    return () => registerMainAppActions(null);
+  }, []);
   const { session } = useAuth();
   const { totalCount: cartCount } = useCart();
   const { profile, refreshMatches, refreshCourtReservations, syncMisPartidoFromMatchId, upsertMisPartido } = useHomeData();
@@ -135,13 +138,8 @@ export function MainApp() {
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [selectedCourtReservation, setSelectedCourtReservation] = useState<CourtReservation | null>(null);
-  const [showMonedero, setShowMonedero] = useState(false);
-  const [showPagosPendientes, setShowPagosPendientes] = useState(false);
-  const [showMovimientosMonedero, setShowMovimientosMonedero] = useState(false);
   const [showTuActividad, setShowTuActividad] = useState(false);
   const [tuActividadSubView, setTuActividadSubView] = useState<TuActividadDestination | null>(null);
-  const [showTransacciones, setShowTransacciones] = useState(false);
-  const [preferencesReturnToTuActividad, setPreferencesReturnToTuActividad] = useState(false);
   const [showDailyLesson, setShowDailyLesson] = useState(false);
   /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
   const [streakRefreshKey, setStreakRefreshKey] = useState(0);
@@ -158,19 +156,12 @@ export function MainApp() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [matchReceivedInvites, setMatchReceivedInvites] = useState<ReceivedMatchInvite[]>([]);
   const [matchInviteNonce, setMatchInviteNonce] = useState(0);
-  const [showEditProfile, setShowEditProfile] = useState(false);
-  const [showChangePassword, setShowChangePassword] = useState(false);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [openTournamentId, setOpenTournamentId] = useState<string | null>(null);
   // Si llegamos al perfil desde una feature bloqueada por falta de onboarding
   // (p.ej. Daily Lesson), pedimos a ProfileScreen que abra el modal del
   // cuestionario de nivelación automáticamente al montar.
   const [profileAutoOpenOnboarding, setProfileAutoOpenOnboarding] = useState(false);
-  const [showPreferences, setShowPreferences] = useState(false);
-  const [showAjustes, setShowAjustes] = useState(false);
-  const [showClubReviews, setShowClubReviews] = useState(false);
-  const [infoScreen, setInfoScreen] = useState<InfoScreenId | null>(null);
-  const [infoReturnToProfile, setInfoReturnToProfile] = useState(false);
   const [showCommunity, setShowCommunity] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [messagesPeer, setMessagesPeer] = useState<MessagePeerNav | null>(null);
@@ -559,36 +550,13 @@ export function MainApp() {
 
   /** Cierra overlays del menú lateral antes de abrir otro destino (evita flags superpuestos). */
   const resetSidebarOverlays = useCallback(() => {
-    setShowEditProfile(false);
-    setShowChangePassword(false);
-    setShowPreferences(false);
-    setPreferencesReturnToTuActividad(false);
-    setShowAjustes(false);
-    setShowClubReviews(false);
-    setInfoScreen(null);
-    setInfoReturnToProfile(false);
     setShowTuActividad(false);
     setTuActividadSubView(null);
-    setShowMonedero(false);
-    setShowPagosPendientes(false);
-    setShowMovimientosMonedero(false);
-    setShowTransacciones(false);
-    registerOverlayNestedBack(null);
   }, []);
 
   const fullscreenOverlayOpen =
     bookingSuccessData != null ||
-    showMonedero ||
-    showPagosPendientes ||
-    showMovimientosMonedero ||
-    showTransacciones ||
     showTuActividad ||
-    showEditProfile ||
-    showChangePassword ||
-    showPreferences ||
-    showAjustes ||
-    showClubReviews ||
-    infoScreen != null ||
     showPartidoDetail ||
     showCourtReservationDetail ||
     showClubDetail ||
@@ -603,14 +571,6 @@ export function MainApp() {
     showCommunity ||
     showPublicProfile ||
     affinityPublicProfileId !== null;
-
-  const closeInfoScreen = useCallback(() => {
-    setInfoScreen(null);
-    if (infoReturnToProfile) {
-      setInfoReturnToProfile(false);
-      setActiveTab('perfil');
-    }
-  }, [infoReturnToProfile]);
 
   // Tras aceptar una invitación desde el banner: abrir Liga competitiva en preferencias
   // con ese compañero ya fijado para buscar.
@@ -652,10 +612,6 @@ export function MainApp() {
         sidebar.close();
         return true;
       }
-      // Subpantallas internas (Ajustes → Notificaciones, etc.)
-      if (consumeOverlayNestedBack()) {
-        return true;
-      }
       // Flujos modales por encima de todo
       if (bookingSuccessData != null) {
         setBookingSuccessData(null);
@@ -687,45 +643,7 @@ export function MainApp() {
         setPartidosRefreshNonce((n) => n + 1);
         return true;
       }
-      // Cambiar contraseña (desde editar perfil)
-      if (showChangePassword) {
-        setShowChangePassword(false);
-        return true;
-      }
-      // Editar perfil
-      if (showEditProfile) {
-        setShowEditProfile(false);
-        setActiveTab('perfil');
-        return true;
-      }
-      // Preferences → vuelve a perfil o a Tu actividad
-      if (showPreferences) {
-        setShowPreferences(false);
-        if (preferencesReturnToTuActividad) {
-          setPreferencesReturnToTuActividad(false);
-          setTuActividadSubView(null);
-          setShowTuActividad(true);
-        } else {
-          setActiveTab('perfil');
-        }
-        return true;
-      }
-      // Ajustes
-      if (showAjustes) {
-        setShowAjustes(false);
-        return true;
-      }
-      // Valorar clubes
-      if (showClubReviews) {
-        setShowClubReviews(false);
-        return true;
-      }
-      // Ayuda / legal
-      if (infoScreen) {
-        closeInfoScreen();
-        return true;
-      }
-      if (activeTab === 'perfil' && !showEditProfile && !showPreferences && !infoScreen) {
+      if (activeTab === 'perfil') {
         setActiveTab('inicio');
         setProfileAutoOpenOnboarding(false);
         return true;
@@ -779,19 +697,6 @@ export function MainApp() {
         setShowSeasonPass(false);
         return true;
       }
-      // Transacciones (sale antes que Wallet en renderContent)
-      if (showTransacciones) {
-        setShowTransacciones(false);
-        return true;
-      }
-      if (showPagosPendientes) {
-        setShowPagosPendientes(false);
-        return true;
-      }
-      if (showMovimientosMonedero) {
-        setShowMovimientosMonedero(false);
-        return true;
-      }
       // Detalle de partido (prioridad sobre flujos padre, p. ej. Tu actividad)
       if (selectedCourtReservation) {
         setSelectedCourtReservation(null);
@@ -809,11 +714,6 @@ export function MainApp() {
           return true;
         }
         setShowTuActividad(false);
-        return true;
-      }
-      // Monedero
-      if (showMonedero) {
-        setShowMonedero(false);
         return true;
       }
       // Detalle de club en pestaña Pistas
@@ -841,14 +741,6 @@ export function MainApp() {
     selectedPublicCourse,
     showDailyLesson,
     crearPartidoFlow.open,
-    showChangePassword,
-    showEditProfile,
-    showPreferences,
-    preferencesReturnToTuActividad,
-    showAjustes,
-    showClubReviews,
-    infoScreen,
-    closeInfoScreen,
     showCommunity,
     showMessages,
     messagesPeer,
@@ -856,12 +748,8 @@ export function MainApp() {
     showPublicProfile,
     showCompetitiveLeague,
     showSeasonPass,
-    showTransacciones,
-    showPagosPendientes,
-    showMovimientosMonedero,
     showTuActividad,
     tuActividadSubView,
-    showMonedero,
     selectedPartido,
     selectedCourtReservation,
     clubDetailCourt,
@@ -983,58 +871,6 @@ export function MainApp() {
               });
             } else {
               void refreshMatches({ force: true, scope: 'mine' });
-            }
-          }}
-        />
-      );
-    }
-    if (showChangePassword) {
-      return (
-        <ChangePasswordScreen
-          userEmail={session?.user?.email}
-          onBack={() => setShowChangePassword(false)}
-        />
-      );
-    }
-    if (showEditProfile) {
-      return (
-        <EditProfileScreen
-          onBack={() => {
-            setShowEditProfile(false);
-            setActiveTab('perfil');
-          }}
-          onSaved={() => {
-            setProfileRefreshKey((k) => k + 1);
-            setPartidosRefreshNonce((n) => n + 1);
-          }}
-          onPreferencesPress={() => {
-            setShowEditProfile(false);
-            setShowPreferences(true);
-          }}
-          onChangePasswordPress={() => setShowChangePassword(true)}
-        />
-      );
-    }
-    if (showAjustes) {
-      return <AjustesScreen onBack={() => setShowAjustes(false)} />;
-    }
-    if (showClubReviews) {
-      return <ClubReviewsScreen onBack={() => setShowClubReviews(false)} />;
-    }
-    if (infoScreen) {
-      return <InfoContentScreen screenId={infoScreen} onBack={closeInfoScreen} />;
-    }
-    if (showPreferences) {
-      return (
-        <PreferencesScreen
-          onBack={() => {
-            setShowPreferences(false);
-            if (preferencesReturnToTuActividad) {
-              setPreferencesReturnToTuActividad(false);
-              setTuActividadSubView(null);
-              setShowTuActividad(true);
-            } else {
-              setActiveTab('perfil');
             }
           }}
         />
@@ -1164,27 +1000,6 @@ export function MainApp() {
     }
     if (showSeasonPass) {
       return <SeasonPassScreen onBack={() => setShowSeasonPass(false)} />;
-    }
-    if (showTransacciones) {
-      return (
-        <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
-      );
-    }
-    if (showPagosPendientes) {
-      return <PagosPendientesScreen onBack={() => setShowPagosPendientes(false)} />;
-    }
-    if (showMovimientosMonedero) {
-      return <MovimientosMonederoScreen onBack={() => setShowMovimientosMonedero(false)} />;
-    }
-    if (showMonedero) {
-      return (
-        <MonederoScreen
-          onBack={() => setShowMonedero(false)}
-          onPagosPendientesPress={() => setShowPagosPendientes(true)}
-          onMovimientosPress={() => setShowMovimientosMonedero(true)}
-          onTransaccionesPress={() => setShowTransacciones(true)}
-        />
-      );
     }
     if (showCourtReservationDetail && selectedCourtReservation) {
       return (
@@ -1354,21 +1169,17 @@ export function MainApp() {
             key={profileRefreshKey}
             onBack={() => {
               setActiveTab('inicio');
-              setShowPreferences(false);
-              setShowEditProfile(false);
-              setShowChangePassword(false);
               setProfileAutoOpenOnboarding(false);
             }}
             onMenuPress={sidebar.toggle}
             onEditProfilePress={() => {
-              setShowEditProfile(true);
+              navigation.navigate('EditProfile');
             }}
             onPreferencesPress={() => {
-              setShowPreferences(true);
+              navigation.navigate('Preferences');
             }}
             onNavigateToInfo={(screenId) => {
-              setInfoReturnToProfile(true);
-              setInfoScreen(screenId);
+              navigation.navigate('Info', { screenId });
             }}
             autoOpenOnboarding={profileAutoOpenOnboarding}
             onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
@@ -1469,7 +1280,7 @@ export function MainApp() {
         ? '#0F0F0F'
         : showMessages
         ? '#0A0A0A'
-        : showEditProfile || showChangePassword || showPreferences || showAjustes || showClubReviews || infoScreen || showMonedero || showTuActividad
+        : showTuActividad
           ? '#0F0F0F'
         : showDailyLesson
           ? '#0F0F0F'
@@ -1494,14 +1305,6 @@ export function MainApp() {
   const handleTabChange = (tab: MainTabId) => {
     setActiveTab(tab);
     setShowCart(false);
-    setShowEditProfile(false);
-    setShowChangePassword(false);
-    setShowPreferences(false);
-    setShowAjustes(false);
-    setShowClubReviews(false);
-    setInfoScreen(null);
-    setInfoReturnToProfile(false);
-    registerOverlayNestedBack(null);
     setShowMessages(false);
     setMessagesPeer(null);
     setShowCompetitiveLeague(false);
@@ -1517,7 +1320,7 @@ export function MainApp() {
         close={sidebar.close}
         onNavigateToMonedero={() => {
           resetSidebarOverlays();
-          setShowMonedero(true);
+          navigation.navigate('Monedero');
         }}
         onNavigateToTuActividad={() => {
           resetSidebarOverlays();
@@ -1525,15 +1328,15 @@ export function MainApp() {
         }}
         onNavigateToAjustes={() => {
           resetSidebarOverlays();
-          setShowAjustes(true);
+          navigation.navigate('Ajustes');
         }}
         onNavigateToClubReviews={() => {
           resetSidebarOverlays();
-          setShowClubReviews(true);
+          navigation.navigate('ClubReviews');
         }}
         onNavigateToInfo={(screenId) => {
           resetSidebarOverlays();
-          setInfoScreen(screenId);
+          navigation.navigate('Info', { screenId });
         }}
         onProfilePress={() => {
           resetSidebarOverlays();

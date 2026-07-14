@@ -12,7 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { requestAccountDeletion } from '../api/auth';
 import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
-import { registerOverlayNestedBack } from '../navigation/overlayBackRef';
+import type { AjustesSectionId } from '../navigation/types';
 import { theme } from '../theme';
 import { type AppLocale, useTranslation } from '../i18n';
 const BG = '#0F0F0F';
@@ -37,10 +37,10 @@ const LANGUAGE_OPTIONS: { value: AppLocale; label: string }[] = [
   { value: 'zh-HK', label: '🇭🇰 繁體中文' },
 ];
 
-type AjustesView = 'main' | 'notificaciones' | 'privacidad' | 'privacy-policy' | 'seguridad';
-
 type AjustesScreenProps = {
   onBack: () => void;
+  /** Abre una seccion como ruta propia (antes un switcher de estado local). */
+  onOpenSection: (section: AjustesSectionId) => void;
 };
 
 function AjustesNotificacionesView({
@@ -132,25 +132,15 @@ function AjustesPrivacidadView({
   );
 }
 
-export function AjustesScreen({ onBack }: AjustesScreenProps) {
+export function AjustesScreen({ onBack, onOpenSection }: AjustesScreenProps) {
   const insets = useSafeAreaInsets();
   const { session, logout } = useAuth();
-  const { profile, refreshProfile } = useHomeData();
   const { locale: language, setLocale, t } = useTranslation();
   const token = session?.access_token;
 
-  const [view, setView] = useState<AjustesView>('main');
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
-
-  const basePrefs = useMemo<PlayerPreferences | null>(() => profile?.preferences ?? null, [profile]);
-  const [prefs, setPrefs] = useState<PlayerPreferences | null>(basePrefs);
-  const [savingNotifs, setSavingNotifs] = useState(false);
-
-  useEffect(() => {
-    setPrefs(basePrefs);
-  }, [basePrefs]);
 
   const languageLabel =
     LANGUAGE_OPTIONS.find((o) => o.value === language)?.label ?? LANGUAGE_OPTIONS[0].label;
@@ -192,75 +182,6 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
     }
   };
 
-  const applyPrefs = async (next: PlayerPreferences) => {
-    if (!token) return;
-    setPrefs(next);
-    setSavingNotifs(true);
-    try {
-      const res = await updateMyPlayerPreferences(token, next);
-      if (res.ok) {
-        await refreshProfile({ force: true });
-      } else {
-        setPrefs(basePrefs);
-      }
-    } finally {
-      setSavingNotifs(false);
-    }
-  };
-
-  useEffect(() => {
-    if (view === 'main') {
-      registerOverlayNestedBack(null);
-      return;
-    }
-    registerOverlayNestedBack(() => {
-      if (view === 'privacy-policy') {
-        setView('privacidad');
-        return true;
-      }
-      if (view === 'privacidad' || view === 'notificaciones' || view === 'seguridad') {
-        setView('main');
-        return true;
-      }
-      return false;
-    });
-    return () => registerOverlayNestedBack(null);
-  }, [view]);
-
-  if (view === 'seguridad') {
-    return (
-      <ChangePasswordScreen
-        title={t('settings.security')}
-        userEmail={session?.user?.email}
-        onBack={() => setView('main')}
-      />
-    );
-  }
-
-  if (view === 'notificaciones') {
-    return (
-      <AjustesNotificacionesView
-        onBack={() => setView('main')}
-        prefs={prefs ?? DEFAULT_PREFERENCES}
-        onToggle={(next) => void applyPrefs(next)}
-        saving={savingNotifs}
-      />
-    );
-  }
-
-  if (view === 'privacy-policy') {
-    return <InfoContentScreen screenId="privacy" onBack={() => setView('privacidad')} />;
-  }
-
-  if (view === 'privacidad') {
-    return (
-      <AjustesPrivacidadView
-        onBack={() => setView('main')}
-        onOpenPolicy={() => setView('privacy-policy')}
-      />
-    );
-  }
-
   return (
     <View style={styles.container}>
       <MenuScreenHeader title={t('settings.title')} onBack={onBack} />
@@ -293,21 +214,21 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
               icon="eye-outline"
               iconColors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.04)']}
               iconColor="#9ca3af"
-              onPress={() => setView('privacidad')}
+              onPress={() => onOpenSection('privacidad')}
             />
             <MenuScreenRow
               title={t('settings.notifications')}
               icon="notifications-outline"
               iconColors={['rgba(245,158,11,0.2)', 'rgba(202,138,4,0.1)']}
               iconColor="#fbbf24"
-              onPress={() => setView('notificaciones')}
+              onPress={() => onOpenSection('notificaciones')}
             />
             <MenuScreenRow
               title={t('settings.security')}
               icon="lock-closed-outline"
               iconColors={['rgba(239,68,68,0.2)', 'rgba(220,38,38,0.1)']}
               iconColor="#f87171"
-              onPress={() => setView('seguridad')}
+              onPress={() => onOpenSection('seguridad')}
             />
           </View>
         </MenuScreenSection>
@@ -383,6 +304,76 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
       </MenuScreenOverlay>
     </View>
   );
+}
+
+type AjustesSectionScreenProps = {
+  section: AjustesSectionId;
+  onBack: () => void;
+  /** Desde Privacidad: abre la politica de privacidad (ruta pusheada encima). */
+  onOpenPrivacyPolicy: () => void;
+};
+
+/** Secciones de Ajustes como pantalla propia (una ruta por seccion). */
+export function AjustesSectionScreen({
+  section,
+  onBack,
+  onOpenPrivacyPolicy,
+}: AjustesSectionScreenProps) {
+  const { session } = useAuth();
+  const { profile, refreshProfile } = useHomeData();
+  const { t } = useTranslation();
+  const token = session?.access_token;
+
+  const basePrefs = useMemo<PlayerPreferences | null>(() => profile?.preferences ?? null, [profile]);
+  const [prefs, setPrefs] = useState<PlayerPreferences | null>(basePrefs);
+  const [savingNotifs, setSavingNotifs] = useState(false);
+
+  useEffect(() => {
+    setPrefs(basePrefs);
+  }, [basePrefs]);
+
+  const applyPrefs = async (next: PlayerPreferences) => {
+    if (!token) return;
+    setPrefs(next);
+    setSavingNotifs(true);
+    try {
+      const res = await updateMyPlayerPreferences(token, next);
+      if (res.ok) {
+        await refreshProfile({ force: true });
+      } else {
+        setPrefs(basePrefs);
+      }
+    } finally {
+      setSavingNotifs(false);
+    }
+  };
+
+  if (section === 'seguridad') {
+    return (
+      <ChangePasswordScreen
+        title={t('settings.security')}
+        userEmail={session?.user?.email}
+        onBack={onBack}
+      />
+    );
+  }
+
+  if (section === 'notificaciones') {
+    return (
+      <AjustesNotificacionesView
+        onBack={onBack}
+        prefs={prefs ?? DEFAULT_PREFERENCES}
+        onToggle={(next) => void applyPrefs(next)}
+        saving={savingNotifs}
+      />
+    );
+  }
+
+  if (section === 'privacy-policy') {
+    return <InfoContentScreen screenId="privacy" onBack={onBack} />;
+  }
+
+  return <AjustesPrivacidadView onBack={onBack} onOpenPolicy={onOpenPrivacyPolicy} />;
 }
 
 const styles = StyleSheet.create({
