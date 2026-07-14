@@ -33,6 +33,15 @@ import {
   PublicCourseDetailRoute,
   SeasonPassRoute,
 } from './routes/commerceRoutes';
+import {
+  ClubDetailRoute,
+  CommunityRoute,
+  DirectMessageThreadRoute,
+  MessagesRoute,
+  NotificationsRoute,
+  PartidoDetailRoute,
+  PublicProfileRoute,
+} from './routes/socialRoutes';
 import { BookingSuccessProvider } from '../contexts/BookingSuccessContext';
 import { GlobalOverlaysHost } from './GlobalOverlaysHost';
 import type { RootStackParamList } from './types';
@@ -81,6 +90,14 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="CrearPartido" component={CrearPartidoRoute} />
             <RootStack.Screen name="CourtReservationDetail" component={CourtReservationDetailRoute} />
             <RootStack.Screen name="SeasonPass" component={SeasonPassRoute} />
+            {/* Grafo social / partidos */}
+            <RootStack.Screen name="PartidoDetail" component={PartidoDetailRoute} />
+            <RootStack.Screen name="PublicProfile" component={PublicProfileRoute} />
+            <RootStack.Screen name="Messages" component={MessagesRoute} />
+            <RootStack.Screen name="DirectMessageThread" component={DirectMessageThreadRoute} />
+            <RootStack.Screen name="Notifications" component={NotificationsRoute} />
+            <RootStack.Screen name="Community" component={CommunityRoute} />
+            <RootStack.Screen name="ClubDetail" component={ClubDetailRoute} />
             {/* Las siguientes fases de la migracion registran aqui el resto
                 de overlays de MainApp. */}
           </RootStack.Group>
