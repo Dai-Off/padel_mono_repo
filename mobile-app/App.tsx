@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import * as SystemUI from 'expo-system-ui';
 import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
 import { MatchmakingProvider } from './src/contexts/MatchmakingContext';
@@ -43,6 +44,10 @@ function AppContent() {
 export default function App() {
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    // Fondo de la ventana nativa: al hacer pop, react-native-screens deja ver
+    // la ventana un frame mientras re-engancha la pantalla anterior; en blanco
+    // (default) produce un flash en cada vuelta atras.
+    void SystemUI.setBackgroundColorAsync('#0F0F0F');
   }, []);
 
   const urlScheme =
