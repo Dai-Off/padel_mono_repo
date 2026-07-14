@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, BackHandler, Pressable, Text, View, StyleSheet } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -116,6 +117,14 @@ const SEASON_TRANSITION_PREVIEW_DATA: SeasonTransition = {
 export function MainApp() {
   const { t } = useTranslation();
   const sidebar = useSidebar(false);
+  // MainApp es la ruta `Main` del stack raiz; cuando hay rutas pusheadas
+  // encima pierde el foco y su BackHandler debe inhibirse (via ref para no
+  // reinstalar el listener).
+  const isFocused = useIsFocused();
+  const isFocusedRef = useRef(isFocused);
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
   const { session } = useAuth();
   const { totalCount: cartCount } = useCart();
   const { profile, refreshMatches, refreshCourtReservations, syncMisPartidoFromMatchId, upsertMisPartido } = useHomeData();
@@ -633,6 +642,11 @@ export function MainApp() {
    */
   useEffect(() => {
     const onBack = (): boolean => {
+      // Con una ruta del stack encima (pantalla ya migrada a React
+      // Navigation), el pop lo gestiona el navigator, no esta cadena.
+      if (!isFocusedRef.current) {
+        return false;
+      }
       // Sidebar abierto → cerrar primero (cubre cualquier pantalla).
       if (sidebar.isOpen) {
         sidebar.close();

@@ -1,8 +1,7 @@
-import { useContext, useEffect, useState, useCallback } from 'react';
-import { StyleSheet } from 'react-native';
+import { useContext, useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
@@ -13,114 +12,9 @@ import { HomeDataProvider } from './src/contexts/HomeDataContext';
 import { ProfileDataProvider } from './src/contexts/ProfileDataContext';
 import { CartProvider } from './src/contexts/CartContext';
 import { SplashScreen } from './src/components/SplashScreen';
-import { LoginScreen } from './src/screens/LoginScreen';
-import { MainApp } from './src/screens/MainApp';
-import { RegisterScreen } from './src/screens/RegisterScreen';
-import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
-import { ResetPasswordScreen, type RecoveryPayload } from './src/screens/ResetPasswordScreen';
-import { RequireAuth } from './src/components/auth';
+import { RootNavigator } from './src/navigation/RootNavigator';
 import { STRIPE_PUBLISHABLE_KEY } from './src/config';
-import { theme } from './src/theme';
 import { I18nProvider } from './src/i18n';
-import { isRecoveryDeepLink, parseSupabaseRecoveryFromUrl } from './src/lib/parseAuthRecoveryUrl';
-import { parseTournamentInviteUrl } from './src/lib/parseTournamentInviteUrl';
-import { parseMatchDeepLink } from './src/lib/parseMatchDeepLink';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
-const PENDING_MATCH_DEEPLINK_KEY = 'pending_match_deeplink';
-
-async function stashTournamentInviteFromUrl(url: string | null) {
-  if (!url) return;
-  const parsed = parseTournamentInviteUrl(url);
-  if (parsed) {
-    await AsyncStorage.setItem(PENDING_TOURNAMENT_INVITE_KEY, JSON.stringify(parsed));
-  }
-}
-
-async function stashMatchDeepLinkFromUrl(url: string | null) {
-  if (!url) return;
-  const parsed = parseMatchDeepLink(url);
-  if (parsed) {
-    await AsyncStorage.setItem(PENDING_MATCH_DEEPLINK_KEY, JSON.stringify(parsed));
-  }
-}
-
-type AuthScreen = 'login' | 'register' | 'forgot_password' | 'reset_password';
-
-function AuthFlowWrapper() {
-  const [screen, setScreen] = useState<AuthScreen>('login');
-  const [recovery, setRecovery] = useState<RecoveryPayload | null>(null);
-  const [loginEmail, setLoginEmail] = useState('');
-
-  const consumeDeepLink = useCallback((url: string | null) => {
-    if (!url) return;
-    void stashTournamentInviteFromUrl(url);
-    void stashMatchDeepLinkFromUrl(url);
-
-    if (url.includes('email-confirmed')) {
-      setRecovery(null);
-      setScreen('login');
-      return;
-    }
-
-    if (!isRecoveryDeepLink(url)) return;
-    const parsed = parseSupabaseRecoveryFromUrl(url);
-    setRecovery({
-      access_token: parsed.access_token,
-      refresh_token: parsed.refresh_token,
-      token_hash: parsed.token_hash,
-    });
-    setScreen('reset_password');
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const initial = await Linking.getInitialURL();
-      if (alive && initial) consumeDeepLink(initial);
-    })();
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      consumeDeepLink(url);
-    });
-    return () => {
-      alive = false;
-      sub.remove();
-    };
-  }, [consumeDeepLink]);
-
-  const goLogin = () => {
-    setRecovery(null);
-    setLoginEmail('');
-    setScreen('login');
-  };
-
-  return (
-    <SafeAreaView style={[styles.container, styles.authContainer]} edges={['top', 'bottom']}>
-      {screen === 'login' && (
-        <LoginScreen
-          onGoToRegister={() => setScreen('register')}
-          onGoToForgot={() => setScreen('forgot_password')}
-          initialEmail={loginEmail}
-        />
-      )}
-      {screen === 'register' && (
-        <RegisterScreen
-          onGoToLogin={(email) => {
-            setLoginEmail(email ?? '');
-            setScreen('login');
-          }}
-        />
-      )}
-      {screen === 'forgot_password' && (
-        <ForgotPasswordScreen onBackToLogin={goLogin} />
-      )}
-      {screen === 'reset_password' && recovery ? (
-        <ResetPasswordScreen recovery={recovery} onBackToLogin={goLogin} />
-      ) : null}
-    </SafeAreaView>
-  );
-}
 
 function AppContent() {
   const ctx = useContext(AuthContext);
@@ -137,21 +31,10 @@ function AppContent() {
     );
   }
 
-  if (isAuthenticated) {
-    return (
-      <>
-        <StatusBar style="dark" />
-        <RequireAuth>
-          <MainApp />
-        </RequireAuth>
-      </>
-    );
-  }
-
   return (
     <>
-      <StatusBar style="light" />
-      <AuthFlowWrapper />
+      <StatusBar style={isAuthenticated ? 'dark' : 'light'} />
+      <RootNavigator isAuthenticated={isAuthenticated} />
     </>
   );
 }
@@ -186,13 +69,3 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  authContainer: {
-    backgroundColor: theme.auth.bg,
-  },
-});
