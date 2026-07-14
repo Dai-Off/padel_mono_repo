@@ -31,6 +31,7 @@ import {
   claimSeasonPassReward,
   fetchSeasonPassMe,
   rerollSeasonPassMission,
+  type ClaimedRewardDto,
   type SeasonPassMeOk,
   type SeasonPassMissionDto,
   type SeasonPassTrackRewardDto,
@@ -700,7 +701,7 @@ export function SeasonPassScreen({ onBack }: Props) {
   const [elitePaying, setElitePaying] = useState(false);
   const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
   const [claiming, setClaiming] = useState(false);
-  const [claimAllCount, setClaimAllCount] = useState<number | null>(null);
+  const [claimAllRewards, setClaimAllRewards] = useState<ClaimedRewardDto[] | null>(null);
   const [celebrateReward, setCelebrateReward] = useState<SeasonPassTrackRewardDto | null>(null);
   const trackScrollRef = useRef<ScrollView>(null);
   const [me, setMe] = useState<SeasonPassMeOk | null>(null);
@@ -754,7 +755,7 @@ export function SeasonPassScreen({ onBack }: Props) {
     const res = await claimAllSeasonPassRewards(token);
     setClaiming(false);
     if (res.ok && res.count > 0) {
-      setClaimAllCount(res.count);
+      setClaimAllRewards(res.rewards);
       load();
     }
   }, [session?.access_token, claiming, load]);
@@ -1519,24 +1520,42 @@ export function SeasonPassScreen({ onBack }: Props) {
       />
 
       <Modal
-        visible={claimAllCount !== null}
+        visible={claimAllRewards !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setClaimAllCount(null)}
+        onRequestClose={() => setClaimAllRewards(null)}
       >
-        <Pressable style={styles.claimSummaryBackdrop} onPress={() => setClaimAllCount(null)}>
+        <View style={styles.claimSummaryBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setClaimAllRewards(null)} />
           <View style={styles.claimSummaryCard}>
             <View style={styles.claimSummaryIcon}>
               <Ionicons name="gift" size={26} color={ACCENT} />
             </View>
             <Text style={styles.claimSummaryMsg}>
-              {t('alerts.seasonPass.claimAllDone', { count: claimAllCount ?? 0 })}
+              {t('alerts.seasonPass.claimAllDone', { count: claimAllRewards?.length ?? 0 })}
             </Text>
-            <Pressable onPress={() => setClaimAllCount(null)} style={styles.claimSummaryCta}>
+            <ScrollView style={styles.claimSummaryList} contentContainerStyle={styles.claimSummaryGrid}>
+              {(claimAllRewards ?? []).map((r) => (
+                <View key={r.reward_id} style={styles.claimSummaryItem}>
+                  <RewardThumb
+                    reward={{
+                      id: r.reward_id,
+                      tier: r.tier,
+                      reward_type: r.reward_type as SeasonPassTrackRewardDto['reward_type'],
+                      display: r.display,
+                      status: 'claimed',
+                    }}
+                    size={52}
+                    dimmed={false}
+                  />
+                </View>
+              ))}
+            </ScrollView>
+            <Pressable onPress={() => setClaimAllRewards(null)} style={styles.claimSummaryCta}>
               <Text style={styles.claimSummaryCtaTxt}>{t('alerts.seasonPass.claimAllDoneCta')}</Text>
             </Pressable>
           </View>
-        </Pressable>
+        </View>
       </Modal>
 
       <Modal
@@ -1931,7 +1950,8 @@ const styles = StyleSheet.create({
   },
   claimSummaryCard: {
     width: '100%',
-    maxWidth: 320,
+    maxWidth: 340,
+    maxHeight: '82%',
     backgroundColor: '#17110d',
     borderRadius: 20,
     borderWidth: 1,
@@ -1948,7 +1968,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 14,
   },
-  claimSummaryMsg: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 18 },
+  claimSummaryMsg: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 14 },
+  claimSummaryList: { alignSelf: 'stretch', maxHeight: 260, marginBottom: 16 },
+  claimSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12, paddingVertical: 4 },
+  claimSummaryItem: { width: 52, height: 52 },
   claimSummaryCta: {
     alignSelf: 'stretch',
     paddingVertical: 13,
