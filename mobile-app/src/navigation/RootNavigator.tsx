@@ -86,7 +86,15 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
     <BookingSuccessProvider>
       <NavigationContainer ref={navigationRef} theme={APP_NAV_THEME} onReady={flushPendingNavActions}>
         <RootStack.Navigator
-          screenOptions={{ headerShown: false, contentStyle: APP_CONTENT_STYLE }}
+          screenOptions={{
+            headerShown: false,
+            contentStyle: APP_CONTENT_STYLE,
+            // Sin animacion: replica el swap instantaneo previo a React
+            // Navigation y evita ver el cascaron de la pantalla entrante
+            // antes de que pinte su contenido. Se puede activar animacion
+            // por pantalla cuando interese.
+            animation: 'none',
+          }}
         >
         {isAuthenticated ? (
           <RootStack.Group>

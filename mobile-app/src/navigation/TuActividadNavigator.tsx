@@ -77,7 +77,11 @@ export function TuActividadNavigator() {
     <TuActividadDataProvider>
       <RouteShell>
         <TuActividadStack.Navigator
-          screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: 'transparent' },
+            animation: 'none',
+          }}
         >
           <TuActividadStack.Screen name="TuActividadMenu" component={TuActividadMenuRoute} />
           <TuActividadStack.Screen name="MisPartidosActividad" component={MisPartidosRoute} />
