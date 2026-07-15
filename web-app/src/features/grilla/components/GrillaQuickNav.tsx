@@ -6,7 +6,6 @@ import {
   Users,
   DollarSign,
   GraduationCap,
-  BarChart3,
   Settings,
   Shield,
   ClipboardList,
@@ -105,14 +104,6 @@ function buildSections(isAdmin: boolean): NavSection[] {
         { id: 'inventario', path: '/inventario', label: 'Inventario' },
         { id: 'incidencias', path: '/incidencias', label: 'Incidencias' },
         { id: 'resenas', path: '/resenas', label: 'Reseñas' },
-      ],
-    },
-    {
-      id: 'informes',
-      label: 'Informes',
-      icon: BarChart3,
-      children: [
-        { id: 'cierreCaja', path: '/cierreCaja', label: 'Cierre de caja' },
       ],
     },
     {

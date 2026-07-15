@@ -2,6 +2,7 @@ export type JoinedPlayer = {
   first_name?: string | null;
   last_name?: string | null;
   elo_rating?: number | null;
+  phone?: string | null;
 };
 
 /** Supabase puede devolver joins 1:1 como objeto o como array de un elemento. */

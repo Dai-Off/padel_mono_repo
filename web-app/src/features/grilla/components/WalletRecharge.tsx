@@ -187,14 +187,19 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
 
     // ── Computed values ──
     const amountCents = Math.round(parseFloat(amountText || '0') * 100);
-    const bonusExtraCents = selectedBonus ? selectedBonus.balance_to_add : 0;
-    const totalToWallet = amountCents + bonusExtraCents;
 
-    // Premio → importe en caja forzado a 0
-    const priceToPay = paymentMethod === 'prize' ? 0 : amountCents;
+    // Premio → importe en caja forzado a 0. Si hay bono, se cobra el precio del bono.
+    const priceToPay = paymentMethod === 'prize'
+        ? 0
+        : (selectedBonus ? selectedBonus.price_to_pay : amountCents);
+
+    // Total que entra al monedero: si hay bono, entra el balance_to_add del bono.
+    const totalToWallet = selectedBonus
+        ? selectedBonus.balance_to_add
+        : amountCents;
 
     const classSessions = Math.max(0, Math.trunc(Number(classSessionsText || '0')));
-    const isValidMoney = walletMode === 'money' && selectedPlayer && amountCents > 0;
+    const isValidMoney = walletMode === 'money' && selectedPlayer && (selectedBonus ? true : amountCents > 0);
     const isValidClasses = walletMode === 'classes' && selectedPlayer && classSessions >= 1;
     const isValid = isValidMoney || isValidClasses;
 
@@ -222,16 +227,22 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                 setNotes('');
             } else {
                 const methodLabel = paymentMethod === 'cash' ? 'Efectivo' : paymentMethod === 'card' ? 'Tarjeta' : 'Premio';
-                const bonusPart = selectedBonus ? ` + Bono "${selectedBonus.name}" (+${fmt(bonusExtraCents)}€)` : '';
+                const concept = selectedBonus
+                    ? `Adquisición Bono: ${selectedBonus.name} — ${methodLabel}`
+                    : `Recarga ${fmt(amountCents)}€ — ${methodLabel}`;
+                const transactionNotes = selectedBonus
+                    ? `bonus_id=${selectedBonus.id}${notes.trim() ? ` | ${notes.trim()}` : ''}`
+                    : (notes.trim() || null);
+
                 await apiFetchWithAuth<any>('/wallet/transactions', {
                     method: 'POST',
                     body: JSON.stringify({
                         player_id: selectedPlayer.id,
                         club_id: clubId,
                         amount_cents: totalToWallet,
-                        concept: `Recarga ${fmt(amountCents)}€${bonusPart} — ${methodLabel}`,
+                        concept,
                         type: 'credit',
-                        notes: notes.trim() || null,
+                        notes: transactionNotes,
                     }),
                 });
                 await fetchBalance(selectedPlayer.id);
@@ -389,48 +400,51 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                             </div>
 
                             {walletMode === 'classes' ? (
-                            <div>
-                                <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">2. Nº de clases del pack</label>
-                                <input
-                                    type="number"
-                                    min={1}
-                                    value={classSessionsText}
-                                    onChange={e => setClassSessionsText(e.target.value)}
-                                    className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm font-bold"
-                                />
-                                <p className="text-[10px] text-gray-400 mt-1">Opcional: importe cobrado (€) abajo; con «Premio» queda a 0 €.</p>
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">2. Nº de clases del pack</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={classSessionsText}
+                                        onChange={e => setClassSessionsText(e.target.value)}
+                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm font-bold"
+                                    />
+                                    <p className="text-[10px] text-gray-400 mt-1">Opcional: importe cobrado (€) abajo; con «Premio» queda a 0 €.</p>
+                                </div>
+                                <div>
+                                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">3. Precio del pack (€)</label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">€</span>
+                                        <input
+                                            type="number" min="0" step="0.01"
+                                            value={amountText}
+                                            onChange={e => setAmountText(e.target.value)}
+                                            placeholder="0 = premio"
+                                            className="w-full pl-8 pr-3 py-2.5 border border-gray-300 rounded-xl text-base font-bold"
+                                        />
+                                    </div>
+                                </div>
                             </div>
-                            ) : null}
-
-                            {/* ── Step 2: Amount field ── */}
-                            {walletMode === 'money' ? (
+                            ) : (
                             <div>
                                 <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">2. Saldo a cargar</label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">€</span>
                                     <input
                                         type="number" min="0" step="0.01"
-                                        value={amountText}
+                                        value={selectedBonus ? (selectedBonus.price_to_pay / 100).toFixed(2) : amountText}
                                         onChange={e => setAmountText(e.target.value)}
+                                        disabled={!!selectedBonus}
                                         placeholder="0.00"
-                                        className="w-full pl-8 pr-3 py-2.5 border border-gray-300 rounded-xl text-base font-bold focus:ring-2 focus:ring-[#00726b] focus:border-transparent outline-none"
+                                        className={`w-full pl-8 pr-3 py-2.5 border border-gray-300 rounded-xl text-base font-bold outline-none ${selectedBonus ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-blue-200' : 'focus:ring-2 focus:ring-[#00726b] focus:border-transparent'}`}
                                     />
                                 </div>
-                                <p className="text-[10px] text-gray-400 mt-1">Importe que paga el cliente en caja</p>
-                            </div>
-                            ) : (
-                            <div>
-                                <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">3. Precio del pack (€)</label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">€</span>
-                                    <input
-                                        type="number" min="0" step="0.01"
-                                        value={amountText}
-                                        onChange={e => setAmountText(e.target.value)}
-                                        placeholder="0 = premio"
-                                        className="w-full pl-8 pr-3 py-2.5 border border-gray-300 rounded-xl text-base font-bold"
-                                    />
-                                </div>
+                                <p className="text-[10px] text-gray-400 mt-1">
+                                    {selectedBonus 
+                                        ? `Precio fijado por el bono: ${selectedBonus.name}` 
+                                        : 'Importe que paga el cliente en caja'}
+                                </p>
                             </div>
                             )}
 
@@ -591,7 +605,7 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                     )}
 
                     {/* ── Confirmation summary ── */}
-                    {selectedPlayer && walletMode === 'money' && amountCents > 0 && (
+                    {selectedPlayer && walletMode === 'money' && (amountCents > 0 || !!selectedBonus) && (
                         <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
                             <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Resumen de operación</p>
 
@@ -604,7 +618,7 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                                     <div className="border-t border-dashed border-gray-200" />
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs text-gray-600">Bono: {selectedBonus.name}</span>
-                                        <span className="text-sm font-bold text-emerald-600">+{fmt(bonusExtraCents)} €</span>
+                                        <span className="text-sm font-bold text-emerald-600">+{fmt(selectedBonus.balance_to_add)} €</span>
                                     </div>
                                 </>
                             )}

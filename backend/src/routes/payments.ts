@@ -2136,6 +2136,366 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
 }
 
 /**
+ * GET /payments/club-transactions/export
+ * Exporta transacciones del club en formato CSV plano (tipo Syltek) completo para gestoría.
+ * Soporta filtros por rango de fechas (date_from y date_to).
+ */
+export async function exportClubTransactionsHandler(req: Request, res: Response): Promise<void> {
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const dateFrom = String(req.query.date_from ?? '').trim();
+  const dateTo = String(req.query.date_to ?? '').trim();
+  const timezone = String(req.query.timezone ?? 'Europe/Madrid').trim();
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    // Obtener info del club
+    const { data: clubRow } = await supabase.from('clubs').select('name, city').eq('id', clubId).maybeSingle();
+    const clubName = String((clubRow as { name?: string } | null)?.name ?? 'Club');
+    const clubCity = String((clubRow as { city?: string } | null)?.city ?? '');
+
+    // Construir consulta base de payment_transactions
+    let query = supabase
+      .from('payment_transactions')
+      .select(`
+        id,
+        amount_cents,
+        currency,
+        status,
+        created_at,
+        booking_id,
+        payer_player_id,
+        stripe_payment_intent_id,
+        tournament_id,
+        players ( first_name, last_name, email ),
+        bookings (
+          start_at,
+          end_at,
+          courts (
+            id,
+            name,
+            club_id
+          )
+        ),
+        tournaments (
+          id,
+          name,
+          club_id
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    // Filtrar por rango de fechas en base a timezone (si se proveen)
+    if (dateFrom) {
+      let startUtc: Date;
+      try {
+        startUtc = zonedTimeToUtc(`${dateFrom}T00:00:00`, timezone);
+      } catch {
+        startUtc = new Date(`${dateFrom}T00:00:00.000Z`);
+      }
+      if (!Number.isNaN(startUtc.getTime())) {
+        query = query.gte('created_at', startUtc.toISOString());
+      }
+    }
+    if (dateTo) {
+      let endUtc: Date;
+      try {
+        endUtc = new Date(zonedTimeToUtc(`${dateTo}T23:59:59`, timezone).getTime() + 999);
+      } catch {
+        endUtc = new Date(`${dateTo}T23:59:59.999Z`);
+      }
+      if (!Number.isNaN(endUtc.getTime())) {
+        query = query.lte('created_at', endUtc.toISOString());
+      }
+    }
+
+    const { data: rows, error } = await query;
+    if (error) {
+      console.error('[payments/export-transactions] error fetching payments:', error);
+      res.status(500).json({ ok: false, error: error.message });
+      return;
+    }
+
+    // Filtrar en memoria por club (para capturar tanto los que tienen booking en el club como torneos en el club)
+    const filteredRows = (rows ?? []).filter((r: any) => {
+      const bClubId = r.bookings?.courts?.club_id;
+      const tClubId = r.tournaments?.club_id;
+      return bClubId === clubId || tClubId === clubId;
+    });
+
+    const bookingIds = Array.from(
+      new Set(filteredRows.map((r: any) => r.booking_id).filter(Boolean) as string[]),
+    );
+
+    // Mapeo de transacciones autoritativas
+    const txByBookingPlayer = new Map<string, Map<string, { amount_cents: number; method: string | null }>>();
+    for (const r of filteredRows) {
+      if (r.status !== 'succeeded') continue;
+      const bid = String(r.booking_id ?? '');
+      const pid = String(r.payer_player_id ?? '');
+      if (!bid || !pid) continue;
+      const stripeId = String(r.stripe_payment_intent_id ?? '');
+      const method = stripeId.startsWith('manual_')
+        ? (stripeId.split('_')[1] ?? null)
+        : 'card';
+      const bookingMap = txByBookingPlayer.get(bid) ?? new Map();
+      const prev = bookingMap.get(pid) ?? { amount_cents: 0, method: null };
+      bookingMap.set(pid, { amount_cents: prev.amount_cents + (Number(r.amount_cents) || 0), method: prev.method ?? method });
+      txByBookingPlayer.set(bid, bookingMap);
+    }
+
+    // Obtener participantes de las reservas correspondientes
+    const participantsByBooking = new Map<string, any[]>();
+    if (bookingIds.length > 0) {
+      const { data: bpRows, error: bpError } = await supabase
+        .from('booking_participants')
+        .select(`
+          booking_id,
+          player_id,
+          role,
+          share_amount_cents,
+          payment_status,
+          payment_method,
+          paid_amount_cents,
+          wallet_amount_cents,
+          players ( first_name, last_name, email )
+        `)
+        .in('booking_id', bookingIds);
+
+      if (!bpError && bpRows) {
+        for (const bp of bpRows as any[]) {
+          const bid = String(bp.booking_id ?? '');
+          const pid = String(bp.player_id ?? '');
+          const player = (Array.isArray(bp.players) ? bp.players[0] : bp.players) as Record<string, any> | null;
+          const txInfo = bid && pid ? txByBookingPlayer.get(bid)?.get(pid) : undefined;
+          const bpPaidCents = Number(bp.paid_amount_cents ?? 0) + Number(bp.wallet_amount_cents ?? 0);
+          const txAmount = txInfo?.amount_cents ?? 0;
+          const shareAmount = bp.payment_status === 'paid' ? Number(bp.share_amount_cents ?? 0) : 0;
+          const resolvedPaidCents = txAmount > 0 ? txAmount : (bpPaidCents > 0 ? Number(bp.paid_amount_cents ?? 0) : shareAmount);
+          const resolvedWalletCents = bpPaidCents > 0 ? Number(bp.wallet_amount_cents ?? 0) : 0;
+          const resolvedMethod = bp.payment_method ?? txInfo?.method ?? (bp.payment_status === 'paid' ? 'card' : null);
+
+          const item = {
+            player_id: bp.player_id != null ? String(bp.player_id) : null,
+            first_name: player?.first_name ?? null,
+            last_name: player?.last_name ?? null,
+            email: player?.email ?? null,
+            role: bp.role ?? null,
+            share_amount_cents: Number(bp.share_amount_cents ?? 0),
+            payment_status: bp.payment_status ?? null,
+            payment_method: resolvedMethod,
+            paid_amount_cents: resolvedPaidCents,
+            wallet_amount_cents: resolvedWalletCents,
+          };
+          const list = participantsByBooking.get(bid) ?? [];
+          list.push(item);
+          participantsByBooking.set(bid, list);
+        }
+      }
+    }
+
+    // Mapear transacciones de reservas y torneos
+    const transactions: ClubPaymentLedgerEntry[] = filteredRows.map((t: any): ClubPaymentLedgerEntry => {
+      const b = (Array.isArray(t.bookings) ? t.bookings[0] : t.bookings) as Record<string, any> | null;
+      const court = b?.courts ? (Array.isArray(b.courts) ? b.courts[0] : b.courts) : null;
+      const payer = t.players ? (Array.isArray(t.players) ? t.players[0] : t.players) : null;
+      const tournament = t.tournaments ? (Array.isArray(t.tournaments) ? t.tournaments[0] : t.tournaments) : null;
+      const bid = typeof t.booking_id === 'string' ? t.booking_id : null;
+      const stripeRef = String(t.stripe_payment_intent_id ?? '');
+      const paymentMethod = paymentMethodFromStripeRef(stripeRef);
+      const courtName = court?.name ? String(court.name) : null;
+      const startAt = (b?.start_at as string | null) ?? null;
+      let concept = 'Pago';
+      if (courtName && startAt) {
+        concept = `Turno · ${courtName}`;
+      } else if (tournament?.name) {
+        concept = `Torneo · ${tournament.name}`;
+      } else if (bid) {
+        concept = `Reserva ${bid.slice(0, 8)}`;
+      }
+
+      return {
+        id: String(t.id ?? ''),
+        amount_cents: Number(t.amount_cents ?? 0),
+        currency: String(t.currency ?? ''),
+        status: String(t.status ?? ''),
+        created_at: String(t.created_at ?? ''),
+        booking_id: bid,
+        start_at: startAt,
+        end_at: (b?.end_at as string | null) ?? null,
+        court_name: courtName,
+        club_name: clubName,
+        city: clubCity,
+        payer_first_name: payer?.first_name ?? null,
+        payer_last_name: payer?.last_name ?? null,
+        payer_email: payer?.email ?? null,
+        payer_player_id: t.payer_player_id != null ? String(t.payer_player_id) : null,
+        concept,
+        source: 'booking',
+        payment_method: paymentMethod,
+        participants: bid ? participantsByBooking.get(bid) ?? [] : [],
+      };
+    });
+
+    // Obtener y mapear transacciones de tienda (usamos un límite alto para exportar)
+    const storeEntries = await listClubStorePaymentEntries(supabase, clubId, 5000);
+
+    // Filtrar las de tienda por rango de fechas si aplica
+    const filteredStoreEntries = storeEntries.filter((se) => {
+      if (dateFrom && se.created_at < dateFrom) return false;
+      if (dateTo && se.created_at.slice(0, 10) > dateTo) return false;
+      return true;
+    });
+
+    const merged = [...transactions, ...filteredStoreEntries].sort((a, b) =>
+      String(b.created_at).localeCompare(String(a.created_at))
+    );
+
+    // Generar el contenido CSV plano (con BOM para Excel)
+    const headers = [
+      'ID Transaccion',
+      'Fecha Pago',
+      'Hora Pago',
+      'Origen',
+      'Concepto',
+      'Pista',
+      'Fecha Servicio',
+      'Hora Inicio',
+      'Hora Fin',
+      'Cliente',
+      'Email Cliente',
+      'Metodo Pago',
+      'Importe EUR',
+      'Importe Centimos',
+      'Moneda',
+      'Estado',
+      'ID Reserva',
+      'ID Torneo',
+      'ID Venta',
+      'Ref Stripe',
+      'Participante',
+      'Metodo Participante',
+      'Importe Participante Centimos',
+      'Estado Participante'
+    ];
+
+    const csvRows = [headers.map(h => `"${h}"`).join(';')];
+
+    for (const item of merged) {
+      const dt = new Date(item.created_at);
+      const fechaPago = Number.isNaN(dt.getTime()) ? '-' : dt.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const horaPago = Number.isNaN(dt.getTime()) ? '-' : dt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+      let fechaServicio = '-';
+      let horaInicio = '-';
+      let horaFin = '-';
+      if (item.start_at) {
+        const dtStart = new Date(item.start_at);
+        if (!Number.isNaN(dtStart.getTime())) {
+          fechaServicio = dtStart.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+          horaInicio = dtStart.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        }
+      }
+      if (item.end_at) {
+        const dtEnd = new Date(item.end_at);
+        if (!Number.isNaN(dtEnd.getTime())) {
+          horaFin = dtEnd.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        }
+      }
+
+      const clientName = [item.payer_first_name, item.payer_last_name].filter(Boolean).join(' ').trim() || 'Cliente';
+      const stripeRef = (item as any).stripe_payment_intent_id ?? '';
+
+      // Si hay desglose de participantes, incluimos filas con dicho desglose.
+      if (item.participants && item.participants.length > 0) {
+        for (const p of item.participants) {
+          const partName = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.email || 'Jugador';
+          const pPaidCents = (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0);
+          const fields = [
+            item.id,
+            fechaPago,
+            horaPago,
+            item.source,
+            item.concept,
+            item.court_name ?? '',
+            fechaServicio,
+            horaInicio,
+            horaFin,
+            clientName,
+            item.payer_email ?? '',
+            item.payment_method,
+            String(item.amount_cents / 100),
+            String(item.amount_cents),
+            item.currency,
+            item.status,
+            item.booking_id ?? '',
+            (item as any).tournament_id ?? '',
+            item.sale_id ?? '',
+            stripeRef,
+            partName,
+            p.payment_method ?? '',
+            String(pPaidCents),
+            p.payment_status ?? '',
+          ];
+          csvRows.push(fields.map(val => `"${String(val ?? '').replace(/"/g, '""')}"`).join(';'));
+        }
+      } else {
+        const fields = [
+          item.id,
+          fechaPago,
+          horaPago,
+          item.source,
+          item.concept,
+          item.court_name ?? '',
+          fechaServicio,
+          horaInicio,
+          horaFin,
+          clientName,
+          item.payer_email ?? '',
+          item.payment_method,
+          String(item.amount_cents / 100),
+          String(item.amount_cents),
+          item.currency,
+          item.status,
+          item.booking_id ?? '',
+          (item as any).tournament_id ?? '',
+          item.sale_id ?? '',
+          stripeRef,
+          '',
+          '',
+          '',
+          '',
+        ];
+        csvRows.push(fields.map(val => `"${String(val ?? '').replace(/"/g, '""')}"`).join(';'));
+      }
+    }
+
+    const csvContent = '\uFEFF' + csvRows.join('\n'); // UTF-8 con BOM
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="transacciones_${clubId}_${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.status(200).send(csvContent);
+  } catch (err) {
+    console.error('[payments/club-transactions/export]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+
+/**
  * GET /payments/cash-closing/expected
  * Calcula el "esperado" para el arqueo de caja de un día:
  * - suma pagos `succeeded` asociados a bookings de ese día en el club

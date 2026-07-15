@@ -18,6 +18,7 @@ import {
     MessageSquare,
     Send,
     Link2,
+    Copy,
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
@@ -236,11 +237,33 @@ export const PlayerSearch: React.FC<{
                                 <p className="text-sm font-bold text-gray-900 truncate">
                                     {`${selectedPlayer.first_name ?? ''} ${selectedPlayer.last_name ?? ''}`.trim() || formatPlayerLabel(selectedPlayer)}
                                 </p>
-                                <p className="text-[10px] text-gray-500 truncate">
-                                    {selectedPlayer.username?.trim()
-                                        ? `@${selectedPlayer.username.trim()}`
-                                        : (formatPlayerSubline(selectedPlayer) || t('playerSearch.noContactLine'))}
-                                </p>
+                                <div className="flex flex-col text-[10px] text-gray-500 mt-0.5">
+                                    {selectedPlayer.username?.trim() && (
+                                        <span className="truncate">@{selectedPlayer.username.trim()}</span>
+                                    )}
+                                    {selectedPlayer.email?.trim() && (
+                                        <span className="truncate">{selectedPlayer.email.trim()}</span>
+                                    )}
+                                    {selectedPlayer.phone?.trim() && (
+                                        <span
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                void navigator.clipboard.writeText(selectedPlayer.phone!.trim());
+                                                toast.success('Teléfono copiado');
+                                            }}
+                                            className="inline-flex items-center gap-1 cursor-pointer hover:text-blue-600 transition-colors group/phone font-medium w-fit"
+                                            title="Copiar teléfono"
+                                        >
+                                            <span>{selectedPlayer.phone.trim()}</span>
+                                            <Copy className="w-3 h-3 text-gray-400 opacity-0 group-hover/phone:opacity-100 transition-opacity" />
+                                        </span>
+                                    )}
+                                    {!selectedPlayer.username?.trim() && !selectedPlayer.email?.trim() && !selectedPlayer.phone?.trim() && (
+                                        <span className="truncate">
+                                            {t('playerSearch.noContactLine')}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                         </div>
                         <button
@@ -567,7 +590,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     first_name: orgPlayer.first_name ?? '',
                     last_name: orgPlayer.last_name ?? '',
                     email: (orgPlayer as { email?: string }).email || '',
-                    phone: null,
+                    phone: orgPlayer.phone || null,
                     elo_rating: normalizePlayerElo(orgPlayer.elo_rating) ?? 0,
                     status: 'active',
                     created_at: '',
@@ -585,7 +608,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     first_name: p.players.first_name,
                     last_name: p.players.last_name,
                     email: p.players.email || '',
-                    phone: null,
+                    phone: p.players.phone || null,
                     elo_rating: normalizePlayerElo(p.players.elo_rating) ?? 0,
                     status: 'active' as const,
                     created_at: '',

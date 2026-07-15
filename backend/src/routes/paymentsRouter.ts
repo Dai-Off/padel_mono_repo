@@ -12,6 +12,7 @@ import {
   listTransactionsHandler,
   listPendingBookingsHandler,
   listClubTransactionsHandler,
+  exportClubTransactionsHandler,
   cashClosingExpectedHandler,
   getCashOpeningForDayHandler,
   createCashOpeningRecordHandler,
@@ -33,6 +34,7 @@ router.use(attachAuthContext);
 router.get('/transactions', listTransactionsHandler);
 router.get('/pending-bookings', listPendingBookingsHandler);
 router.get('/club-transactions', requireClubOwnerOrAdminOrPortalStaff, listClubTransactionsHandler);
+router.get('/club-transactions/export', requireClubOwnerOrAdminOrPortalStaff, exportClubTransactionsHandler);
 router.get('/cash-closing/expected', requireClubOwnerOrAdminOrPortalStaff, cashClosingExpectedHandler);
 router.get('/cash-opening/today', requireClubOwnerOrAdminOrPortalStaff, getCashOpeningForDayHandler);
 router.post('/cash-opening/records', requireClubOwnerOrAdminOrPortalStaff, createCashOpeningRecordHandler);
