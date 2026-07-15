@@ -23,10 +23,10 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
     Animated.parallel([
       // timing (no spring): un spring tarda ~1s en reportar su fin (converge
       // en subpixeles) y mientras la animacion nativa sigue viva los taps no
-      // llegan a los botones del panel. El timing termina exacto a los 220ms.
+      // llegan a los botones del panel. El timing termina exacto a los 320ms.
       Animated.timing(slideAnim, {
         toValue: visible ? 0 : -width,
-        duration: 220,
+        duration: 320,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
