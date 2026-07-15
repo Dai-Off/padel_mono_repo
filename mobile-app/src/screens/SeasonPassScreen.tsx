@@ -393,7 +393,10 @@ function RewardThumb({
           shadowOpacity: glowy ? 0.9 : 0,
           shadowRadius: glowy ? 10 : 0,
           shadowOffset: { width: 0, height: 0 },
-          elevation: glowy ? 6 : 0,
+          // Sin elevation: en Android proyectaba una caja negra rectangular (el
+          // fondo semitransparente impide el contorno redondeado). El resplandor
+          // iOS se mantiene; en Android la rareza la marca el borde de color.
+          elevation: 0,
         }}
       >
         {inner}
