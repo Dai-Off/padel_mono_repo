@@ -43,8 +43,8 @@ import { AuthButton } from '../components/auth/AuthButton';
 import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
 import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
 import { RewardClaimedModal } from '../components/seasonPass/RewardClaimedModal';
-import { PlayerName } from '../components/profile/PlayerName';
 import { ProfileThemeBackground } from '../components/profile/ProfileThemeBackground';
+import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
 import type { AchievementRarity } from '../design/rarity';
 
 type Props = { onBack: () => void; onGoToProfile?: () => void };
@@ -265,11 +265,15 @@ function RewardThumb({
   size,
   dimmed,
   onPress,
+  avatarUrl,
+  initials,
 }: {
   reward: SeasonPassTrackRewardDto | null;
   size: number;
   dimmed: boolean;
   onPress?: () => void;
+  avatarUrl?: string | null;
+  initials?: string;
 }) {
   const rarityKey = reward?.display.rarity ?? 'common';
   const glowy = rarityKey === 'epic' || rarityKey === 'legendary';
@@ -296,33 +300,21 @@ function RewardThumb({
 
   let inner: ReactNode;
   if (d.kind === 'frame') {
-    // Marco: anillo con su paleta (override `colors` o color de rareza).
-    const palette =
-      Array.isArray(d.colors) && d.colors.length >= 2
-        ? (d.colors as [string, string, ...string[]])
-        : ([rarity.color, rarity.border] as [string, string]);
+    // Marco: forma real + animación sobre el avatar (igual que en el perfil).
+    const frameAttrs: FrameAttrs = {
+      rarity: d.rarity ?? 'common',
+      style: d.style ?? null,
+      animationType: d.animation_type ?? null,
+      colors: Array.isArray(d.colors) ? (d.colors as string[]) : null,
+    };
     inner = (
-      <LinearGradient
-        colors={palette}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{
-          width: size - 14,
-          height: size - 14,
-          borderRadius: (size - 14) / 2,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <View
-          style={{
-            width: size - 22,
-            height: size - 22,
-            borderRadius: (size - 22) / 2,
-            backgroundColor: '#111827',
-          }}
-        />
-      </LinearGradient>
+      <AvatarWithFrame
+        initials={initials ?? '?'}
+        avatarUrl={avatarUrl ?? null}
+        size={size - 8}
+        animate
+        frame={frameAttrs}
+      />
     );
   } else if (d.kind === 'sp') {
     // SP directo: solo el valor, sin icono (el rayo no aportaba nada).
@@ -356,15 +348,14 @@ function RewardThumb({
       </View>
     );
   } else if (d.kind === 'name_color') {
-    // Color de nombre: muestra "Aa" con la paleta real.
-    const cols = Array.isArray(d.colors) ? (d.colors as string[]) : null;
+    // Color de nombre: "Aa" con el primer/último color de la paleta (sin shadow
+    // para evitar la caja oscura del textShadow en Android).
+    const cols = Array.isArray(d.colors) && d.colors.length ? (d.colors as string[]) : [rarity.color];
     inner = (
-      <PlayerName
-        name="Aa"
-        nameColor={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols } : null}
-        style={{ fontSize: 20, fontWeight: '900', color: rarity.color }}
-        animate={false}
-      />
+      <View style={{ flexDirection: 'row' }}>
+        <Text style={{ fontSize: 22, fontWeight: '900', color: cols[0] }}>A</Text>
+        <Text style={{ fontSize: 22, fontWeight: '900', color: cols[cols.length - 1] }}>a</Text>
+      </View>
     );
   } else if (d.kind === 'theme') {
     // Tema: mini muestra del fondo animado.
@@ -436,6 +427,8 @@ function LevelTrackColumn({
   freeReward,
   eliteReward,
   onPressReward,
+  avatarUrl,
+  initials,
 }: {
   level: number;
   isUnlocked: boolean;
@@ -444,6 +437,8 @@ function LevelTrackColumn({
   freeReward: SeasonPassTrackRewardDto | null;
   eliteReward: SeasonPassTrackRewardDto | null;
   onPressReward: (reward: SeasonPassTrackRewardDto) => void;
+  avatarUrl?: string | null;
+  initials?: string;
 }) {
   const scaleNode = useRef(new Animated.Value(1)).current;
   const ringScale = useRef(new Animated.Value(1)).current;
@@ -505,6 +500,8 @@ function LevelTrackColumn({
             size={thumbSize}
             dimmed={!hasElite || !isUnlocked}
             onPress={eliteReward ? () => onPressReward(eliteReward) : undefined}
+            avatarUrl={avatarUrl}
+            initials={initials}
           />
           {!hasElite && eliteReward && (
             <View style={styles.eliteLockOverlay} pointerEvents="none">
@@ -592,6 +589,8 @@ function LevelTrackColumn({
             size={thumbSize}
             dimmed={!isUnlocked}
             onPress={freeReward ? () => onPressReward(freeReward) : undefined}
+            avatarUrl={avatarUrl}
+            initials={initials}
           />
         </View>
         {rewardShortLabel(freeReward) ? (
@@ -1249,6 +1248,8 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                       freeReward={levelRewards.find((r) => r.tier === 'free') ?? null}
                       eliteReward={levelRewards.find((r) => r.tier === 'elite') ?? null}
                       onPressReward={(reward) => setRewardDetail({ level: lvl, reward })}
+                      avatarUrl={profile?.avatarUrl ?? null}
+                      initials={playerInitials}
                     />
                   );
                 })}
@@ -1553,6 +1554,8 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                       size={52}
                       dimmed={false}
                       onPress={() => setRewardDetail({ level: r.level, reward })}
+                      avatarUrl={profile?.avatarUrl ?? null}
+                      initials={playerInitials}
                     />
                   </View>
                 );
