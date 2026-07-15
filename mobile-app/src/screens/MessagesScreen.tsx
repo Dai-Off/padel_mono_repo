@@ -20,6 +20,7 @@ import { theme } from '../theme';
 import { formatPlayerLabel } from '../lib/username';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 import { useTranslation } from '../i18n';
+import { fetchFollowing } from '../api/playerFollows';
 
 const ACCENT = '#F18F34';
 const BG = '#0A0A0A';
@@ -65,7 +66,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchHits, setSearchHits] = useState<PlayerSearchHit[]>([]);
+  const [searchHits, setSearchHits] = useState<import('../api/playerFollows').FollowerPlayer[]>([]);
 
   useEffect(() => {
     if (!token) return;
@@ -110,33 +111,96 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
     return conversations.filter((c) => peerDisplayName(c).toLowerCase().includes(q));
   }, [conversations, filter]);
 
+  const [followingList, setFollowingList] = useState<any[]>([]);
+
+  // Cargar lista de personas seguidas al abrir el modal de nuevo chat
   useEffect(() => {
-    if (!newChatOpen || !token) {
-      setSearchHits([]);
+    if (newChatOpen && token && myPlayerId) {
+      setSearchLoading(true);
+      fetchFollowing(token, myPlayerId)
+        .then((res) => {
+          if (res.ok) {
+            setFollowingList(res.following);
+          }
+        })
+        .finally(() => {
+          setSearchLoading(false);
+        });
+    } else {
+      setFollowingList([]);
+    }
+  }, [newChatOpen, token, myPlayerId]);
+
+  // Buscar local e invocar API en paralelo para priorizar seguidos
+  useEffect(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!q) {
+      // Limitar a los primeros 10 seguidos cuando no se ha escrito nada
+      setSearchHits(followingList.slice(0, 10));
       return;
     }
-    const q = searchQ.trim();
-    if (q.length < 2) {
-      setSearchHits([]);
-      return;
-    }
+
     let cancelled = false;
+
+    // 1. Filtrar seguidos localmente (excluyendo a uno mismo)
+    const localMatches = followingList
+      .filter((p) => p.id !== myPlayerId)
+      .filter((p) => {
+        const username = (p.username ?? '').toLowerCase();
+        const firstName = (p.first_name ?? '').toLowerCase();
+        const lastName = (p.last_name ?? '').toLowerCase();
+        return (
+          username.includes(q) ||
+          firstName.includes(q) ||
+          lastName.includes(q)
+        );
+      });
+
+    if (q.length < 2) {
+      setSearchHits(localMatches);
+      return;
+    }
+
     setSearchLoading(true);
-    const t = setTimeout(async () => {
-      const res = await searchPlayers(q, token);
-      if (cancelled) return;
-      setSearchLoading(false);
-      if (res.ok) {
-        setSearchHits(res.players.filter((p) => p.id !== myPlayerId));
-      } else {
-        setSearchHits([]);
+
+    // 2. Buscar en la API global con un debounce implícito de delay
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchPlayers(q, token);
+        if (cancelled) return;
+
+        if (res.ok) {
+          const globalResults = res.players.filter((p) => p.id !== myPlayerId);
+          
+          // Combinar priorizando los seguidos
+          const combinedMap = new Map<string, any>();
+          
+          // Primero insertamos los matches locales de seguidos
+          localMatches.forEach((m) => combinedMap.set(m.id, { ...m, is_following: true }));
+          
+          // Luego los globales de la API
+          globalResults.forEach((g) => {
+            if (!combinedMap.has(g.id)) {
+              combinedMap.set(g.id, g);
+            }
+          });
+
+          setSearchHits(Array.from(combinedMap.values()));
+        } else {
+          setSearchHits(localMatches);
+        }
+      } catch {
+        if (!cancelled) setSearchHits(localMatches);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
       }
-    }, 400);
+    }, 300);
+
     return () => {
       cancelled = true;
-      clearTimeout(t);
+      clearTimeout(timer);
     };
-  }, [newChatOpen, searchQ, token, myPlayerId]);
+  }, [searchQ, followingList, token, myPlayerId]);
 
   const openThread = (peer: MessagePeerNav) => {
     setNewChatOpen(false);
@@ -290,13 +354,17 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                         openThread({
                           id: item.id,
                           displayName: fullName || dn,
-                          avatarUrl: null,
+                          avatarUrl: item.avatar_url ?? null,
                         })
                       }
                     >
-                      <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{initials(fullName || dn)}</Text>
-                      </View>
+                      <AvatarWithFrame
+                        avatarUrl={item.avatar_url ?? null}
+                        initials={initials(fullName || dn)}
+                        size={36}
+                        frame={item.frame ?? null}
+                        animate={false}
+                      />
                       <View style={styles.searchRowText}>
                         <Text style={styles.peerName}>
                           {hasUsername ? `@${item.username}` : fullName || t('common.playerFallback')}
@@ -309,7 +377,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                   );
                 }}
                 ListEmptyComponent={
-                  searchQ.trim().length >= 2 && !searchLoading ? (
+                  !searchLoading ? (
                     <Text style={styles.empty}>{t('messages.noSearchResults')}</Text>
                   ) : null
                 }
@@ -436,7 +504,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: theme.spacing.md,
-    maxHeight: '88%',
+    maxHeight: '94%',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: OUTLINE,
   },
@@ -456,8 +524,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     color: '#fff',
     fontSize: theme.fontSize.base,
+    marginBottom: 8,
   },
-  modalList: { marginTop: theme.spacing.sm, maxHeight: 320 },
+  modalList: { marginTop: theme.spacing.sm, maxHeight: 450 },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',

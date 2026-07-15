@@ -1438,15 +1438,36 @@ export function TournamentDetailScreen({
                         {chatLoading ? t('torneos.detailChatLoading') : t('torneos.detailChatEmpty')}
                       </Text>
                     ) : (
-                      chatMessages.map((m) => (
-                        <View key={m.id} style={styles.chatMessageBubble}>
-                          <Text style={styles.chatAuthor}>{m.author_name || t('common.playerFallback')}</Text>
-                          <Text style={styles.chatMessageText}>{m.message}</Text>
-                          <Text style={styles.chatDate}>
-                            {formatIsoDateTime(locale,m.created_at) ?? formatShortDate(locale,m.created_at)}
-                          </Text>
-                        </View>
-                      ))
+                      chatMessages.map((m) => {
+                        const isOrganizer = row?.created_by_player_id != null && m.author_user_id === row.created_by_player_id;
+                        const isClub = m.author_name?.trim() === 'Martin Gadea';
+
+                        const bubbleStyle = [
+                          styles.chatMessageBubble,
+                          isOrganizer && { borderColor: 'rgba(241,143,52,0.3)', backgroundColor: 'rgba(241,143,52,0.06)' },
+                          isClub && { borderColor: 'rgba(59,130,246,0.3)', backgroundColor: 'rgba(59,130,246,0.06)' },
+                        ];
+
+                        const authorStyle = [
+                          styles.chatAuthor,
+                          isOrganizer && { color: '#F18F34' },
+                          isClub && { color: '#3B82F6' },
+                        ];
+
+                        return (
+                          <View key={m.id} style={bubbleStyle}>
+                            <Text style={authorStyle}>
+                              {m.author_name || t('common.playerFallback')}
+                              {isOrganizer && ` (${t('torneos.chatOrganizerTag', { defaultValue: 'Organizador' })})`}
+                              {isClub && ` (${t('torneos.chatClubTag', { defaultValue: 'Club' })})`}
+                            </Text>
+                            <Text style={styles.chatMessageText}>{m.message}</Text>
+                            <Text style={styles.chatDate}>
+                              {formatIsoDateTime(locale, m.created_at) ?? formatShortDate(locale, m.created_at)}
+                            </Text>
+                          </View>
+                        );
+                      })
                     )}
                   </ScrollView>
                   <View style={styles.chatInputRow}>

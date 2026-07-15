@@ -21,6 +21,8 @@ import { formatPlayerLabel } from '../../lib/username';
 import { CommentSheet } from './CommentSheet';
 import { useTranslation } from '../../i18n';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
+import { toggleFollow } from '../../api/playerFollows';
+import { fetchMyPlayerId } from '../../api/players';
 
 /** Iniciales (máx 2) del autor del clip. */
 function clipAuthorInitials(p: { first_name?: string | null; last_name?: string | null; username?: string | null }): string {
@@ -56,6 +58,14 @@ export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, tok
   const [commentsClip, setCommentsClip] = useState<CommunityPost | null>(null);
   // Altura real del área visible (más fiable que Dimensions con edge-to-edge).
   const [viewportH, setViewportH] = useState(height);
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+
+  // Cargar mi ID de jugador
+  useEffect(() => {
+    if (isVisible && token) {
+      fetchMyPlayerId(token).then(setMyPlayerId);
+    }
+  }, [isVisible, token]);
 
   // Al abrir: mostramos la semilla al instante y cargamos el feed recomendado.
   useEffect(() => {
@@ -106,6 +116,22 @@ export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, tok
               isActive={index === activeIndex}
               muted={muted}
               token={token}
+              myPlayerId={myPlayerId}
+              onFollowChange={(targetId, followStatus) => {
+                setClips(prev =>
+                  prev.map(c =>
+                    c.player.id === targetId
+                      ? {
+                          ...c,
+                          player: {
+                            ...c.player,
+                            is_following: followStatus, // Se actualizará en el objeto de negocio
+                          },
+                        }
+                      : c
+                  )
+                );
+              }}
               cellHeight={viewportH}
               onOpenComments={() => setCommentsClip(item)}
               onPressAuthor={onPressAuthor}
@@ -153,12 +179,14 @@ interface ClipCellProps {
   isActive: boolean;
   muted: boolean;
   token?: string | null;
+  myPlayerId?: string | null;
+  onFollowChange: (targetId: string, status: boolean) => void;
   cellHeight: number;
   onOpenComments: () => void;
   onPressAuthor?: (playerId: string) => void;
 }
 
-const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellHeight, onOpenComments, onPressAuthor }) => {
+const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, myPlayerId, onFollowChange, cellHeight, onOpenComments, onPressAuthor }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const url = clip.images?.[0]?.media_url ?? null;
@@ -275,10 +303,6 @@ const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellH
             frame={clip.player.frame ?? null}
             animate={false}
           />
-          {/* "Seguir" — solo visual */}
-          <View style={styles.followBadge}>
-            <Ionicons name="add" size={12} color="#FFF" />
-          </View>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.action} onPress={handleLike}>
@@ -305,14 +329,28 @@ const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellH
         </Animated.View>
       </View>
 
-      {/* Info inferior (solo visual: no bloquea el doble-tap) */}
-      <View style={[styles.bottom, { bottom: insets.bottom + 24 }]} pointerEvents="none">
+      {/* Info inferior (permite interacciones específicas mediante box-none para poder pulsar el botón de Seguir) */}
+      <View style={[styles.bottom, { bottom: insets.bottom + 24 }]} pointerEvents="box-none">
         <View style={styles.authorRow}>
           <Text style={styles.author}>{formatPlayerLabel(clip.player, t('common.playerFallback'))}</Text>
-          {/* "Seguir" — solo visual */}
-          <View style={styles.followBtn}>
-            <Text style={styles.followBtnText}>{t('common.follow')}</Text>
-          </View>
+          {clip.player.id !== myPlayerId && token ? (
+            <TouchableOpacity
+              style={[
+                styles.followBtn,
+                clip.player.is_following && styles.followingBtnActive
+              ]}
+              onPress={async () => {
+                const prev = !!clip.player.is_following;
+                onFollowChange(clip.player.id, !prev);
+                const res = await toggleFollow(token, clip.player.id);
+                if (!res.ok) onFollowChange(clip.player.id, prev);
+              }}
+            >
+              <Text style={styles.followBtnText}>
+                {clip.player.is_following ? t('profile.unfollowBtn') : t('profile.followBtn')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
         {!!clip.caption && <Text style={styles.caption} numberOfLines={2}>{clip.caption}</Text>}
         <View style={styles.soundRow}>
@@ -426,7 +464,12 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.6)',
+    borderColor: '#F18F34',
+    backgroundColor: 'rgba(241,143,52,0.1)',
+  },
+  followingBtnActive: {
+    borderColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   followBtnText: {
     color: '#FFF',

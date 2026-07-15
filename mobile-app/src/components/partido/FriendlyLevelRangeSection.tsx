@@ -21,9 +21,11 @@ export function defaultFriendlyRange(organizerElo: number | null | undefined): {
   eloMax: number;
 } {
   const elo = organizerElo != null && Number.isFinite(organizerElo) ? organizerElo : 3.5;
+  const eloMin = Math.max(FRIENDLY_ELO_MIN, elo - 0.25);
+  const eloMax = Math.min(FRIENDLY_ELO_MAX, elo + 0.75);
   return {
-    eloMin: snapFriendlyElo(elo - 1),
-    eloMax: snapFriendlyElo(elo + 1),
+    eloMin: Math.round(eloMin * 100) / 100,
+    eloMax: Math.round(eloMax * 100) / 100,
   };
 }
 
