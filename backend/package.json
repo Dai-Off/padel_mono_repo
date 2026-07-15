@@ -21,6 +21,7 @@
     "mobile-admin:migrate": "ts-node -r dotenv/config scripts/apply-mobile-admins-migration.ts",
     "store:migrate": "ts-node -r dotenv/config scripts/apply-store-products-migration.ts",
     "store:collections:migrate": "ts-node -r dotenv/config scripts/apply-store-collections-migration.ts",
+    "tournament-ttl:migrate": "ts-node -r dotenv/config scripts/apply-093-tournament-invite-ttl.ts",
     "store:seed": "ts-node -r dotenv/config scripts/seed-store-products.ts"
   },
   "keywords": [

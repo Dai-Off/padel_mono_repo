@@ -20,6 +20,8 @@ export type PaymentTransaction = {
   status: string;
   created_at: string;
   booking_id?: string | null;
+  booking_status?: string | null;
+  cancelled_by?: string | null;
   start_at: string | null;
   end_at: string | null;
   court_name: string | null;
@@ -44,6 +46,9 @@ export type CashClosingBookingExpected = {
   total_price_cents: number | null;
   cash_paid_cents: number;
   card_paid_cents: number;
+  client_name?: string | null;
+  paid_at?: string | null;
+  ref?: string | null;
 };
 
 export type CashClosingStoreSaleLine = {
@@ -55,6 +60,8 @@ export type CashClosingStoreSaleLine = {
   movement_at: string | null;
   booking_id: string | null;
   player_id: string | null;
+  client_name?: string | null;
+  ref?: string | null;
 };
 
 export type CashMovementType = 'withdrawal' | 'deposit';

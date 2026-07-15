@@ -9,6 +9,13 @@ function playersPerInscription(row: { player_id_2?: string | null }): number {
   return row.player_id_2 ? 2 : 1;
 }
 
+/** TTL null/0 = cupo sin expiración: la inscripción se crea con expires_at NULL. */
+export function computeInscriptionExpiresAt(inviteTtlMinutes: number | null | undefined): string | null {
+  const ttl = Number(inviteTtlMinutes);
+  if (!Number.isFinite(ttl) || ttl <= 0) return null;
+  return new Date(Date.now() + ttl * 60000).toISOString();
+}
+
 type InscriptionSlotRow = { status: string; player_id_2?: string | null };
 
 export function slotsFromInscriptionRows(rows: InscriptionSlotRow[] | null | undefined): {
@@ -285,9 +292,9 @@ export async function finalizeTournamentPaidJoin(params: {
   }
 
   const { tokenHash } = generateInviteToken();
-  const expiresAt = new Date(
-    Date.now() + Number((tournament as { invite_ttl_minutes: number }).invite_ttl_minutes) * 60000
-  ).toISOString();
+  const expiresAt = computeInscriptionExpiresAt(
+    (tournament as { invite_ttl_minutes: number | null }).invite_ttl_minutes
+  );
   const { error: insErr } = await supabase.from('tournament_inscriptions').insert({
     tournament_id: tournamentId,
     status: 'confirmed',

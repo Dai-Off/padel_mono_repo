@@ -37,6 +37,7 @@ import { parseEloRange } from '../lib/openMatchRules';
 import { normalizeReservationTypeSlug } from '../lib/reservationTypeSlug';
 import {
   cancelDisplacedBookingsForOccupyingReservation,
+  cancelAndRefundIncompleteOverlaps,
   contentionStatusForNewMatchBooking,
   overlappingBookingBlocksNewReservation,
   resolveCourtContention,
@@ -468,10 +469,17 @@ const COURT_MAINTENANCE_PREFIX = '__COURT_MAINTENANCE__';
  * /bookings/bulk-block-slots:
  *   post:
  *     tags: [Bookings]
- *     summary: Bloquear varios tramos de pista (mantenimiento o torneo)
+ *     summary: Bloquear varios tramos de pista (mantenimiento, torneo o personalizado)
  *     description: |
- *       Crea bloqueos en lote para los tramos indicados. Solo inserta slots sin conflicto;
- *       no cancela reservas existentes ni desplaza jugadores.
+ *       Crea bloqueos en lote para los tramos indicados. Por defecto solo inserta slots
+ *       sin conflicto; no cancela reservas existentes.
+ *       Con `displace_incomplete: true`, cancela y reembolsa turnos incompletos
+ *       (menos de 4 jugadores y sin pago completo) que solapan cada tramo, y luego
+ *       crea el bloque/reserva personalizada.
+ *       Además de `blocked` y `tournament`, acepta `school_individual` y tipos
+ *       personalizados del club (`custom_*`, creados en Precios) para reservas de
+ *       escuela, fiestas, cumpleaños, etc. Los tipos `custom_*` se validan contra
+ *       `reservation_type_prices` del club de la pista.
  *     requestBody:
  *       required: true
  *       content:
@@ -482,11 +490,17 @@ const COURT_MAINTENANCE_PREFIX = '__COURT_MAINTENANCE__';
  *             properties:
  *               booking_type:
  *                 type: string
- *                 enum: [blocked, tournament]
+ *                 description: blocked, tournament, school_individual o un slug custom_* del club
+ *                 example: custom_cumpleanos
  *                 default: blocked
  *               reason:
  *                 type: string
- *                 example: Mantenimiento
+ *                 description: Etiqueta libre que se muestra en la grilla
+ *                 example: Cumpleaños Marcos
+ *               displace_incomplete:
+ *                 type: boolean
+ *                 description: Si true, cancela y reembolsa turnos incompletos en conflicto antes de crear
+ *                 default: false
  *               ranges:
  *                 type: array
  *                 items:
@@ -505,6 +519,7 @@ const COURT_MAINTENANCE_PREFIX = '__COURT_MAINTENANCE__';
  *           example:
  *             booking_type: blocked
  *             reason: Cambio de césped
+ *             displace_incomplete: true
  *             ranges:
  *               - court_id: "00000000-0000-0000-0000-000000000001"
  *                 start_at: "2026-07-01T09:00:00.000Z"
@@ -519,6 +534,7 @@ const COURT_MAINTENANCE_PREFIX = '__COURT_MAINTENANCE__';
  *               properties:
  *                 ok: { type: boolean }
  *                 created: { type: integer }
+ *                 displaced: { type: integer }
  *                 skipped:
  *                   type: array
  *                   items:
@@ -534,19 +550,61 @@ const COURT_MAINTENANCE_PREFIX = '__COURT_MAINTENANCE__';
  *         description: Ningún tramo válido
  */
 router.post('/bulk-block-slots', async (req: Request, res: Response) => {
-  const { ranges, booking_type, reason } = req.body ?? {};
+  const { ranges, booking_type, reason, displace_incomplete } = req.body ?? {};
   if (!Array.isArray(ranges) || ranges.length === 0) {
     return res.status(400).json({ ok: false, error: 'ranges es obligatorio y no puede estar vacío' });
   }
+  const shouldDisplaceIncomplete = displace_incomplete === true;
 
   const reservationType = normalizeReservationTypeSlug(booking_type ?? 'blocked');
-  if (reservationType !== 'blocked' && reservationType !== 'tournament') {
-    return res.status(400).json({ ok: false, error: 'booking_type debe ser blocked o tournament' });
+  const isCustomType = /^custom_[a-z0-9_]+$/.test(reservationType);
+  const allowedSystemTypes = new Set(['blocked', 'tournament', 'school_individual']);
+  if (!allowedSystemTypes.has(reservationType) && !isCustomType) {
+    return res.status(400).json({
+      ok: false,
+      error: 'booking_type debe ser blocked, tournament, school_individual o un tipo personalizado (custom_*)',
+    });
   }
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const trimmedReason = String(reason ?? '').trim() || (reservationType === 'tournament' ? 'Torneo' : 'Mantenimiento');
+
+    let customDisplayName: string | null = null;
+    if (isCustomType) {
+      const firstCourtId = ranges.find((r: { court_id?: string }) => r?.court_id)?.court_id;
+      if (!firstCourtId) {
+        return res.status(400).json({ ok: false, error: 'court_id es obligatorio en los tramos' });
+      }
+      const { data: courtRow } = await supabase
+        .from('courts')
+        .select('club_id')
+        .eq('id', firstCourtId)
+        .maybeSingle();
+      const clubId = (courtRow as { club_id?: string } | null)?.club_id;
+      if (!clubId) {
+        return res.status(400).json({ ok: false, error: 'Pista no encontrada' });
+      }
+      const { data: typeRow } = await supabase
+        .from('reservation_type_prices')
+        .select('reservation_type, display_name')
+        .eq('club_id', clubId)
+        .eq('reservation_type', reservationType)
+        .maybeSingle();
+      if (!typeRow) {
+        return res.status(400).json({ ok: false, error: 'El tipo personalizado no existe para este club' });
+      }
+      customDisplayName = (typeRow as { display_name?: string | null }).display_name ?? null;
+    }
+
+    const defaultReason =
+      reservationType === 'tournament'
+        ? 'Torneo'
+        : reservationType === 'blocked'
+          ? 'Mantenimiento'
+          : reservationType === 'school_individual'
+            ? 'Clase particular'
+            : customDisplayName || 'Reservado';
+    const trimmedReason = String(reason ?? '').trim() || defaultReason;
     const notes =
       reservationType === 'blocked'
         ? `${COURT_MAINTENANCE_PREFIX}: ${trimmedReason}`
@@ -556,6 +614,8 @@ router.post('/bulk-block-slots', async (req: Request, res: Response) => {
     const skipped: { court_id: string; start_at: string; end_at: string; error: string }[] = [];
     const timezoneByCourt = new Map<string, string>();
     let merged = 0;
+    let displaced = 0;
+    const displacedIds = new Set<string>();
 
     for (const range of ranges) {
       const court_id = range?.court_id;
@@ -594,6 +654,31 @@ router.post('/bulk-block-slots', async (req: Request, res: Response) => {
           error: hoursCheck.error,
         });
         continue;
+      }
+
+      if (shouldDisplaceIncomplete) {
+        try {
+          const cancelled = await cancelAndRefundIncompleteOverlaps(
+            supabase,
+            String(court_id),
+            String(start_at),
+            String(end_at),
+          );
+          for (const id of cancelled) {
+            if (!displacedIds.has(id)) {
+              displacedIds.add(id);
+              displaced += 1;
+            }
+          }
+        } catch (dispErr) {
+          skipped.push({
+            court_id: String(court_id),
+            start_at: String(start_at),
+            end_at: String(end_at),
+            error: (dispErr as Error).message || 'Error al reembolsar turno incompleto',
+          });
+          continue;
+        }
       }
 
       if (reservationType === 'blocked') {
@@ -679,6 +764,7 @@ router.post('/bulk-block-slots', async (req: Request, res: Response) => {
         ok: false,
         error: 'Ningún tramo válido para bloquear',
         skipped,
+        displaced,
       });
     }
 
@@ -692,6 +778,7 @@ router.post('/bulk-block-slots', async (req: Request, res: Response) => {
       ok: true,
       created: (inserted ?? []).length,
       merged,
+      displaced,
       skipped,
     });
   } catch (err) {

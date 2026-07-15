@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Wrench, Trophy, Users, GraduationCap, Trash2 } from 'lucide-react';
+import { Wrench, Trophy, Users, GraduationCap, Trash2, Sparkles } from 'lucide-react';
 import type { Court, Reservation } from '../types';
 import {
     collectSlotsInMarquee,
@@ -13,7 +13,7 @@ import {
     type GridSlot,
 } from '../utils/gridMarqueeSelection';
 
-export type MarqueeAction = 'maintenance' | 'tournament' | 'match' | 'class' | 'unblock_maintenance';
+export type MarqueeAction = 'maintenance' | 'tournament' | 'custom' | 'match' | 'class' | 'unblock_maintenance';
 
 type Props = {
     shellRef?: React.RefObject<HTMLElement | null>;
@@ -132,6 +132,16 @@ export const GridMarqueeLayer: React.FC<Props> = ({
     }, [onSelectionChange]);
 
     const closeMenu = clearSelection;
+
+    useEffect(() => {
+        if (!disabled) return;
+        originRef.current = null;
+        draggingRef.current = false;
+        axisDragRef.current = false;
+        setIsDragging(false);
+        setMarquee(null);
+        document.body.classList.remove('grilla-marquee-selecting');
+    }, [disabled]);
 
     useEffect(() => {
         const root = listenRef.current;
@@ -298,7 +308,7 @@ export const GridMarqueeLayer: React.FC<Props> = ({
     }, [anchorRect, closeMenu]);
 
     useEffect(() => {
-        if (selectedKeys.size === 0) return;
+        if (disabled || selectedKeys.size === 0) return;
         const onDown = (e: PointerEvent) => {
             const target = e.target as HTMLElement;
             if (target.closest('[data-marquee-menu]')) return;
@@ -309,7 +319,7 @@ export const GridMarqueeLayer: React.FC<Props> = ({
         };
         window.addEventListener('pointerdown', onDown);
         return () => window.removeEventListener('pointerdown', onDown);
-    }, [selectedKeys.size, clearSelection, listenRef]);
+    }, [disabled, selectedKeys.size, clearSelection, listenRef]);
 
     useEffect(() => {
         if (disabled || selectedKeys.size === 0) {
@@ -328,6 +338,7 @@ export const GridMarqueeLayer: React.FC<Props> = ({
         { id: 'match', label: 'Partido', icon: <Users className="w-4 h-4 text-[#005bc5]" />, show: singleCourt && !hasMaintenance },
         { id: 'class', label: 'Clase particular', icon: <GraduationCap className="w-4 h-4 text-[#9d174d]" />, show: singleCourt && !hasMaintenance },
         { id: 'tournament', label: 'Torneo', icon: <Trophy className="w-4 h-4 text-[#b45309]" />, show: !hasMaintenance },
+        { id: 'custom', label: 'Personalizado', icon: <Sparkles className="w-4 h-4 text-[#0f766e]" />, show: !hasMaintenance },
         { id: 'maintenance', label: 'Mantenimiento', icon: <Wrench className="w-4 h-4 text-amber-700" />, show: !hasMaintenance },
     ];
 

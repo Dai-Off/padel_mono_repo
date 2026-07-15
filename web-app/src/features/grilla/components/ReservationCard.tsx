@@ -63,14 +63,33 @@ export const ReservationCard: React.FC<Props> = ({
         reservation.booking_type !== 'blocked' &&
         reservation.booking_type !== 'tournament';
     const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : (isLoadingName ? null : t('grid.noClient'));
+    const playerCount =
+        reservation.registeredPlayerCount ??
+        reservation.detailedPlayers?.filter((p) => p.name?.trim()).length ??
+        0;
     const showPlayerBubble = reservation.isPublicOpenMatch === true && !isLoadingName;
-    const registeredCount = reservation.registeredPlayerCount ?? reservation.detailedPlayers?.length ?? 0;
+    const PLAYER_COUNT_TYPES = new Set(['open_match', 'standard', 'pozo']);
+    const showPlayerCountBadge =
+        PLAYER_COUNT_TYPES.has(reservation.booking_type) &&
+        reservation.status !== 'cancelled' &&
+        reservation.status !== 'available' &&
+        reservation.status !== 'past' &&
+        !showPlayerBubble;
+    const isMobileChannel = reservation.source_channel === 'mobile';
+    const isDeskChannel =
+        reservation.source_channel === 'manual' || reservation.source_channel === 'web';
+    const showChannelBadge =
+        (isMobileChannel || isDeskChannel) &&
+        reservation.booking_type !== 'blocked' &&
+        reservation.status !== 'available' &&
+        reservation.status !== 'past';
     const renderPlayerBubble = (sizePx: number, fontPx: number) => (
         <div
             className="rounded-full bg-white shadow-sm border border-white/80 flex items-center justify-center font-bold text-gray-900 leading-none shrink-0"
             style={{ width: sizePx, height: sizePx, fontSize: fontPx }}
+            title={`${playerCount} de 4 jugadores`}
         >
-            {registeredCount}
+            {playerCount}
         </div>
     );
     const priceLabel =
@@ -334,23 +353,49 @@ export const ReservationCard: React.FC<Props> = ({
                 />
             )}
 
-            {/* Mobile channel badge (WM) — top left yellow circle */}
-            {reservation.source_channel === 'mobile' && (
+            {/* Channel badge — app (WM) o mostrador/club (M) */}
+            {showChannelBadge && (
                 <div
-                    className="absolute top-0 left-0 z-20 rounded-full bg-yellow-400 flex items-center justify-center"
+                    className={clsx(
+                        'absolute top-0 z-20 rounded-full flex items-center justify-center',
+                        isMobileChannel ? 'bg-yellow-400' : 'bg-slate-700',
+                    )}
                     style={{
+                        left: reservation.hasYellowAlert
+                            ? (isCompact ? 11 : isSmallZoom ? 28 : 15)
+                            : 0,
                         width: isCompact ? 9 : isSmallZoom ? 25 : 14,
                         height: isCompact ? 9 : isSmallZoom ? 25 : 14,
                     }}
+                    title={isMobileChannel ? 'Reserva desde app móvil' : 'Reserva creada en mostrador / club'}
                 >
                     {!isCompact && (
                         <span
-                            className="font-black text-gray-900 leading-none select-none"
+                            className={clsx(
+                                'font-black leading-none select-none',
+                                isMobileChannel ? 'text-gray-900' : 'text-white',
+                            )}
                             style={{ fontSize: isSmallZoom ? 9 : 5 }}
                         >
-                            WM
+                            {isMobileChannel ? 'WM' : 'M'}
                         </span>
                     )}
+                </div>
+            )}
+
+            {/* Player count — bottom left (cupo del turno) */}
+            {showPlayerCountBadge && (
+                <div
+                    className="absolute bottom-0.5 left-0.5 z-20 rounded-full bg-white/95 border border-black/10 shadow-sm flex items-center justify-center font-bold text-gray-900 leading-none"
+                    style={{
+                        minWidth: isCompact ? 12 : isSmallZoom ? 28 : 18,
+                        height: isCompact ? 9 : isSmallZoom ? 18 : 12,
+                        paddingInline: isCompact ? 2 : 3,
+                        fontSize: isCompact ? 6 : isSmallZoom ? 9 : 7,
+                    }}
+                    title={`${playerCount} de 4 jugadores`}
+                >
+                    {playerCount}/4
                 </div>
             )}
 

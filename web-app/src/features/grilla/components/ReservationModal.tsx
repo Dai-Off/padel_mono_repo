@@ -130,6 +130,8 @@ interface ReservationModalProps {
     onCancelMaintenance?: (bookingIds: string[]) => Promise<void>;
     /** Embebido en Partidos: sin overlay ni portal. */
     presentation?: 'modal' | 'inline';
+    /** Pestaña inicial al abrir (p. ej. chat desde lista de partidos). */
+    initialTab?: 'details' | 'chat';
 }
 
 // Helper: Player Search Component
@@ -387,7 +389,7 @@ export const PlayerSearch: React.FC<{
 
 // ─── Tipos de pago por slot ───────────────────────────────────────────────────
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance, presentation = 'modal',
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance, presentation = 'modal', initialTab = 'details',
 }) => {
     const isInline = presentation === 'inline';
     const vvStyle = useVisualViewportFix(isOpen && !isInline);
@@ -456,6 +458,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setChatMessages([]);
             setChatDraft('');
         } else {
+            setActiveTab(initialTab);
             authService.getMe().then((res) => {
                 setMe({
                     authUserId: res.user?.id ?? null,
@@ -463,7 +466,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 });
             }).catch(() => {});
         }
-    }, [isOpen]);
+    }, [isOpen, initialTab]);
 
     const loadBookingChat = useCallback(async () => {
         if (!editingBookingData?.id) return;
@@ -1450,17 +1453,24 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     </div>
                                 ) : (
                                     chatMessages.map((m) => {
-                                        const isMyMessage = me.authUserId && m.author_user_id === me.authUserId;
+                                        const isClubMessage = Boolean(me.authUserId && m.author_user_id === me.authUserId);
                                         return (
                                             <div
                                                 key={m.id}
-                                                className={`max-w-[75%] rounded-xl px-3 py-2 text-xs ${
-                                                    isMyMessage
-                                                        ? "ml-auto bg-[#1A1A1A] text-white"
+                                                className={`w-fit max-w-[75%] rounded-xl px-3 py-2 text-xs ${
+                                                    isClubMessage
+                                                        ? "ml-auto bg-[#006A6A] text-white"
                                                         : "bg-gray-100 text-[#1A1A1A]"
                                                 }`}
                                             >
-                                                <p className="mb-0.5 text-[9px] opacity-75 font-bold">{m.author_name}</p>
+                                                <div className="mb-0.5 flex items-center gap-1.5">
+                                                    <p className="text-[9px] opacity-75 font-bold">{m.author_name}</p>
+                                                    {isClubMessage && (
+                                                        <span className="rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide bg-white/20">
+                                                            Club
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <p className="wrap-break-word">{m.message}</p>
                                                 <span className="block text-[8px] opacity-60 text-right mt-1">
                                                     {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

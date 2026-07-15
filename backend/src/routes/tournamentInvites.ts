@@ -6,7 +6,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { generateInviteToken, hashInviteToken } from '../lib/inviteToken';
 import { buildTournamentInviteUrl } from '../lib/env';
 import { sendInviteEmail } from '../lib/mailer';
-import { cleanupExpiredTournamentInvites, getTournamentSlots, refreshTournamentStatus } from '../services/tournamentsService';
+import { cleanupExpiredTournamentInvites, computeInscriptionExpiresAt, getTournamentSlots, refreshTournamentStatus } from '../services/tournamentsService';
 import { playerMeetsTournamentGender } from '../lib/tournamentGender';
 
 const router = Router();
@@ -81,7 +81,9 @@ router.post('/:id/invites', requireClubOwnerOrAdminOrPortalStaff, async (req: Re
     const currentPlayers = slots.confirmedPlayers + slots.pendingPlayers;
 
     const now = Date.now();
-    const ttlMs = Number((tournament as { invite_ttl_minutes: number }).invite_ttl_minutes) * 60 * 1000;
+    const inviteExpiresAt = computeInscriptionExpiresAt(
+      (tournament as { invite_ttl_minutes: number | null }).invite_ttl_minutes
+    );
     let sent = 0;
     let failed = 0;
     const rows: Record<string, unknown>[] = [];
@@ -168,7 +170,7 @@ router.post('/:id/invites', requireClubOwnerOrAdminOrPortalStaff, async (req: Re
         tournament_id: tournamentId,
         status: 'pending',
         invited_at: new Date(now).toISOString(),
-        expires_at: new Date(now + ttlMs).toISOString(),
+        expires_at: inviteExpiresAt,
         invite_email_1: email1,
         invite_email_2: email2,
         token_hash: tokenHash,
@@ -317,7 +319,8 @@ router.post('/invites/:token/accept', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!inscription) return res.status(400).json({ ok: false, error: 'Invitaci?n inv?lida' });
-    if (new Date(String((inscription as { expires_at: string }).expires_at)).getTime() <= Date.now()) {
+    const inscriptionExpiresAt = (inscription as { expires_at: string | null }).expires_at;
+    if (inscriptionExpiresAt && new Date(inscriptionExpiresAt).getTime() <= Date.now()) {
       return res.status(400).json({ ok: false, error: 'Invitaci?n expirada' });
     }
     if (String((inscription as { status: string }).status) === 'confirmed') {
