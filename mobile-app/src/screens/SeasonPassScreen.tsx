@@ -43,9 +43,7 @@ import { AuthButton } from '../components/auth/AuthButton';
 import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
 import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
 import { RewardClaimedModal } from '../components/seasonPass/RewardClaimedModal';
-import { ProfileThemeBackground } from '../components/profile/ProfileThemeBackground';
 import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
-import type { AchievementRarity } from '../design/rarity';
 
 type Props = { onBack: () => void; onGoToProfile?: () => void };
 
@@ -312,7 +310,7 @@ function RewardThumb({
         initials={initials ?? '?'}
         avatarUrl={avatarUrl ?? null}
         size={size - 8}
-        animate
+        animate={false}
         frame={frameAttrs}
       />
     );
@@ -358,15 +356,17 @@ function RewardThumb({
       </View>
     );
   } else if (d.kind === 'theme') {
-    // Tema: mini muestra del fondo animado.
-    const cols = Array.isArray(d.colors) ? (d.colors as string[]) : null;
+    // Tema: degradado estático de su paleta (barato; el fondo animado real se
+    // ve en el detalle). Intercala el acento (colors[2]) para que se distinga.
+    const cols = Array.isArray(d.colors) && d.colors.length ? (d.colors as string[]) : [rarity.color, rarity.border];
+    const grad = (cols.length >= 3 ? [cols[0], cols[2], cols[1]] : cols) as [string, string, ...string[]];
     inner = (
-      <View style={{ width: size - 14, height: size - 14, borderRadius: 8, overflow: 'hidden' }}>
-        <ProfileThemeBackground
-          theme={cols ? { id: '', rarity: (d.rarity as AchievementRarity) ?? 'common', colors: cols, animationType: d.animation_type ?? null } : null}
-          scrim={false}
-        />
-      </View>
+      <LinearGradient
+        colors={grad}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{ width: size - 14, height: size - 14, borderRadius: 8 }}
+      />
     );
   } else {
     // trophy / badge / title: preset de icono del catálogo con color de rareza.
@@ -416,7 +416,9 @@ function RewardThumb({
 function rewardShortLabel(reward: SeasonPassTrackRewardDto | null): string {
   if (!reward) return '';
   const k = reward.display.kind;
-  return k === 'title' || k === 'frame' || k === 'badge' || k === 'trophy' ? reward.display.label : '';
+  return k === 'title' || k === 'frame' || k === 'badge' || k === 'trophy' || k === 'theme'
+    ? reward.display.label
+    : '';
 }
 
 function LevelTrackColumn({
