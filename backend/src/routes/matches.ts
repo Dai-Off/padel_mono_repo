@@ -127,7 +127,7 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
           ),
           match_players (
             id, team, created_at, slot_index, result,
-            players (id, first_name, last_name, elo_rating, liga, avatar_url)
+            players (id, first_name, last_name, elo_rating, phone, liga, avatar_url)
           )`;
 }
 
@@ -143,7 +143,7 @@ function expandSelectDiscovery(): string {
           ),
           match_players (
             id, team, slot_index,
-            players (id, first_name, last_name, elo_rating, avatar_url)
+            players (id, first_name, last_name, elo_rating, phone, avatar_url)
           )`;
 }
 
@@ -166,7 +166,7 @@ function isJoinableDiscoveryRow(row: { match_players?: Array<{ players?: { id?: 
 }
 
 const DISCOVERY_MATCH_PLAYERS_SELECT =
-  'id, team, slot_index, players (id, first_name, last_name, elo_rating, avatar_url)';
+  'id, team, slot_index, players (id, first_name, last_name, elo_rating, phone, avatar_url)';
 
 async function repairDiscoveryMatchPlayers(supabase: ReturnType<typeof getSupabaseServiceRoleClient>, rows: any[]): Promise<any[]> {
   const out: any[] = [];

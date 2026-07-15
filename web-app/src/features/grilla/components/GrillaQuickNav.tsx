@@ -6,7 +6,6 @@ import {
   Users,
   DollarSign,
   GraduationCap,
-  BarChart3,
   Settings,
   Shield,
   ClipboardList,
