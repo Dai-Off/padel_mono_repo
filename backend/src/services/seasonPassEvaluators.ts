@@ -349,18 +349,18 @@ export class SeasonPassEvalContext {
   /** Pass missions of a given period type completed within the range (meta-missions). */
   missionsCompletedCount(p: MissionPeriod, missionPeriod: string): Promise<number> {
     return this.memo(`missionsDone:${missionPeriod}:${p.start_iso}`, async () => {
-      const { count, error } = await this.supabase
+      // PostgREST no soporta count:exact/head junto a un filtro sobre recurso
+      // embebido (mission.period), así que traemos las filas (pocas por jugador)
+      // y las contamos en memoria.
+      const { data, error } = await this.supabase
         .from('player_season_pass_missions')
-        .select('id, mission:season_pass_mission_definitions!inner(period)', {
-          count: 'exact',
-          head: true,
-        })
+        .select('id, mission:season_pass_mission_definitions!inner(period)')
         .eq('player_id', this.playerId)
         .eq('mission.period', missionPeriod)
         .gte('completed_at', p.start_iso)
         .lt('completed_at', p.end_iso);
       if (error) throw new Error(`[season-pass eval missionsDone] ${error.message}`);
-      return count ?? 0;
+      return (data ?? []).length;
     });
   }
 }
