@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { useTranslation } from '../../i18n';
 import { FilterBottomSheet } from '../filters/FilterBottomSheet';
 import { RARITY_CONFIG, type AchievementRarity } from '../../design/rarity';
@@ -184,6 +185,7 @@ export function RewardDetailSheet({
   const d = reward?.display;
   const equippable = d ? EQUIPPABLE.includes(d.kind) : false;
   const rarity = d ? RARITY_CONFIG[(d.rarity as AchievementRarity) ?? 'common'] ?? RARITY_CONFIG.common : null;
+  const glowy = d?.rarity === 'epic' || d?.rarity === 'legendary';
 
   // Recompensa Elite bloqueada porque falta el pase (el nivel ya está alcanzado):
   // se muestra un CTA de compra en vez del típico "alcanza el nivel N".
@@ -213,15 +215,20 @@ export function RewardDetailSheet({
     >
       {reward && d ? (
         <View style={styles.content}>
-          {/* Glow de rareza detrás del premio */}
+          {/* Halo de rareza detrás del premio: radial que se apaga dentro del
+              área (con margen), así no deja bordes rectos. */}
           <View style={styles.heroArea}>
             {rarity ? (
-              <LinearGradient
-                colors={[rarity.glow || 'transparent', 'transparent']}
-                style={styles.heroGlow}
-                start={{ x: 0.5, y: 0.5 }}
-                end={{ x: 0.5, y: 1 }}
-              />
+              <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+                <Defs>
+                  <RadialGradient id="rarityHalo" cx="50%" cy="47%" rx="60%" ry="46%">
+                    <Stop offset="0" stopColor={rarity.color} stopOpacity={glowy ? 0.42 : 0.26} />
+                    <Stop offset="0.5" stopColor={rarity.color} stopOpacity={glowy ? 0.16 : 0.1} />
+                    <Stop offset="1" stopColor={rarity.color} stopOpacity="0" />
+                  </RadialGradient>
+                </Defs>
+                <Rect x="0" y="0" width="100%" height="100%" fill="url(#rarityHalo)" />
+              </Svg>
             ) : null}
             <BigReward reward={reward} avatarUrl={playerAvatarUrl} initials={playerInitials} />
           </View>
@@ -315,7 +322,6 @@ export function RewardDetailSheet({
 const styles = StyleSheet.create({
   content: { alignItems: 'center', paddingBottom: 8 },
   heroArea: { height: 128, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', marginBottom: 4 },
-  heroGlow: { ...StyleSheet.absoluteFillObject, opacity: 0.32 },
   spCoin: {
     width: 92,
     height: 92,
