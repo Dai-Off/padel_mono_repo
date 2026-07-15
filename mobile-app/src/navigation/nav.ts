@@ -1,5 +1,7 @@
 import { navigationRef } from './navigationRef';
 import type { PartidoItem } from '../screens/PartidosScreen';
+import type { MainTabId } from '../components/layout/BottomNavbar';
+import type { MainTabsParamList } from './types';
 
 /**
  * Acciones encoladas hasta que el NavigationContainer este listo. Cubre la
@@ -32,5 +34,27 @@ export function flushPendingNavActions() {
 export function openPartidoDetail(partido: PartidoItem) {
   dispatchWhenReady(() => {
     navigationRef.navigate('PartidoDetail', { partido });
+  });
+}
+
+const ROUTE_FOR_TAB: Record<MainTabId, keyof MainTabsParamList> = {
+  inicio: 'InicioTab',
+  partidos: 'PartidosTab',
+  pistas: 'PistasTab',
+  tienda: 'TiendaTab',
+  cursos: 'CursosTab',
+  torneos: 'TorneosTab',
+  perfil: 'PerfilTab',
+};
+
+/** Ruta del tab navigator que corresponde a un MainTabId. */
+export function tabRouteFor(tab: MainTabId): keyof MainTabsParamList {
+  return ROUTE_FOR_TAB[tab];
+}
+
+/** Cambia el tab activo de Main desde cualquier punto de la app. */
+export function goToMainTab(tab: MainTabId) {
+  dispatchWhenReady(() => {
+    navigationRef.navigate('Main', { screen: ROUTE_FOR_TAB[tab] });
   });
 }

@@ -10,7 +10,7 @@ import { PreferencesScreen } from '../../screens/PreferencesScreen';
 import { EditProfileScreen } from '../../screens/EditProfileScreen';
 import { ChangePasswordScreen } from '../../screens/ChangePasswordScreen';
 import { useAuth } from '../../contexts/AuthContext';
-import { mainAppActions } from '../mainAppActions';
+import { useAppSignals } from '../../contexts/AppSignalsContext';
 import { RouteShell } from '../RouteShell';
 import type { RootStackParamList } from '../types';
 
@@ -123,11 +123,15 @@ export function PreferencesRoute({
 export function EditProfileRoute({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'EditProfile'>) {
+  const { bumpProfileRefresh, bumpPartidosRefresh } = useAppSignals();
   return (
     <RouteShell>
       <EditProfileScreen
         onBack={() => navigation.goBack()}
-        onSaved={() => mainAppActions.profileSaved()}
+        onSaved={() => {
+          bumpProfileRefresh();
+          bumpPartidosRefresh();
+        }}
         // replace: hoy Preferencias sustituye a Editar perfil (el back de
         // Preferencias vuelve al perfil, no a la edicion).
         onPreferencesPress={() => navigation.replace('Preferences')}

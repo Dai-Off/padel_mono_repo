@@ -1,7 +1,7 @@
 import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RequireAuth } from '../components/auth';
-import { MainApp } from '../screens/MainApp';
+import { MainShell } from './MainShell';
 import { navigationRef } from './navigationRef';
 import { flushPendingNavActions } from './nav';
 import { useAuthDeepLinks } from './useAuthDeepLinks';
@@ -70,7 +70,7 @@ const APP_CONTENT_STYLE = { backgroundColor: '#0F0F0F' } as const;
 function MainRoute() {
   return (
     <RequireAuth>
-      <MainApp />
+      <MainShell />
     </RequireAuth>
   );
 }

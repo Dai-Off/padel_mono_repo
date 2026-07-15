@@ -8,7 +8,8 @@ import { SeasonPassScreen } from '../../screens/SeasonPassScreen';
 import { CrearPartidoLocationSheet } from '../../components/partido/CrearPartidoLocationSheet';
 import { useHomeData } from '../../contexts/HomeDataContext';
 import { useBookingSuccess } from '../../contexts/BookingSuccessContext';
-import { mainAppActions } from '../mainAppActions';
+import { useAppSignals } from '../../contexts/AppSignalsContext';
+import { goToMainTab } from '../nav';
 import { RouteShell } from '../RouteShell';
 import type { RootStackParamList } from '../types';
 
@@ -28,20 +29,21 @@ export function CartRoute({
 export function DailyLessonRoute({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'DailyLesson'>) {
+  const { bumpStreakRefresh, openOnboardingFromSection } = useAppSignals();
   return (
     <RouteShell>
       <DailyLessonScreen
         onBack={() => navigation.goBack()}
         onComplete={() => {
-          mainAppActions.bumpStreakRefresh();
+          bumpStreakRefresh();
           navigation.goBack();
         }}
         onOpenOnboarding={() => {
           navigation.popTo('Main');
-          mainAppActions.openOnboardingFromSection('daily-lesson');
+          openOnboardingFromSection('daily-lesson');
         }}
         onOpenSeasonPass={() => {
-          mainAppActions.bumpStreakRefresh();
+          bumpStreakRefresh();
           // replace: hoy la leccion se cierra al abrir el pase (el back del
           // pase no vuelve a la leccion).
           navigation.replace('SeasonPass');
@@ -55,6 +57,7 @@ export function EducationalCourseDetailRoute({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, 'EducationalCourseDetail'>) {
+  const { openOnboardingFromSection } = useAppSignals();
   return (
     <RouteShell>
       <EducationalCourseDetailScreen
@@ -62,7 +65,7 @@ export function EducationalCourseDetailRoute({
         onBack={() => navigation.goBack()}
         onOpenProfileForOnboarding={() => {
           navigation.popTo('Main');
-          mainAppActions.openOnboardingFromSection('cursos');
+          openOnboardingFromSection('cursos');
         }}
       />
     </RouteShell>
@@ -111,7 +114,7 @@ export function SeasonPassRoute({
         onBack={() => navigation.goBack()}
         onGoToProfile={() => {
           navigation.goBack();
-          mainAppActions.goToProfileTab();
+          goToMainTab('perfil');
         }}
       />
     </RouteShell>
@@ -125,9 +128,10 @@ export function CrearPartidoRoute({
   const { organizerId, matchVisibility } = route.params;
   const { profile, refreshMatches, upsertMisPartido, syncMisPartidoFromMatchId } = useHomeData();
   const { show: showBookingSuccess } = useBookingSuccess();
+  const { bumpPartidosRefresh } = useAppSignals();
 
   const closeFlow = () => {
-    mainAppActions.bumpPartidosRefresh();
+    bumpPartidosRefresh();
     navigation.goBack();
   };
 
@@ -141,13 +145,13 @@ export function CrearPartidoRoute({
         onClose={closeFlow}
         onSiguiente={closeFlow}
         onNavigateToCompleteOnboarding={() => {
-          mainAppActions.bumpPartidosRefresh();
+          bumpPartidosRefresh();
           navigation.popTo('Main');
-          mainAppActions.goToProfileTab();
+          goToMainTab('perfil');
         }}
         onPartidoCreado={(data) => {
           const resolvedOrganizerId = organizerId ?? profile?.id ?? null;
-          mainAppActions.bumpPartidosRefresh();
+          bumpPartidosRefresh();
           // La confirmacion vive por encima del navigator: se muestra antes
           // del pop para cubrir la transicion de vuelta.
           showBookingSuccess(data);

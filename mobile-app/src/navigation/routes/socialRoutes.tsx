@@ -1,5 +1,4 @@
-import { useCallback, useEffect } from 'react';
-import { StackActions } from '@react-navigation/native';
+import { useEffect } from 'react';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { PartidoDetailScreen } from '../../screens/PartidoDetailScreen';
 import { PublicProfileScreen } from '../../screens/PublicProfileScreen';
@@ -9,37 +8,21 @@ import { NotificationsScreen } from '../../screens/NotificationsScreen';
 import { CommunityScreen } from '../../screens/CommunityScreen';
 import { ClubDetailScreen } from '../../screens/ClubDetailScreen';
 import { markAffinityModalPendingReopen } from '../../screens/HomeScreen';
-import { fetchMatchById } from '../../api/matches';
-import { mapMatchToPartido } from '../../api/mapMatchToPartido';
-import { useAuth } from '../../contexts/AuthContext';
 import { useHomeData } from '../../contexts/HomeDataContext';
-import { mainAppActions } from '../mainAppActions';
-import { navigationRef } from '../navigationRef';
+import { useMatchmaking } from '../../contexts/MatchmakingContext';
+import { useAppSignals } from '../../contexts/AppSignalsContext';
+import { useOpenMatchById, useOpenMatchFromInvite } from '../matchActions';
+import { goToMainTab } from '../nav';
 import { RouteShell } from '../RouteShell';
 import type { RootStackParamList } from '../types';
-
-/** Carga un partido por id y abre su detalle (antes openMatchById en MainApp). */
-function useOpenMatchById() {
-  const { session } = useAuth();
-  const { profile } = useHomeData();
-  return useCallback(
-    async (matchId: string) => {
-      const m = await fetchMatchById(matchId, session?.access_token ?? null);
-      if (!m) return;
-      const item = mapMatchToPartido(m, { viewerPlayerId: profile?.id ?? null });
-      if (item && navigationRef.isReady()) {
-        navigationRef.dispatch(StackActions.push('PartidoDetail', { partido: item }));
-      }
-    },
-    [session?.access_token, profile?.id],
-  );
-}
 
 export function PartidoDetailRoute({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, 'PartidoDetail'>) {
   const { refreshMatches } = useHomeData();
+  const { bumpMatchInvites } = useMatchmaking();
+  const { bumpPartidosRefresh, openOnboardingFromSection } = useAppSignals();
 
   // Al salir por cualquier via (boton, back hardware, swipe iOS, popTo):
   // refresca "mis partidos" como hacia el onBack original.
@@ -53,16 +36,19 @@ export function PartidoDetailRoute({
     <RouteShell>
       <PartidoDetailScreen
         partido={route.params.partido}
-        onMatchDataChanged={() => mainAppActions.matchDataChanged()}
+        onMatchDataChanged={() => {
+          bumpMatchInvites();
+          bumpPartidosRefresh();
+        }}
         onBack={() => navigation.goBack()}
         onGoHome={() => {
           navigation.popTo('Main');
-          mainAppActions.goHome();
+          goToMainTab('inicio');
         }}
         onOpenPublicProfile={(pid) => navigation.push('PublicProfile', { playerId: pid })}
         onOpenProfileForOnboarding={() => {
           navigation.popTo('Main');
-          mainAppActions.openOnboardingFromSection('partido-detail');
+          openOnboardingFromSection('partido-detail');
         }}
       />
     </RouteShell>
@@ -75,6 +61,7 @@ export function PublicProfileRoute({
 }: NativeStackScreenProps<RootStackParamList, 'PublicProfile'>) {
   const { playerId, origin } = route.params;
   const openMatchById = useOpenMatchById();
+  const { bumpAffinityReopen } = useAppSignals();
 
   // Perfil abierto desde el modal de IA Afinidad: HomeScreen ya marco el
   // pending reopen al abrirlo; al salir (por cualquier via) se dispara la
@@ -83,9 +70,9 @@ export function PublicProfileRoute({
     if (origin !== 'affinity') return;
     return navigation.addListener('beforeRemove', () => {
       markAffinityModalPendingReopen();
-      mainAppActions.affinityProfileClosed();
+      bumpAffinityReopen();
     });
-  }, [navigation, origin]);
+  }, [navigation, origin, bumpAffinityReopen]);
 
   return (
     <RouteShell>
@@ -139,13 +126,14 @@ export function DirectMessageThreadRoute({
 export function NotificationsRoute({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'Notifications'>) {
+  const openMatchFromInvite = useOpenMatchFromInvite();
   return (
     <RouteShell>
       <NotificationsScreen
         onBack={() => navigation.goBack()}
         onOpenMatch={(invite) => {
           navigation.goBack();
-          mainAppActions.openMatchFromInvite(invite);
+          void openMatchFromInvite(invite);
         }}
       />
     </RouteShell>
@@ -166,7 +154,7 @@ export function CommunityRoute({
         myPlayerId={profile?.id}
         onNavigateToTab={(tab) => {
           navigation.popTo('Main');
-          mainAppActions.goToTab(tab);
+          goToMainTab(tab);
         }}
       />
     </RouteShell>
