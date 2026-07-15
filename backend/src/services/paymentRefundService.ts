@@ -143,15 +143,15 @@ async function resolveStripeRefundForTx(
           return { ok: false, error: `Stripe reembolso ${tx.stripe_payment_intent_id}: ${msg}` };
         }
         console.warn(
-          `[paymentRefund] PI ${pi.id} sin cargo (status=${pi.status}); tx ${tx.id} marcada como failed`,
+          `[paymentRefund] PI ${pi.id} sin cargo (status=${pi.status}); tx ${tx.id} marcada como refunded`,
         );
       } catch {
         console.warn(
-          `[paymentRefund] PI ${tx.stripe_payment_intent_id} no recuperable; tx ${tx.id} marcada como failed`,
+          `[paymentRefund] PI ${tx.stripe_payment_intent_id} no recuperable; tx ${tx.id} marcada como refunded`,
         );
       }
-      const upErr = await markTxStatus(supabase, tx.id, 'failed', now);
-      if (upErr) return { ok: false, error: `Actualizar tx ${tx.id} a failed: ${upErr}` };
+      const upErr = await markTxStatus(supabase, tx.id, 'refunded', now);
+      if (upErr) return { ok: false, error: `Actualizar tx ${tx.id} a refunded: ${upErr}` };
       return { ok: true, stripeRefunded: 0 };
     }
     return { ok: false, error: `Stripe reembolso ${tx.stripe_payment_intent_id}: ${msg}` };

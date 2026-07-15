@@ -27,7 +27,29 @@ export type SlotConflict = {
     reservation: Reservation;
     reason: string;
     skippable: boolean;
+    /** Turno incompleto: se puede reembolsar/cancelar y reemplazar con el bloque. */
+    displaceableIncomplete: boolean;
 };
+
+const INCOMPLETE_MATCH_TYPES = new Set(['open_match', 'pozo', 'standard']);
+
+/** Misma regla que override-move / bulk displace en backend. */
+export function isIncompleteDisplaceableReservation(r: Reservation): boolean {
+    if (r.status === 'cancelled') return false;
+    const type = (r.booking_type || r.reservation_type || 'standard').toLowerCase();
+    if (!INCOMPLETE_MATCH_TYPES.has(type)) return false;
+    const count =
+        r.detailedPlayers?.length ||
+        r.registeredPlayerCount ||
+        (r.playerName?.trim() ? 1 : 0);
+    if (count >= 4) return false;
+    const totalCents = r.totalPrice != null ? Math.round(r.totalPrice * 100) : 0;
+    const paid = r.totalPaidCents ?? 0;
+    if (totalCents <= 0) return !(paid > 0 || r.status === 'confirmed' || r.status === 'flat_rate');
+    if (paid >= totalCents) return false;
+    if (r.status === 'confirmed' || r.status === 'flat_rate') return false;
+    return true;
+}
 
 export function findSlotConflict(
     slot: GridSlot,
@@ -43,18 +65,28 @@ export function findSlotConflict(
         const rEnd = rStart + r.durationMinutes;
         if (slotStart >= rEnd || slotEnd <= rStart) continue;
 
+        const displaceableIncomplete = isIncompleteDisplaceableReservation(r);
+
         if (r.booking_type === 'blocked' && r.notes?.includes(MAINTENANCE_NOTE_PREFIX)) {
-            return { slot, reservation: r, reason: 'Ya bloqueado por mantenimiento', skippable: true };
+            return { slot, reservation: r, reason: 'Ya bloqueado por mantenimiento', skippable: true, displaceableIncomplete: false };
         }
         if (r.booking_type === 'blocked') {
-            return { slot, reservation: r, reason: 'Slot ya bloqueado', skippable: true };
+            return { slot, reservation: r, reason: 'Slot ya bloqueado', skippable: true, displaceableIncomplete: false };
         }
         if (r.booking_type === 'school_course' || r.booking_type === 'school_individual' || r.booking_type === 'school_group') {
             const label = r.playerName?.trim() || r.matchType || 'curso escolar';
-            return { slot, reservation: r, reason: `Curso escolar: ${label}`, skippable: true };
+            return { slot, reservation: r, reason: `Curso escolar: ${label}`, skippable: true, displaceableIncomplete: false };
         }
         const label = r.playerName?.trim() || r.matchType || 'turno';
-        return { slot, reservation: r, reason: `Reserva activa: ${label}`, skippable: true };
+        return {
+            slot,
+            reservation: r,
+            reason: displaceableIncomplete
+                ? `Turno incompleto: ${label}`
+                : `Reserva activa: ${label}`,
+            skippable: true,
+            displaceableIncomplete,
+        };
     }
     return null;
 }
@@ -247,9 +279,28 @@ export function collectSlotsInMarquee(
     const startIdx = Math.round(relTop / slotPx);
     const endIdx = Math.round(relBottom / slotPx);
 
-    for (const col of columnRects) {
-        if (marquee.right <= col.rect.left || marquee.left >= col.rect.right) continue;
+    // Columnas que el marquee tocó.
+    const hitCols = columnRects.filter((col) => {
+        const overlapLeft = Math.max(marquee.left, col.rect.left);
+        const overlapRight = Math.min(marquee.right, col.rect.right);
+        return overlapRight - overlapLeft > 2;
+    });
+    if (hitCols.length === 0) return slots;
 
+    // Rellena huecos por geometría (p. ej. PISTA EXTERIOR entre dos pistas tocadas
+    // aunque el arrastre no haya cruzado 1–2 px de esa columna).
+    let selectedCols = hitCols;
+    if (hitCols.length >= 2) {
+        const spanLeft = Math.min(...hitCols.map((c) => c.rect.left));
+        const spanRight = Math.max(...hitCols.map((c) => c.rect.right));
+        selectedCols = columnRects.filter((col) => {
+            const overlapLeft = Math.max(spanLeft, col.rect.left);
+            const overlapRight = Math.min(spanRight, col.rect.right);
+            return overlapRight - overlapLeft > 2;
+        });
+    }
+
+    for (const col of selectedCols) {
         const startSlot = gridStartMin + startIdx * slotStepMin;
         const endSlot = gridStartMin + endIdx * slotStepMin;
 

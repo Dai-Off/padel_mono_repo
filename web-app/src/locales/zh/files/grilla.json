@@ -49,6 +49,8 @@
   "legend": {
     "iconsTitle": "时段图标",
     "mobileBadge": "手机 App 预订 (WM)",
+    "deskBadge": "柜檯 / 会所预订 (M)",
+    "playersBadge": "时段内球员数 (n/4)",
     "paidDot": "已付款",
     "pendingDot": "待收款",
     "alertDot": "提醒 / 待核对"

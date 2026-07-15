@@ -51,6 +51,8 @@ export const es: TranslationKeys = {
     legend: {
         iconsTitle: 'Iconos en el turno',
         mobileBadge: 'Reserva desde app móvil (WM)',
+        deskBadge: 'Reserva desde mostrador / club (M)',
+        playersBadge: 'Jugadores en el turno (n/4)',
         paidDot: 'Pagado',
         pendingDot: 'Pendiente de cobro',
         alertDot: 'Aviso / revisar turno',

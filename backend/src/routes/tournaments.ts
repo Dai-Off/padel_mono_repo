@@ -9,6 +9,7 @@ import {
   aggregateSlotsByTournamentId,
   cleanupExpiredTournamentInvites,
   cleanupExpiredTournamentInvitesGloballyIfStale,
+  computeInscriptionExpiresAt,
   getTournamentSlots,
   refreshTournamentStatus,
   slotsFromInscriptionRows,
@@ -195,6 +196,15 @@ function normalizeRegistrationMode(value: unknown): 'individual' | 'pair' | 'bot
   return 'individual';
 }
 
+/** null o <= 0 = sin expiración de cupo; undefined = default 1440 min (24 h). */
+function normalizeInviteTtlMinutes(value: unknown): number | null {
+  if (value === undefined) return 1440;
+  if (value === null) return null;
+  const ttl = Number(value);
+  if (!Number.isFinite(ttl) || ttl <= 0) return null;
+  return Math.round(ttl);
+}
+
 function buildInitialMatchRules(body: Record<string, unknown>): Record<string, unknown> {
   const base: Record<string, unknown> = { best_of_sets: 3, results_entry: 'organizer' };
   const mr = body.match_rules;
@@ -241,6 +251,18 @@ function buildUtcIsoFromYmdHm(ymd: string, hm: string): string {
 function mapTournamentDbErrorMessage(errorMessage: string): string {
   if (errorMessage.includes('tournaments_check1')) {
     return 'El rango de nivel no es valido: elo_min debe ser menor o igual que elo_max.';
+  }
+  if (
+    errorMessage.includes('invite_ttl_minutes') &&
+    (errorMessage.includes('not-null') || errorMessage.includes('not null') || errorMessage.includes('violates not-null'))
+  ) {
+    return 'Falta aplicar la migración 093 (invite_ttl_minutes nullable). Ejecutá backend/db/093_tournament_invite_ttl_optional.sql en Supabase SQL Editor, o: npx ts-node -r dotenv/config scripts/apply-093-tournament-invite-ttl.ts';
+  }
+  if (
+    errorMessage.includes('expires_at') &&
+    (errorMessage.includes('not-null') || errorMessage.includes('not null') || errorMessage.includes('violates not-null'))
+  ) {
+    return 'Falta aplicar la migración 093 (expires_at nullable en inscripciones). Ejecutá backend/db/093_tournament_invite_ttl_optional.sql en Supabase.';
   }
   return errorMessage;
 }
@@ -607,7 +629,10 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
  *   get:
  *     tags: [Tournaments]
  *     summary: Detalle de torneo
- *     description: Incluye jugadores ordenados por estado (confirmados primero).
+ *     description: |
+ *       Incluye jugadores ordenados por estado (confirmados primero) con teléfono y género,
+ *       y `payments`: pagos de inscripción agregados por jugador (`{ player_id: { amount_cents, method } }`,
+ *       method = cash | card | app | other) combinando Stripe (app) y cobros manuales en caja.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -637,19 +662,41 @@ router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
     await refreshTournamentStatus(id, { skipInviteCleanup: true });
 
     const inscriptionSelect =
-      'id, status, invited_at, expires_at, confirmed_at, invite_email_1, invite_email_2, player_id_1, player_id_2, division_id, players_1:players!tournament_inscriptions_player_id_1_fkey(id, first_name, last_name, email, avatar_url, elo_rating), players_2:players!tournament_inscriptions_player_id_2_fkey(id, first_name, last_name, email, avatar_url, elo_rating)';
+      'id, status, invited_at, expires_at, confirmed_at, invite_email_1, invite_email_2, player_id_1, player_id_2, division_id, players_1:players!tournament_inscriptions_player_id_1_fkey(id, first_name, last_name, email, phone, gender, avatar_url, elo_rating), players_2:players!tournament_inscriptions_player_id_2_fkey(id, first_name, last_name, email, phone, gender, avatar_url, elo_rating)';
     const fullTournamentSelect =
       'id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, competition_format, match_rules, standings_rules, tournament_courts(court_id)';
 
-    const [{ data: tournamentFresh, error: t2Err }, { data: inscriptions, error: iErr }, { data: divisions, error: divErr }] = await Promise.all([
+    const [{ data: tournamentFresh, error: t2Err }, { data: inscriptions, error: iErr }, { data: divisions, error: divErr }, { data: paymentRows, error: payErr }] = await Promise.all([
       supabase.from('tournaments').select(fullTournamentSelect).eq('id', id).maybeSingle(),
       supabase.from('tournament_inscriptions').select(inscriptionSelect).eq('tournament_id', id).order('invited_at', { ascending: true }),
       supabase.from('tournament_divisions').select('id,code,label,elo_min,elo_max,sort_order').eq('tournament_id', id).order('sort_order', { ascending: true }),
+      supabase.from('payment_transactions').select('payer_player_id, amount_cents, stripe_payment_intent_id').eq('tournament_id', id).eq('status', 'succeeded'),
     ]);
     if (t2Err) return res.status(500).json({ ok: false, error: t2Err.message });
     if (!tournamentFresh) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
     if (iErr) return res.status(500).json({ ok: false, error: iErr.message });
     if (divErr) return res.status(500).json({ ok: false, error: divErr.message });
+    if (payErr) return res.status(500).json({ ok: false, error: payErr.message });
+
+    const payments: Record<string, { amount_cents: number; method: 'cash' | 'card' | 'app' | 'other' }> = {};
+    for (const tx of paymentRows ?? []) {
+      const pid = (tx as { payer_player_id?: string | null }).payer_player_id;
+      if (!pid) continue;
+      const intentId = String((tx as { stripe_payment_intent_id?: string | null }).stripe_payment_intent_id ?? '');
+      const method: 'cash' | 'card' | 'app' | 'other' = intentId.startsWith('manual_cash')
+        ? 'cash'
+        : intentId.startsWith('manual_card')
+          ? 'card'
+          : intentId.startsWith('pi_')
+            ? 'app'
+            : 'other';
+      const prev = payments[pid];
+      payments[pid] = {
+        amount_cents: (prev?.amount_cents ?? 0) + Number((tx as { amount_cents?: number }).amount_cents ?? 0),
+        // Con varios pagos, prevalece el método del último registro no-app.
+        method: prev && prev.method !== 'app' ? prev.method : method,
+      };
+    }
 
     const sorted = [...(inscriptions ?? [])].sort((a: any, b: any) => {
       const pa = a.status === 'confirmed' ? 0 : 1;
@@ -669,6 +716,7 @@ router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
         confirmed: slots.confirmedPlayers,
         pending: slots.pendingPlayers,
       },
+      payments,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -703,7 +751,7 @@ router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
  *               registration_mode: { type: string, enum: [individual, pair, both], description: 'individual, pair o both (sin restricción)' }
  *               registration_closed_at: { type: string, format: date-time, nullable: true }
  *               cancellation_cutoff_at: { type: string, format: date-time, nullable: true }
- *               invite_ttl_minutes: { type: integer, minimum: 1 }
+ *               invite_ttl_minutes: { type: integer, minimum: 1, nullable: true, description: 'Minutos hasta liberar el cupo pendiente. null = sin expiración (desactivado).' }
  *               description: { type: string, nullable: true }
  *               normas: { type: string, nullable: true, description: 'Reglas/normas del torneo visibles al jugador' }
  *               results_entry:
@@ -816,7 +864,7 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
       registration_mode: normalizeRegistrationMode(body.registration_mode),
       registration_closed_at: body.registration_closed_at ? asIso(body.registration_closed_at) : null,
       cancellation_cutoff_at: body.cancellation_cutoff_at ? asIso(body.cancellation_cutoff_at) : null,
-      invite_ttl_minutes: Math.max(1, Number(body.invite_ttl_minutes ?? 1440)),
+      invite_ttl_minutes: normalizeInviteTtlMinutes(body.invite_ttl_minutes),
       description: body.description != null ? String(body.description) : null,
       normas: body.normas != null ? String(body.normas) : null,
       level_mode: levelMode,
@@ -918,7 +966,7 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
  *                 minimum: 0
  *                 nullable: true
  *                 description: Horas antes del inicio para cutoff de cancelación en cada ocurrencia
- *               invite_ttl_minutes: { type: integer, minimum: 1 }
+ *               invite_ttl_minutes: { type: integer, minimum: 1, nullable: true, description: 'Minutos hasta liberar el cupo pendiente. null = sin expiración (desactivado).' }
  *               description: { type: string, nullable: true }
  *               normas: { type: string, nullable: true }
  *               poster_url: { type: string, nullable: true }
@@ -1048,7 +1096,7 @@ router.post('/recurring', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
             registration_mode: normalizeRegistrationMode(body.registration_mode),
             registration_closed_at: registrationCloseHours != null ? new Date(startMs - registrationCloseHours * 60 * 60 * 1000).toISOString() : null,
             cancellation_cutoff_at: cancellationHours != null ? new Date(startMs - cancellationHours * 60 * 60 * 1000).toISOString() : null,
-            invite_ttl_minutes: Math.max(1, Number(body.invite_ttl_minutes ?? 1440)),
+            invite_ttl_minutes: normalizeInviteTtlMinutes(body.invite_ttl_minutes),
             description: body.description != null ? String(body.description) : null,
             normas: body.normas != null ? String(body.normas) : null,
             level_mode: levelMode,
@@ -1224,7 +1272,7 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
     if (body.max_players !== undefined) update.max_players = Math.max(2, Number(body.max_players));
     if (body.registration_closed_at !== undefined) update.registration_closed_at = body.registration_closed_at ? asIso(body.registration_closed_at) : null;
     if (body.cancellation_cutoff_at !== undefined) update.cancellation_cutoff_at = body.cancellation_cutoff_at ? asIso(body.cancellation_cutoff_at) : null;
-    if (body.invite_ttl_minutes !== undefined) update.invite_ttl_minutes = Math.max(1, Number(body.invite_ttl_minutes));
+    if (body.invite_ttl_minutes !== undefined) update.invite_ttl_minutes = normalizeInviteTtlMinutes(body.invite_ttl_minutes);
     if (body.description !== undefined) update.description = body.description != null ? String(body.description) : null;
     if (body.name !== undefined) update.name = body.name != null ? String(body.name).trim() || null : null;
     if (body.normas !== undefined) update.normas = body.normas != null ? String(body.normas) : null;
@@ -1600,7 +1648,7 @@ router.post('/:id/join-owner', requireClubOwnerOrAdminOrPortalStaff, async (req:
     if (existingIns) return res.json({ ok: true, already_joined: true });
 
     const { tokenHash } = generateInviteToken();
-    const expiresAt = new Date(Date.now() + Number((tournament as { invite_ttl_minutes: number }).invite_ttl_minutes) * 60000).toISOString();
+    const expiresAt = computeInscriptionExpiresAt((tournament as { invite_ttl_minutes: number | null }).invite_ttl_minutes);
     const { error: insErr } = await supabase.from('tournament_inscriptions').insert({
       tournament_id: tournamentId,
       status: 'confirmed',
@@ -1637,8 +1685,13 @@ router.post('/:id/join-owner', requireClubOwnerOrAdminOrPortalStaff, async (req:
  * /tournaments/{id}/participants:
  *   post:
  *     tags: [Tournaments]
- *     summary: Agregar jugador existente como participante confirmado
- *     description: Permite al organizador sumar un jugador ya registrado y dejarlo confirmado directamente (sin invitación pendiente).
+ *     summary: Agregar jugador o pareja como participante confirmado
+ *     description: |
+ *       Permite al organizador sumar jugadores ya registrados y dejarlos confirmados
+ *       directamente (sin invitación pendiente). Si se envía `player_id_2` se crea una
+ *       inscripción de pareja (requiere `registration_mode` pair o both); sin él, alta
+ *       individual (requiere individual o both). No registra pago: el cobro puede
+ *       hacerse después en caja con el endpoint manual-payment.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -1654,8 +1707,17 @@ router.post('/:id/join-owner', requireClubOwnerOrAdminOrPortalStaff, async (req:
  *             required: [player_id]
  *             properties:
  *               player_id: { type: string, format: uuid }
+ *               player_id_2: { type: string, format: uuid, nullable: true, description: 'Compañero de pareja (modo pair/both)' }
+ *               division_id: { type: string, format: uuid, nullable: true, description: 'Categoría manual (torneos multi-división)' }
+ *           examples:
+ *             individual:
+ *               value: { player_id: "11111111-1111-1111-1111-111111111111" }
+ *             pareja:
+ *               value:
+ *                 player_id: "11111111-1111-1111-1111-111111111111"
+ *                 player_id_2: "22222222-2222-2222-2222-222222222222"
  *     responses:
- *       200: { description: Jugador agregado }
+ *       200: { description: Jugador(es) agregado(s) }
  *       400: { description: Datos inválidos o torneo no apto }
  *       403: { description: Sin acceso al club o restricciones de género/elo }
  *       404: { description: Torneo o jugador no encontrado }
@@ -1664,7 +1726,11 @@ router.post('/:id/join-owner', requireClubOwnerOrAdminOrPortalStaff, async (req:
 router.post('/:id/participants', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const playerId = String(req.body?.player_id ?? '').trim();
+  const playerId2 = String(req.body?.player_id_2 ?? '').trim() || null;
   if (!playerId) return res.status(400).json({ ok: false, error: 'player_id es obligatorio' });
+  if (playerId2 && playerId2 === playerId) {
+    return res.status(400).json({ ok: false, error: 'player_id y player_id_2 deben ser distintos' });
+  }
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error: tErr } = await supabase
@@ -1680,39 +1746,58 @@ router.post('/:id/participants', requireClubOwnerOrAdminOrPortalStaff, async (re
     if (String((tournament as { status: string }).status) !== 'open') {
       return res.status(400).json({ ok: false, error: 'El torneo no está abierto' });
     }
-    if (!['individual', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode ?? 'individual'))) {
+    const registrationMode = String((tournament as { registration_mode?: string }).registration_mode ?? 'individual');
+    if (playerId2 && !['pair', 'both'].includes(registrationMode)) {
+      return res.status(400).json({ ok: false, error: 'Este torneo no admite inscripción por parejas' });
+    }
+    if (!playerId2 && !['individual', 'both'].includes(registrationMode)) {
       return res.status(400).json({ ok: false, error: 'Este torneo no admite alta individual confirmada' });
     }
 
-    const { data: player, error: pErr } = await supabase
+    const playerIds = playerId2 ? [playerId, playerId2] : [playerId];
+    const { data: playerRows, error: pErr } = await supabase
       .from('players')
       .select('id, first_name, last_name, elo_rating, gender')
-      .eq('id', playerId)
-      .maybeSingle();
+      .in('id', playerIds);
     if (pErr) return res.status(500).json({ ok: false, error: pErr.message });
-    if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    const players = (playerRows ?? []) as Array<{ id: string; first_name?: string; last_name?: string; elo_rating?: number; gender?: string }>;
+    const player = players.find((p) => p.id === playerId);
+    const player2 = playerId2 ? players.find((p) => p.id === playerId2) : null;
+    if (!player || (playerId2 && !player2)) {
+      return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    }
 
     await cleanupExpiredTournamentInvites(tournamentId);
     const slots = await getTournamentSlots(tournamentId);
-    if (slots.confirmedPlayers >= Number((tournament as { max_players: number }).max_players)) {
+    const neededSlots = playerId2 ? 2 : 1;
+    if (slots.confirmedPlayers + neededSlots > Number((tournament as { max_players: number }).max_players)) {
       return res.status(409).json({ ok: false, error: 'No hay cupos disponibles' });
     }
 
+    const dupOr = playerIds
+      .map((pid) => `player_id_1.eq.${pid},player_id_2.eq.${pid}`)
+      .join(',');
     const { data: existingIns } = await supabase
       .from('tournament_inscriptions')
       .select('id')
       .eq('tournament_id', tournamentId)
-      .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`)
+      .or(dupOr)
+      .limit(1)
       .maybeSingle();
     if (existingIns) return res.status(409).json({ ok: false, error: 'El jugador ya está inscripto en este torneo' });
 
-    const elo = Number((player as { elo_rating?: number }).elo_rating ?? 3.5);
+    const elo = Number(player.elo_rating ?? 3.5);
     const levelModePart = String((tournament as any).level_mode ?? 'single_band');
     if (levelModePart === 'single_band') {
       const eloMin = (tournament as any).elo_min;
       const eloMax = (tournament as any).elo_max;
-      if (eloMin != null && eloMax != null && (elo < eloMin || elo > eloMax)) {
-        return res.status(403).json({ ok: false, error: 'El nivel Elo del jugador no está en el rango permitido' });
+      if (eloMin != null && eloMax != null) {
+        for (const p of players) {
+          const pElo = Number(p.elo_rating ?? 3.5);
+          if (pElo < eloMin || pElo > eloMax) {
+            return res.status(403).json({ ok: false, error: 'El nivel Elo del jugador no está en el rango permitido' });
+          }
+        }
       }
     }
     let divisionIdPart: string | null = null;
@@ -1734,16 +1819,18 @@ router.post('/:id/participants', requireClubOwnerOrAdminOrPortalStaff, async (re
         }
       }
     }
-    if (!playerMeetsTournamentGender((tournament as { gender?: string }).gender, (player as { gender?: string }).gender)) {
-      return res.status(403).json({
-        ok: false,
-        error: 'El género del jugador no coincide con la categoría del torneo.',
-      });
+    for (const p of players) {
+      if (!playerMeetsTournamentGender((tournament as { gender?: string }).gender, p.gender)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'El género del jugador no coincide con la categoría del torneo.',
+        });
+      }
     }
 
     const { tokenHash } = generateInviteToken();
     const nowIso = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + Number((tournament as { invite_ttl_minutes: number }).invite_ttl_minutes) * 60000).toISOString();
+    const expiresAt = computeInscriptionExpiresAt((tournament as { invite_ttl_minutes: number | null }).invite_ttl_minutes);
     const { error: insErr } = await supabase.from('tournament_inscriptions').insert({
       tournament_id: tournamentId,
       status: 'confirmed',
@@ -1751,17 +1838,20 @@ router.post('/:id/participants', requireClubOwnerOrAdminOrPortalStaff, async (re
       expires_at: expiresAt,
       confirmed_at: nowIso,
       player_id_1: playerId,
+      ...(playerId2 ? { player_id_2: playerId2 } : {}),
       token_hash: tokenHash,
       ...(divisionIdPart ? { division_id: divisionIdPart } : {}),
     });
     if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
 
-    const joinedName = `${(player as any).first_name ?? ''} ${(player as any).last_name ?? ''}`.trim() || 'Un jugador';
+    const nameOf = (p: { first_name?: string; last_name?: string } | null | undefined) =>
+      `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.trim() || 'Un jugador';
+    const joinedName = player2 ? `${nameOf(player)} y ${nameOf(player2)}` : nameOf(player);
     await supabase.from('tournament_chat_messages').insert({
       tournament_id: tournamentId,
       author_user_id: '00000000-0000-0000-0000-000000000000',
       author_name: 'Sistema',
-      message: `${joinedName} se ha unido al torneo.`,
+      message: player2 ? `${joinedName} se han unido al torneo.` : `${joinedName} se ha unido al torneo.`,
     });
     await refreshTournamentStatus(tournamentId, { force: true, skipInviteCleanup: true });
     return res.json({ ok: true });
@@ -1845,6 +1935,154 @@ router.put('/:id/inscriptions/:inscriptionId/division', requireClubOwnerOrAdminO
       .eq('tournament_id', tournamentId);
     if (uErr) return res.status(500).json({ ok: false, error: uErr.message });
     return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/inscriptions/{inscriptionId}/manual-payment:
+ *   post:
+ *     tags: [Tournaments]
+ *     summary: Registrar cobro en caja de una inscripción (efectivo o tarjeta)
+ *     description: |
+ *       Registra el pago de la inscripción de un jugador cobrado en el club (caja).
+ *       Se registra por jugador: en inscripciones de pareja, cada miembro se cobra por
+ *       separado. Crea una transacción en `payment_transactions` con
+ *       `stripe_payment_intent_id = manual_{method}_{tournamentId}_{playerId}` (idempotente:
+ *       un nuevo cobro manual del mismo jugador reemplaza al anterior). Si el jugador ya
+ *       pagó por la app (Stripe), responde 409.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: path
+ *         name: inscriptionId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [player_id, method]
+ *             properties:
+ *               player_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: Jugador de la inscripción al que se cobra (player_id_1 o player_id_2)
+ *               method:
+ *                 type: string
+ *                 enum: [cash, card]
+ *               amount_cents:
+ *                 type: integer
+ *                 minimum: 0
+ *                 description: Importe cobrado. Por defecto, el precio de inscripción del torneo.
+ *           example:
+ *             player_id: "11111111-1111-1111-1111-111111111111"
+ *             method: cash
+ *             amount_cents: 1100
+ *     responses:
+ *       200:
+ *         description: Pago registrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean }
+ *                 amount_cents: { type: integer }
+ *                 method: { type: string, enum: [cash, card] }
+ *       400: { description: Datos inválidos }
+ *       403: { description: Sin acceso al club }
+ *       404: { description: Torneo, inscripción o jugador no encontrados }
+ *       409: { description: El jugador ya pagó por la app (Stripe) }
+ */
+router.post('/:id/inscriptions/:inscriptionId/manual-payment', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const inscriptionId = req.params.inscriptionId;
+  const playerId = String(req.body?.player_id ?? '').trim();
+  const method = String(req.body?.method ?? '').trim();
+  if (!playerId) return res.status(400).json({ ok: false, error: 'player_id es obligatorio' });
+  if (method !== 'cash' && method !== 'card') {
+    return res.status(400).json({ ok: false, error: 'method debe ser cash o card' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament, error: tErr } = await supabase
+      .from('tournaments')
+      .select('id, club_id, price_cents')
+      .eq('id', tournamentId)
+      .maybeSingle();
+    if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const { data: inscription, error: iErr } = await supabase
+      .from('tournament_inscriptions')
+      .select('id, status, player_id_1, player_id_2')
+      .eq('id', inscriptionId)
+      .eq('tournament_id', tournamentId)
+      .maybeSingle();
+    if (iErr) return res.status(500).json({ ok: false, error: iErr.message });
+    if (!inscription) return res.status(404).json({ ok: false, error: 'Inscripción no encontrada' });
+    const ins = inscription as { status: string; player_id_1?: string | null; player_id_2?: string | null };
+    if (ins.player_id_1 !== playerId && ins.player_id_2 !== playerId) {
+      return res.status(400).json({ ok: false, error: 'El jugador no pertenece a esta inscripción' });
+    }
+    if (ins.status !== 'confirmed' && ins.status !== 'pending') {
+      return res.status(400).json({ ok: false, error: 'La inscripción no está activa' });
+    }
+
+    const rawAmount = req.body?.amount_cents;
+    const amountCents = rawAmount != null
+      ? Math.max(0, Math.round(Number(rawAmount)))
+      : Math.max(0, Number((tournament as { price_cents?: number }).price_cents ?? 0));
+    if (!Number.isFinite(amountCents)) {
+      return res.status(400).json({ ok: false, error: 'amount_cents inválido' });
+    }
+
+    const { data: existingTxs, error: txListErr } = await supabase
+      .from('payment_transactions')
+      .select('id, stripe_payment_intent_id')
+      .eq('tournament_id', tournamentId)
+      .eq('payer_player_id', playerId)
+      .eq('status', 'succeeded');
+    if (txListErr) return res.status(500).json({ ok: false, error: txListErr.message });
+    const hasStripePayment = (existingTxs ?? []).some((tx: { stripe_payment_intent_id?: string | null }) =>
+      String(tx.stripe_payment_intent_id ?? '').startsWith('pi_'),
+    );
+    if (hasStripePayment) {
+      return res.status(409).json({ ok: false, error: 'El jugador ya pagó la inscripción por la app' });
+    }
+
+    // Reemplaza cobros manuales previos del mismo jugador (idempotente).
+    const manualIds = (existingTxs ?? [])
+      .filter((tx: { stripe_payment_intent_id?: string | null }) => String(tx.stripe_payment_intent_id ?? '').startsWith('manual_'))
+      .map((tx: { id: string }) => tx.id);
+    if (manualIds.length > 0) {
+      const { error: delErr } = await supabase.from('payment_transactions').delete().in('id', manualIds);
+      if (delErr) return res.status(500).json({ ok: false, error: delErr.message });
+    }
+
+    const { error: insTxErr } = await supabase.from('payment_transactions').insert({
+      booking_id: null,
+      tournament_id: tournamentId,
+      payer_player_id: playerId,
+      amount_cents: amountCents,
+      currency: 'EUR',
+      stripe_payment_intent_id: `manual_${method}_${tournamentId}_${playerId}`,
+      status: 'succeeded',
+    });
+    if (insTxErr) return res.status(500).json({ ok: false, error: insTxErr.message });
+
+    return res.json({ ok: true, amount_cents: amountCents, method });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -2856,7 +3094,7 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     }
 
     const { tokenHash } = generateInviteToken();
-    const expiresAt = new Date(Date.now() + Number((tournament as any).invite_ttl_minutes) * 60000).toISOString();
+    const expiresAt = computeInscriptionExpiresAt((tournament as { invite_ttl_minutes: number | null }).invite_ttl_minutes);
     const { error: insErr } = await supabase.from('tournament_inscriptions').insert({
       tournament_id: tournamentId,
       status: 'confirmed',
@@ -3205,9 +3443,9 @@ router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdminOrP
 
     const { tokenHash } = generateInviteToken();
     const nowIso = new Date().toISOString();
-    const expiresAt = new Date(
-      Date.now() + Number((tournament as { invite_ttl_minutes: number }).invite_ttl_minutes) * 60000
-    ).toISOString();
+    const expiresAt = computeInscriptionExpiresAt(
+      (tournament as { invite_ttl_minutes: number | null }).invite_ttl_minutes
+    );
     const { error: insErr } = await supabase.from('tournament_inscriptions').insert({
       tournament_id: tournamentId,
       status: 'confirmed',
@@ -3615,7 +3853,7 @@ router.post('/:id/join-pair', async (req: Request, res: Response) => {
 
     const { token, tokenHash } = generateInviteToken();
     const inviteUrl = buildTournamentInviteUrl(tournamentId, token);
-    const expiresAt = new Date(Date.now() + Number((tournament as any).invite_ttl_minutes) * 60000).toISOString();
+    const expiresAt = computeInscriptionExpiresAt((tournament as { invite_ttl_minutes: number | null }).invite_ttl_minutes);
     const { error: insErr } = await supabase.from('tournament_inscriptions').insert({
       tournament_id: tournamentId,
       status: 'pending',

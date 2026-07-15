@@ -49,6 +49,8 @@
   "legend": {
     "iconsTitle": "Booking icons",
     "mobileBadge": "Mobile app booking (WM)",
+    "deskBadge": "Desk / club booking (M)",
+    "playersBadge": "Players in the slot (n/4)",
     "paidDot": "Paid",
     "pendingDot": "Payment pending",
     "alertDot": "Alert / needs review"

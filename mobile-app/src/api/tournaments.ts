@@ -44,7 +44,7 @@ export type PublicTournamentRow = {
   registration_mode: 'individual' | 'pair' | 'both';
   registration_closed_at?: string | null;
   cancellation_cutoff_at?: string | null;
-  invite_ttl_minutes?: number;
+  invite_ttl_minutes?: number | null;
   cancelled_at?: string | null;
   cancelled_reason?: string | null;
   closed_at?: string | null;

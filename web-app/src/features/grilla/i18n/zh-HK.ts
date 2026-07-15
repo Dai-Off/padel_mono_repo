@@ -51,6 +51,8 @@ export const zhHK: TranslationKeys = {
     legend: {
         iconsTitle: '時段圖示',
         mobileBadge: '手機 App 預訂 (WM)',
+        deskBadge: '櫃檯 / 會所預訂 (M)',
+        playersBadge: '時段內球員數 (n/4)',
         paidDot: '已付款',
         pendingDot: '待收款',
         alertDot: '提醒 / 待核對',

@@ -767,6 +767,9 @@ export type CashTimelineEntry = {
   title: string;
   subtitle?: string;
   employeeName?: string;
+  clientName?: string | null;
+  paymentMethod?: string | null;
+  ref?: string | null;
   amountEur?: number;
   tone: 'green' | 'blue' | 'red' | 'emerald' | 'neutral';
   details?: string[];
@@ -779,67 +782,163 @@ export type CashTimelineEntry = {
   onEditSale?: (saleId: string) => void;
 };
 
-const toneRowClass: Record<CashTimelineEntry['tone'], string> = {
-  green: 'bg-emerald-50 border-emerald-100 text-emerald-950',
-  blue: 'bg-sky-50 border-sky-100 text-sky-950',
-  red: 'bg-red-50 border-red-100 text-red-950',
-  emerald: 'bg-teal-50 border-teal-100 text-teal-950',
-  neutral: 'bg-white border-gray-100 text-[#1A1A1A]',
+const toneBandClass: Record<CashTimelineEntry['tone'], string> = {
+  green: 'bg-emerald-100 text-emerald-950',
+  blue: 'bg-sky-100 text-sky-950',
+  red: 'bg-red-50 text-red-950',
+  emerald: 'bg-teal-50 text-teal-950',
+  neutral: 'bg-white text-[#1A1A1A]',
 };
+
+function shortRef(id: string | null | undefined, prefix = ''): string {
+  const raw = String(id ?? '').replace(/-/g, '');
+  const body = raw.slice(-7).toUpperCase();
+  return body ? `${prefix}${body}` : '—';
+}
+
+function formatLedgerDateTime(d: Date): string {
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleString('es-ES', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
 
 export function CashDayTimeline({ entries, emptyLabel }: { entries: CashTimelineEntry[]; emptyLabel: string }) {
   if (entries.length === 0) {
     return <p className="text-xs text-gray-400 py-6 text-center">{emptyLabel}</p>;
   }
   const sorted = [...entries].sort((a, b) => a.at.getTime() - b.at.getTime());
+
   return (
-    <div className="space-y-2">
-      {sorted.map((e) => (
-        <div key={e.id} className={`rounded-2xl border px-4 py-3 ${toneRowClass[e.tone]}`}>
-          <p className="text-xs font-bold">
-            {e.at.toLocaleString('es-ES')} — {e.employeeName ?? '—'} —{' '}
-            {e.booking_id && e.onOpenBooking ? (
-              <button type="button" onClick={() => e.onOpenBooking!(e.booking_id!)} className="text-[#0B5B7A] hover:underline">
-                {e.title}
-              </button>
-            ) : (
-              e.title
-            )}
-          </p>
-          {e.subtitle ? <p className="text-[10px] mt-1 opacity-80">{e.subtitle}</p> : null}
-          {e.amountEur != null && (
-            <p className="text-sm font-black mt-1">
-              {e.kind === 'withdrawal' ? '−' : e.kind === 'deposit' ? '+' : ''}
-              {e.amountEur.toFixed(2)} €
-            </p>
-          )}
-          {(e.onOpenBooking && e.booking_id) || e.onEditSale || e.onOpenCart ? (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {e.onOpenBooking && e.booking_id ? (
-                <button type="button" onClick={() => e.onOpenBooking!(e.booking_id!)} className="text-[10px] font-bold text-[#0B5B7A] hover:underline">
-                  Ver en grilla
-                </button>
-              ) : null}
-              {e.sale_id && e.onEditSale ? (
-                <button type="button" onClick={() => e.onEditSale!(e.sale_id!)} className="text-[10px] font-bold text-[#0B5B7A] hover:underline">
-                  Editar
-                </button>
-              ) : e.onOpenCart ? (
-                <button type="button" onClick={() => e.onOpenCart!(e.player_id ?? null, e.booking_id ?? null, e.sale_id ?? null)} className="text-[10px] font-bold text-[#E31E24] hover:underline">
-                  Carrito
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          {e.details && e.details.length > 0 && (
-            <ul className="mt-2 space-y-0.5 text-[10px] opacity-90">
-              {e.details.map((line) => (
-                <li key={line} className={line.startsWith('✕') || line.startsWith('×') ? 'text-red-700 font-semibold' : ''}>{line}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ))}
+    <div className="overflow-x-auto rounded-xl border border-gray-200">
+      <table className="w-full min-w-[960px] text-xs border-collapse">
+        <thead>
+          <tr className="bg-[#f3f4f6] text-left text-[11px] font-bold text-gray-600 border-b border-gray-200">
+            <th className="px-3 py-2.5 whitespace-nowrap">Ref.</th>
+            <th className="px-3 py-2.5 whitespace-nowrap">Fecha</th>
+            <th className="px-3 py-2.5">Concepto</th>
+            <th className="px-3 py-2.5 whitespace-nowrap">Usuario</th>
+            <th className="px-3 py-2.5 whitespace-nowrap">Cliente</th>
+            <th className="px-3 py-2.5 whitespace-nowrap">Forma de pago</th>
+            <th className="px-3 py-2.5 text-right whitespace-nowrap">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((e) => {
+            const isBand = e.kind === 'opening' || e.kind === 'arqueo' || e.kind === 'cierre';
+            const amountPrefix = e.kind === 'withdrawal' ? '−' : e.kind === 'deposit' ? '+' : '';
+            const amountLabel =
+              e.amountEur != null ? `${amountPrefix}${e.amountEur.toFixed(2).replace('.', ',')} €` : '—';
+
+            if (isBand) {
+              const bandExtra =
+                e.kind === 'opening' && e.amountEur != null
+                  ? ` · Cambio: ${e.amountEur.toFixed(2).replace('.', ',')} €`
+                  : e.details && e.details.length > 0
+                    ? ` · ${e.details.join(' · ')}`
+                    : e.subtitle
+                      ? ` · ${e.subtitle}`
+                      : '';
+              return (
+                <tr key={e.id} className={`${toneBandClass[e.tone]} border-y border-black/5`}>
+                  <td colSpan={7} className="px-3 py-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[12px] font-semibold">
+                        <span className="font-mono text-[11px] opacity-70 mr-2">{e.ref ?? shortRef(e.id)}</span>
+                        {formatLedgerDateTime(e.at)} — {e.employeeName ?? '—'} — {e.title}
+                        {bandExtra}
+                      </p>
+                      {e.booking_id && e.onOpenBooking ? (
+                        <button
+                          type="button"
+                          onClick={() => e.onOpenBooking!(e.booking_id!)}
+                          className="text-[11px] font-bold text-[#0B5B7A] hover:underline"
+                        >
+                          Ver detalle
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              );
+            }
+
+            return (
+              <tr key={e.id} className={`border-b border-gray-100 ${toneBandClass[e.tone]}`}>
+                <td className="px-3 py-2.5 align-top whitespace-nowrap">
+                  {e.booking_id && e.onOpenBooking ? (
+                    <button
+                      type="button"
+                      onClick={() => e.onOpenBooking!(e.booking_id!)}
+                      className="font-mono text-[#0B5B7A] font-semibold hover:underline"
+                    >
+                      {e.ref ?? shortRef(e.booking_id)}
+                    </button>
+                  ) : e.sale_id && e.onEditSale ? (
+                    <button
+                      type="button"
+                      onClick={() => e.onEditSale!(e.sale_id!)}
+                      className="font-mono text-[#0B5B7A] font-semibold hover:underline"
+                    >
+                      {e.ref ?? shortRef(e.sale_id)}
+                    </button>
+                  ) : (
+                    <span className="font-mono text-gray-700">{e.ref ?? shortRef(e.id)}</span>
+                  )}
+                </td>
+                <td className="px-3 py-2.5 align-top whitespace-nowrap text-gray-700">
+                  {formatLedgerDateTime(e.at)}
+                </td>
+                <td className="px-3 py-2.5 align-top">
+                  <p className="font-medium text-[#1A1A1A]">{e.title}</p>
+                  {e.subtitle ? <p className="text-[10px] text-gray-500 mt-0.5">{e.subtitle}</p> : null}
+                  {(e.onOpenBooking && e.booking_id) || e.onEditSale || e.onOpenCart ? (
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {e.onOpenBooking && e.booking_id ? (
+                        <button
+                          type="button"
+                          onClick={() => e.onOpenBooking!(e.booking_id!)}
+                          className="text-[10px] font-bold text-[#0B5B7A] hover:underline"
+                        >
+                          Ver en grilla
+                        </button>
+                      ) : null}
+                      {e.sale_id && e.onEditSale ? (
+                        <button
+                          type="button"
+                          onClick={() => e.onEditSale!(e.sale_id!)}
+                          className="text-[10px] font-bold text-[#0B5B7A] hover:underline"
+                        >
+                          Editar
+                        </button>
+                      ) : e.onOpenCart ? (
+                        <button
+                          type="button"
+                          onClick={() => e.onOpenCart!(e.player_id ?? null, e.booking_id ?? null, e.sale_id ?? null)}
+                          className="text-[10px] font-bold text-[#E31E24] hover:underline"
+                        >
+                          Carrito
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </td>
+                <td className="px-3 py-2.5 align-top whitespace-nowrap text-gray-700">{e.employeeName ?? '—'}</td>
+                <td className="px-3 py-2.5 align-top whitespace-nowrap text-gray-700">{e.clientName?.trim() || '—'}</td>
+                <td className="px-3 py-2.5 align-top whitespace-nowrap text-gray-700">{e.paymentMethod ?? '—'}</td>
+                <td className="px-3 py-2.5 align-top text-right whitespace-nowrap font-bold text-[#1A1A1A]">
+                  {amountLabel}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
