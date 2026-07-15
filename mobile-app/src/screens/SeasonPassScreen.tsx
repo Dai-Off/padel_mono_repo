@@ -1552,10 +1552,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                       reward={reward}
                       size={52}
                       dimmed={false}
-                      onPress={() => {
-                        setClaimAllRewards(null);
-                        setRewardDetail({ level: r.level, reward });
-                      }}
+                      onPress={() => setRewardDetail({ level: r.level, reward })}
                     />
                   </View>
                 );
@@ -1980,7 +1977,7 @@ const styles = StyleSheet.create({
   },
   claimSummaryMsg: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 14 },
   claimSummaryList: { alignSelf: 'stretch', maxHeight: 260, marginBottom: 16 },
-  claimSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12, paddingVertical: 4 },
+  claimSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 14, paddingVertical: 8, paddingHorizontal: 8 },
   claimSummaryItem: { width: 52, height: 52 },
   claimSummaryCta: {
     alignSelf: 'stretch',
