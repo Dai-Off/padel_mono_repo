@@ -13,6 +13,7 @@ import {
   Loader2,
   MessageCircle,
   MoreVertical,
+  Pencil,
   Plus,
   Search,
   Shield,
@@ -34,12 +35,15 @@ import {
   type CompetitionView,
   type TournamentChatMessage,
   type TournamentInscription,
+  type TournamentInscriptionPayment,
+  type TournamentInscriptionPlayer,
   type TournamentListItem,
   type TournamentPrize,
   type TournamentDivisionRow,
   type TournamentEntryRequest,
 } from '../../services/tournaments';
 import { HttpError } from '../../services/api';
+import { authService } from '../../services/auth';
 import { courtService } from '../../services/court';
 import type { Court } from '../../types/court';
 import { clubClientService } from '../../services/clubClients';
@@ -166,6 +170,24 @@ for (let h = 0; h < 24; h++) {
   HALF_HOUR_TIMES.push(`${String(h).padStart(2, '0')}:30`);
 }
 
+type TtlUnit = 'minutes' | 'hours' | 'days';
+const TTL_UNIT_MINUTES: Record<TtlUnit, number> = { minutes: 1, hours: 60, days: 1440 };
+
+function ttlFieldsFromMinutes(minutes: number | null | undefined): { enabled: boolean; value: string; unit: TtlUnit } {
+  const m = Number(minutes);
+  if (!Number.isFinite(m) || m <= 0) return { enabled: false, value: '24', unit: 'hours' };
+  if (m % 1440 === 0) return { enabled: true, value: String(m / 1440), unit: 'days' };
+  if (m % 60 === 0) return { enabled: true, value: String(m / 60), unit: 'hours' };
+  return { enabled: true, value: String(m), unit: 'minutes' };
+}
+
+function ttlMinutesFromFields(enabled: boolean, value: string, unit: TtlUnit): number | null {
+  if (!enabled) return null;
+  const v = Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(v) || v <= 0) return 1440;
+  return Math.max(1, Math.round(v * TTL_UNIT_MINUTES[unit]));
+}
+
 function calcDurationMin(startTime: string, endTime: string): number {
   const [sh, sm] = startTime.split(':').map(Number);
   const [eh, em] = endTime.split(':').map(Number);
@@ -197,6 +219,26 @@ function calcDurationFromDateRange(
   const start = new Date(`${startDate}T${startTime}`);
   const end = new Date(`${endDate}T${endTime}`);
   return Math.round((end.getTime() - start.getTime()) / 60000);
+}
+
+function playerGenderLabel(g: string | null | undefined): string {
+  if (g === 'male') return 'Masculino';
+  if (g === 'female') return 'Femenino';
+  if (g === 'other') return 'Otro';
+  return '—';
+}
+
+function paymentMethodLabel(method: TournamentInscriptionPayment['method']): string {
+  if (method === 'cash') return 'efectivo';
+  if (method === 'card') return 'tarjeta';
+  if (method === 'app') return 'app';
+  return 'otro';
+}
+
+function formatInscriptionDate(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function tournamentGenderLabel(g: string | null | undefined): string {
@@ -675,16 +717,24 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [courts, setCourts] = useState<Court[]>([]);
   const [selectedCourtIds, setSelectedCourtIds] = useState<string[]>([]);
   const [addParticipantOpen, setAddParticipantOpen] = useState(false);
+  const [addParticipantMode, setAddParticipantMode] = useState<'individual' | 'pair'>('individual');
   const [playerSearch, setPlayerSearch] = useState('');
   const [searchingPlayers, setSearchingPlayers] = useState(false);
   const [searchResults, setSearchResults] = useState<Player[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+  const [selectedPlayer2, setSelectedPlayer2] = useState<Player | null>(null);
+  const [addingParticipant, setAddingParticipant] = useState(false);
   const [guestEmail, setGuestEmail] = useState('');
   const [lastInviteLink, setLastInviteLink] = useState('');
+  const [detailPayments, setDetailPayments] = useState<Record<string, TournamentInscriptionPayment>>({});
+  const [chargeTarget, setChargeTarget] = useState<{ inscriptionId: string; player: TournamentInscriptionPlayer } | null>(null);
+  const [chargeAmount, setChargeAmount] = useState('');
+  const [charging, setCharging] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const [sendingChat, setSendingChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<TournamentChatMessage[]>([]);
   const [chatDraft, setChatDraft] = useState('');
+  const [chatAuthUserId, setChatAuthUserId] = useState<string | null>(null);
   const [rowMenuOpenId, setRowMenuOpenId] = useState<string | null>(null);
   const [chatUnread, setChatUnread] = useState<Record<string, boolean>>({});
   const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set());
@@ -759,7 +809,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     visibility: 'private',
     registration_mode: 'individual',
     gender: '',
-    invite_ttl_minutes: '1440',
+    invite_ttl_enabled: true,
+    invite_ttl_value: '24',
+    invite_ttl_unit: 'hours' as TtlUnit,
     elo_min: '',
     elo_max: '',
     description: '',
@@ -784,6 +836,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     normas: '',
     poster_url: '',
     results_entry: 'organizer' as 'organizer' | 'players',
+    invite_ttl_enabled: true,
+    invite_ttl_value: '24',
+    invite_ttl_unit: 'hours' as TtlUnit,
   });
   const routeId = location.pathname.startsWith('/torneos/') ? location.pathname.split('/')[2] : null;
   const isDetailRoute = Boolean(routeId);
@@ -839,7 +894,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       registration_mode: 'individual',
       visibility: 'private',
       gender: '',
-      invite_ttl_minutes: '1440',
+      invite_ttl_enabled: true,
+      invite_ttl_value: '24',
+      invite_ttl_unit: 'hours',
       elo_min: '',
       elo_max: '',
       description: '',
@@ -894,7 +951,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         String(t.gender ?? '') === 'male' || String(t.gender ?? '') === 'female' || String(t.gender ?? '') === 'mixed'
           ? String(t.gender)
           : '',
-      invite_ttl_minutes: String(Math.max(30, Number(t.invite_ttl_minutes ?? 1440))),
+      ...(() => {
+        const ttl = ttlFieldsFromMinutes(t.invite_ttl_minutes);
+        return { invite_ttl_enabled: ttl.enabled, invite_ttl_value: ttl.value, invite_ttl_unit: ttl.unit };
+      })(),
       elo_min: t.elo_min != null ? String(t.elo_min) : '',
       elo_max: t.elo_max != null ? String(t.elo_max) : '',
       description: String(t.description ?? ''),
@@ -947,6 +1007,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     const res = await tournamentsService.detail(id);
     if (gen !== detailFetchGenRef.current) return;
     setDetail(res.inscriptions ?? []);
+    setDetailPayments(res.payments ?? {});
     setDivisionsDetail(res.divisions ?? []);
     setSelected((prev) => {
       if (prev?.id !== id) return prev;
@@ -1119,6 +1180,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       normas: String(selected.normas ?? ''),
       poster_url: String(selected.poster_url ?? ''),
       results_entry: selected.match_rules?.results_entry === 'players' ? 'players' : 'organizer',
+      ...(() => {
+        const ttl = ttlFieldsFromMinutes(selected.invite_ttl_minutes);
+        return { invite_ttl_enabled: ttl.enabled, invite_ttl_value: ttl.value, invite_ttl_unit: ttl.unit };
+      })(),
     });
   }, [selected?.id, selected?.updated_at, selectedCourtIdsKey]);
 
@@ -1163,9 +1228,13 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     setChatLoading(true);
     void (async () => {
       try {
-        const list = await tournamentsService.listChat(chatTournamentId);
+        const [list, me] = await Promise.all([
+          tournamentsService.listChat(chatTournamentId),
+          authService.getMe().catch(() => null),
+        ]);
         if (cancelled) return;
         setChatMessages(list);
+        setChatAuthUserId(me?.user?.id ?? null);
       } catch {
         if (!cancelled) setChatMessages([]);
       } finally {
@@ -1838,6 +1907,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       <div className="absolute right-0 top-full mt-1 z-40 w-48 bg-white rounded-xl border border-gray-200 shadow-lg py-1 text-xs">
                         <button
                           type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 font-medium"
+                          onClick={() => {
+                            setRowMenuOpenId(null);
+                            setSelected(row);
+                            navigate(`/torneos/${row.id}`);
+                          }}
+                        >
+                          <Pencil className="w-3.5 h-3.5" /> Ver detalles
+                        </button>
+                        <button
+                          type="button"
                           className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
                           onClick={async () => {
                             setRowMenuOpenId(null);
@@ -2140,7 +2220,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => setAddParticipantOpen(true)}
+                    onClick={() => {
+                      setAddParticipantMode(selected?.registration_mode === 'pair' ? 'pair' : 'individual');
+                      setAddParticipantOpen(true);
+                    }}
                     className="px-3 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-semibold"
                   >
                     {tx.addParticipant}
@@ -2153,137 +2236,212 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     {t('tournament_pairing_manage')}
                   </button>
                 </div>
-                {playersOrdered.map((ins) => {
-                  const over24h = ins.status === 'pending' && (Date.now() - new Date(ins.invited_at).getTime() > 24 * 60 * 60 * 1000);
-                  const isConfirmed = ins.status === 'confirmed';
-                  return (
-                    <div key={ins.id} className="rounded-xl border border-gray-100 p-3">
-                      <div className="flex justify-between items-start gap-2 text-xs">
-                        <div className="flex items-start gap-2 min-w-0">
-                          {ins.players_1 ? (
-                            <PlayerAvatarThumb
-                              avatarUrl={ins.players_1.avatar_url}
-                              firstName={ins.players_1.first_name}
-                              lastName={ins.players_1.last_name}
-                            />
-                          ) : (
-                            <div className="h-8 w-8 shrink-0 rounded-full bg-gray-100 border border-gray-100" aria-hidden />
-                          )}
-                          <div className="pt-1 min-w-0">
-                            <span className="font-semibold text-[#1A1A1A]">
-                              {ins.players_1 ? `${ins.players_1.first_name} ${ins.players_1.last_name}` : ins.invite_email_1 || 'Invitado'}
-                            </span>
-                            {ins.players_1 ? (
-                              <p className="text-[10px] text-gray-500 mt-0.5">
-                                {t('tournament_player_elo', { n: formatPlayerElo(ins.players_1.elo_rating) })}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                              isConfirmed
-                                ? 'border-green-200 bg-green-50 text-green-700'
-                                : 'border-amber-200 bg-amber-50 text-amber-700'
-                            }`}
-                          >
-                            {isConfirmed ? 'confirmado' : 'pendiente'}
-                          </span>
-                          {selected.level_mode === 'multi_division' && divisionsDetail.length > 0 ? (
-                            <select
-                              value={ins.division_id ?? ''}
-                              onChange={async (e) => {
-                                if (!selected) return;
-                                const v = e.target.value;
-                                const nextId = v === '' ? null : v;
-                                try {
-                                  await tournamentsService.setInscriptionDivision(selected.id, ins.id, nextId);
-                                  setDetail((prev) =>
-                                    prev.map((row) => (row.id === ins.id ? { ...row, division_id: nextId } : row))
-                                  );
-                                  toast.success('Categoría actualizada');
-                                } catch (err) {
-                                  toast.error((err as Error).message || 'No se pudo actualizar');
-                                }
-                              }}
-                              className="text-[10px] rounded-lg border border-gray-200 px-1.5 py-1 max-w-[140px]"
-                            >
-                              <option value="">Sin categoría</option>
-                              {divisionsDetail.map((d) => (
-                                <option key={d.id} value={d.id}>
-                                  {d.label}
-                                </option>
-                              ))}
-                            </select>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (!selected) return;
-                              const ok = window.confirm('¿Quitar este participante del torneo? Esta acción libera su cupo.');
-                              if (!ok) return;
-                              const removedId = ins.id;
-                              const removedStatus = ins.status;
-                              const prevDetail = detail;
-                              // Optimistic UI: se quita al instante sin esperar roundtrip.
-                              setDetail((prev) => prev.filter((x) => x.id !== removedId));
-                              setSelected((prev) => {
-                                if (!prev) return prev;
-                                const next = { ...prev };
-                                if (removedStatus === 'confirmed') {
-                                  next.confirmed_count = Math.max(0, Number(next.confirmed_count ?? 0) - 1);
-                                } else if (removedStatus === 'pending') {
-                                  next.pending_count = Math.max(0, Number(next.pending_count ?? 0) - 1);
-                                }
-                                return next;
-                              });
-                              try {
-                                await tournamentsService.removeInscription(selected.id, removedId);
-                                toast.success('Participante removido');
-                                // Refetch para asegurar consistencia con backend.
-                                await refreshDetail(selected.id);
-                                await refreshList(selected.id);
-                              } catch (e) {
-                                // Revertir si falla.
-                                setDetail(prevDetail);
-                                toast.error((e as Error).message || 'No se pudo remover el participante');
-                              }
-                            }}
-                            className="px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 text-[11px] font-semibold hover:bg-red-100"
-                          >
-                            Quitar
-                          </button>
-                        </div>
-                      </div>
-                      {ins.invite_email_2 && (
-                        <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-500">
-                          {ins.players_2 ? (
-                            <PlayerAvatarThumb
-                              sizeClass="h-6 w-6"
-                              avatarUrl={ins.players_2.avatar_url}
-                              firstName={ins.players_2.first_name}
-                              lastName={ins.players_2.last_name}
-                            />
-                          ) : null}
-                          <div className="min-w-0">
-                            <p className="font-medium text-gray-700">
-                              {ins.players_2 ? `${ins.players_2.first_name} ${ins.players_2.last_name}` : ins.invite_email_2}
-                            </p>
-                            {ins.players_2 ? (
-                              <p className="text-[10px] text-gray-500">
-                                {t('tournament_player_elo', { n: formatPlayerElo(ins.players_2.elo_rating) })}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                      )}
-                      {ins.status === 'pending' && (
-                        <p className={`text-[11px] mt-1 ${over24h ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>{timeAgoLabel(ins.invited_at)}</p>
-                      )}
-                    </div>
-                  );
-                })}
+                {playersOrdered.length === 0 ? (
+                  <p className="text-xs text-gray-500">Aún no hay inscripciones.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-gray-100">
+                    <table className="w-full min-w-[900px] text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 text-left text-[10px] uppercase tracking-wide text-gray-500">
+                          <th className="px-3 py-2 font-semibold">Equipo</th>
+                          <th className="px-3 py-2 font-semibold">Nombre</th>
+                          <th className="px-3 py-2 font-semibold">Género</th>
+                          <th className="px-3 py-2 font-semibold">Teléfono</th>
+                          <th className="px-3 py-2 font-semibold">Precio</th>
+                          <th className="px-3 py-2 font-semibold">Estado del pago</th>
+                          <th className="px-3 py-2 font-semibold">Inscripción</th>
+                          <th className="px-3 py-2 font-semibold">Fecha inscripción</th>
+                          <th className="px-3 py-2 font-semibold text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      {playersOrdered.map((ins, teamIdx) => {
+                        const over24h = ins.status === 'pending' && (Date.now() - new Date(ins.invited_at).getTime() > 24 * 60 * 60 * 1000);
+                        const isConfirmed = ins.status === 'confirmed';
+                        const priceCents = Math.max(0, Number(selected.price_cents ?? 0));
+                        const members: Array<{ key: string; player: TournamentInscriptionPlayer | null; email: string | null }> = [
+                          { key: `${ins.id}-1`, player: ins.players_1 ?? null, email: ins.invite_email_1 ?? null },
+                        ];
+                        if (ins.players_2 || ins.invite_email_2) {
+                          members.push({ key: `${ins.id}-2`, player: ins.players_2 ?? null, email: ins.invite_email_2 ?? null });
+                        }
+                        return (
+                          <tbody key={ins.id} className="border-t border-gray-100">
+                            {members.map((m, i) => {
+                              const pay = m.player ? detailPayments[m.player.id] : undefined;
+                              const paidCents = pay?.amount_cents ?? 0;
+                              const fullyPaid = paidCents > 0 && paidCents >= priceCents;
+                              const partiallyPaid = paidCents > 0 && paidCents < priceCents;
+                              const canCharge = Boolean(m.player) && priceCents > 0 && !fullyPaid && (isConfirmed || ins.status === 'pending');
+                              return (
+                                <tr key={m.key} className={i > 0 ? 'border-t border-gray-50' : ''}>
+                                  {i === 0 && (
+                                    <td rowSpan={members.length} className="px-3 py-2 align-middle">
+                                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-[11px] font-bold text-gray-700">
+                                        {teamIdx + 1}
+                                      </span>
+                                    </td>
+                                  )}
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      {m.player ? (
+                                        <PlayerAvatarThumb
+                                          sizeClass="h-7 w-7"
+                                          avatarUrl={m.player.avatar_url}
+                                          firstName={m.player.first_name}
+                                          lastName={m.player.last_name}
+                                        />
+                                      ) : (
+                                        <div className="h-7 w-7 shrink-0 rounded-full bg-gray-100 border border-gray-100" aria-hidden />
+                                      )}
+                                      <div className="min-w-0">
+                                        <p className="font-semibold text-[#1A1A1A] truncate">
+                                          {m.player ? `${m.player.first_name} ${m.player.last_name}` : m.email || 'Invitado'}
+                                        </p>
+                                        {m.player ? (
+                                          <p className="text-[10px] text-gray-500">
+                                            {t('tournament_player_elo', { n: formatPlayerElo(m.player.elo_rating) })}
+                                          </p>
+                                        ) : (
+                                          <p className="text-[10px] text-gray-400">Invitación por email</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2 text-gray-600">{m.player ? playerGenderLabel(m.player.gender) : '—'}</td>
+                                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{m.player?.phone?.trim() || '—'}</td>
+                                  <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{formatTournamentPrice(priceCents)}</td>
+                                  <td className="px-3 py-2">
+                                    {priceCents === 0 ? (
+                                      <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-bold uppercase text-gray-500">
+                                        Gratis
+                                      </span>
+                                    ) : fullyPaid ? (
+                                      <span className="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-bold uppercase text-green-700">
+                                        Pagado · {paymentMethodLabel(pay!.method)}
+                                      </span>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">
+                                          {partiallyPaid ? `Parcial ${formatTournamentPrice(paidCents)}` : 'Pendiente'}
+                                        </span>
+                                        {canCharge && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (!m.player) return;
+                                              setChargeTarget({ inscriptionId: ins.id, player: m.player });
+                                              setChargeAmount(centsToEurosInput(Math.max(0, priceCents - paidCents)));
+                                            }}
+                                            className="px-2 py-0.5 rounded-lg border border-gray-300 bg-white text-[10px] font-semibold text-gray-700 hover:bg-gray-50"
+                                          >
+                                            Cobrar en caja
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                  {i === 0 && (
+                                    <td rowSpan={members.length} className="px-3 py-2 align-middle">
+                                      <span
+                                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                          isConfirmed
+                                            ? 'border-green-200 bg-green-50 text-green-700'
+                                            : 'border-amber-200 bg-amber-50 text-amber-700'
+                                        }`}
+                                      >
+                                        {isConfirmed ? 'confirmada' : 'pendiente'}
+                                      </span>
+                                      {ins.status === 'pending' && (
+                                        <p className={`text-[10px] mt-1 ${over24h ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                                          {timeAgoLabel(ins.invited_at)}
+                                        </p>
+                                      )}
+                                    </td>
+                                  )}
+                                  {i === 0 && (
+                                    <td rowSpan={members.length} className="px-3 py-2 align-middle text-gray-600 whitespace-nowrap">
+                                      {formatInscriptionDate(ins.invited_at)}
+                                    </td>
+                                  )}
+                                  {i === 0 && (
+                                    <td rowSpan={members.length} className="px-3 py-2 align-middle">
+                                      <div className="flex items-center justify-end gap-2">
+                                        {selected.level_mode === 'multi_division' && divisionsDetail.length > 0 ? (
+                                          <select
+                                            value={ins.division_id ?? ''}
+                                            onChange={async (e) => {
+                                              if (!selected) return;
+                                              const v = e.target.value;
+                                              const nextId = v === '' ? null : v;
+                                              try {
+                                                await tournamentsService.setInscriptionDivision(selected.id, ins.id, nextId);
+                                                setDetail((prev) =>
+                                                  prev.map((row) => (row.id === ins.id ? { ...row, division_id: nextId } : row))
+                                                );
+                                                toast.success('Categoría actualizada');
+                                              } catch (err) {
+                                                toast.error((err as Error).message || 'No se pudo actualizar');
+                                              }
+                                            }}
+                                            className="text-[10px] rounded-lg border border-gray-200 px-1.5 py-1 max-w-[140px]"
+                                          >
+                                            <option value="">Sin categoría</option>
+                                            {divisionsDetail.map((d) => (
+                                              <option key={d.id} value={d.id}>
+                                                {d.label}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            if (!selected) return;
+                                            const ok = window.confirm('¿Quitar este participante del torneo? Esta acción libera su cupo.');
+                                            if (!ok) return;
+                                            const removedId = ins.id;
+                                            const removedStatus = ins.status;
+                                            const prevDetail = detail;
+                                            // Optimistic UI: se quita al instante sin esperar roundtrip.
+                                            setDetail((prev) => prev.filter((x) => x.id !== removedId));
+                                            setSelected((prev) => {
+                                              if (!prev) return prev;
+                                              const next = { ...prev };
+                                              if (removedStatus === 'confirmed') {
+                                                next.confirmed_count = Math.max(0, Number(next.confirmed_count ?? 0) - 1);
+                                              } else if (removedStatus === 'pending') {
+                                                next.pending_count = Math.max(0, Number(next.pending_count ?? 0) - 1);
+                                              }
+                                              return next;
+                                            });
+                                            try {
+                                              await tournamentsService.removeInscription(selected.id, removedId);
+                                              toast.success('Participante removido');
+                                              // Refetch para asegurar consistencia con backend.
+                                              await refreshDetail(selected.id);
+                                              await refreshList(selected.id);
+                                            } catch (e) {
+                                              // Revertir si falla.
+                                              setDetail(prevDetail);
+                                              toast.error((e as Error).message || 'No se pudo remover el participante');
+                                            }
+                                          }}
+                                          className="px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 text-[11px] font-semibold hover:bg-red-100"
+                                        >
+                                          Quitar
+                                        </button>
+                                      </div>
+                                    </td>
+                                  )}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        );
+                      })}
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2292,15 +2450,36 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 max-h-72 overflow-y-auto space-y-2">
                   {chatLoading && <p className="text-xs text-gray-500">Cargando chat...</p>}
                   {!chatLoading && chatMessages.length === 0 && <p className="text-xs text-gray-500">Aún no hay mensajes.</p>}
-                  {chatMessages.map((msg) => (
-                    <div key={msg.id} className="rounded-lg bg-white border border-gray-100 px-3 py-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-semibold text-[#1A1A1A]">{msg.author_name}</p>
-                        <p className="text-[10px] text-gray-400">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                  {chatMessages.map((msg) => {
+                    const isClubMessage = Boolean(chatAuthUserId && msg.author_user_id === chatAuthUserId);
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`w-fit max-w-[85%] rounded-lg px-3 py-2 ${
+                          isClubMessage
+                            ? 'ml-auto bg-[#E31E24] text-white'
+                            : 'bg-white border border-gray-100'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className={`text-xs font-semibold truncate ${isClubMessage ? 'text-white' : 'text-[#1A1A1A]'}`}>
+                              {msg.author_name}
+                            </p>
+                            {isClubMessage && (
+                              <span className="shrink-0 rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide bg-white/20">
+                                Club
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-[10px] shrink-0 ${isClubMessage ? 'text-white/70' : 'text-gray-400'}`}>
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                        <p className={`text-xs mt-1 ${isClubMessage ? 'text-white' : 'text-gray-700'}`}>{msg.message}</p>
                       </div>
-                      <p className="text-xs text-gray-700 mt-1">{msg.message}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <div className="flex gap-2">
                   <input
@@ -2844,6 +3023,43 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     />
                   </div>
                   <div className="md:col-span-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Tiempo de reserva de cupo</label>
+                      <label className="flex items-center gap-1.5 text-[10px] text-gray-600 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={settingsForm.invite_ttl_enabled}
+                          onChange={(e) => setSettingsForm((p) => ({ ...p, invite_ttl_enabled: e.target.checked }))}
+                          className="accent-[#E31E24]"
+                        />
+                        Activado
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={settingsForm.invite_ttl_value}
+                        onChange={(e) => setSettingsForm((p) => ({ ...p, invite_ttl_value: e.target.value }))}
+                        disabled={!settingsForm.invite_ttl_enabled}
+                        className="w-20 rounded-xl border border-gray-200 px-3 py-2 text-xs text-center font-semibold disabled:opacity-40"
+                      />
+                      <select
+                        value={settingsForm.invite_ttl_unit}
+                        onChange={(e) => setSettingsForm((p) => ({ ...p, invite_ttl_unit: e.target.value as TtlUnit }))}
+                        disabled={!settingsForm.invite_ttl_enabled}
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:opacity-40"
+                      >
+                        <option value="minutes">minutos</option>
+                        <option value="hours">horas</option>
+                        <option value="days">días</option>
+                      </select>
+                    </div>
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      {settingsForm.invite_ttl_enabled
+                        ? 'Si el invitado no acepta en este tiempo, el cupo se libera automáticamente. Solo aplica a nuevas invitaciones.'
+                        : 'Desactivado: los cupos reservados no expiran automáticamente.'}
+                    </p>
+                  </div>
+                  <div className="md:col-span-2">
                     <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Resultados de partidos</label>
                     <select
                       value={settingsForm.results_entry}
@@ -3050,6 +3266,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         poster_url: settingsForm.poster_url.trim() || null,
                         court_ids: settingsForm.court_ids,
                         results_entry: settingsForm.results_entry,
+                        invite_ttl_minutes: ttlMinutesFromFields(
+                          settingsForm.invite_ttl_enabled,
+                          settingsForm.invite_ttl_value,
+                          settingsForm.invite_ttl_unit,
+                        ),
                       });
                       setItems((prev) => prev.map((it) => (it.id === selected.id ? { ...it, ...updatedTournament } : it)));
                       setSelected((prev) => (prev?.id === selected.id ? { ...prev, ...updatedTournament } : prev));
@@ -3666,18 +3887,43 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Tiempo de reserva de cupo (min)</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Tiempo de reserva de cupo</label>
+                    <label className="flex items-center gap-1.5 text-[11px] text-gray-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={form.invite_ttl_enabled}
+                        onChange={(e) => setForm((p) => ({ ...p, invite_ttl_enabled: e.target.checked }))}
+                        className="accent-[#ED1C24]"
+                      />
+                      Activado
+                    </label>
+                  </div>
                   <div className="mt-1.5 flex items-center gap-2">
                     <Shield className="w-4 h-4 text-gray-400" />
                     <input
-                      value={form.invite_ttl_minutes}
-                      onChange={(e) => setForm((p) => ({ ...p, invite_ttl_minutes: e.target.value }))}
-                      placeholder="1440"
-                      className="w-24 text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5 text-center font-semibold"
+                      value={form.invite_ttl_value}
+                      onChange={(e) => setForm((p) => ({ ...p, invite_ttl_value: e.target.value }))}
+                      placeholder="24"
+                      disabled={!form.invite_ttl_enabled}
+                      className="w-20 text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5 text-center font-semibold disabled:opacity-40 disabled:border-gray-300"
                     />
-                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">min</span>
+                    <select
+                      value={form.invite_ttl_unit}
+                      onChange={(e) => setForm((p) => ({ ...p, invite_ttl_unit: e.target.value as TtlUnit }))}
+                      disabled={!form.invite_ttl_enabled}
+                      className="text-xs px-2 py-1.5 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white disabled:opacity-40 disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
+                    >
+                      <option value="minutes">min</option>
+                      <option value="hours">horas</option>
+                      <option value="days">días</option>
+                    </select>
                   </div>
-                  <p className="text-[11px] text-gray-500 mt-1">Si el invitado no acepta en este tiempo, el cupo se libera automáticamente.</p>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {form.invite_ttl_enabled
+                      ? 'Si el invitado no acepta en este tiempo, el cupo se libera automáticamente.'
+                      : 'Desactivado: los cupos reservados no expiran nunca automáticamente.'}
+                  </p>
                 </div>
                   </>
                 )}
@@ -3816,7 +4062,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       form.gender === 'male' || form.gender === 'female' || form.gender === 'mixed'
                         ? form.gender
                         : null,
-                    invite_ttl_minutes: Number(form.invite_ttl_minutes),
+                    invite_ttl_minutes: ttlMinutesFromFields(form.invite_ttl_enabled, form.invite_ttl_value, form.invite_ttl_unit),
                     prizes: formRowsToPrizePayload(createPrizeRows),
                     elo_min: form.elo_min ? Number(form.elo_min) : null,
                     elo_max: form.elo_max ? Number(form.elo_max) : null,
@@ -4175,56 +4421,16 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
       {addParticipantOpen && selected && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white border border-gray-100 shadow-xl p-4 space-y-3">
-            <p className="text-sm font-bold text-[#1A1A1A]">{tx.addParticipant}</p>
-            <p className="text-xs text-gray-500">{t('tournament_add_participant_hint')}</p>
-
-            <input
-              value={playerSearch}
-              onChange={(e) => {
-                setPlayerSearch(e.target.value);
-                setSelectedPlayer(null);
-              }}
-              placeholder={t('tournament_add_participant_search_placeholder')}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
-            />
-            <div className="max-h-44 overflow-y-auto rounded-xl border border-gray-100">
-              {searchingPlayers && <p className="text-xs text-gray-500 px-3 py-2">Buscando...</p>}
-              {!searchingPlayers && searchResults.length === 0 && (
-                <p className="text-xs text-gray-400 px-3 py-2">Sin resultados.</p>
-              )}
-              {searchResults.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedPlayer(p);
-                    setGuestEmail(p.email ?? '');
-                  }}
-                  className={`w-full text-left px-3 py-2 border-b border-gray-50 last:border-b-0 hover:bg-gray-50 ${selectedPlayer?.id === p.id ? 'bg-red-50' : ''}`}
-                >
-                  <p className="text-xs font-semibold text-[#1A1A1A]">{p.first_name} {p.last_name}</p>
-                  <p className="text-[11px] text-gray-500">
-                    {t('tournament_player_phone_elo_line', {
-                      phone: p.phone?.trim() || t('tournament_no_phone'),
-                      elo: formatPlayerElo(p.elo_rating),
-                    })}
-                  </p>
-                </button>
-              ))}
-            </div>
-
-            <div>
-              <label className="text-[11px] text-gray-500">Email invitación (guest o jugador)</label>
-              <input
-                value={guestEmail}
-                onChange={(e) => setGuestEmail(e.target.value)}
-                placeholder="invitado@correo.com"
-                className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
+          <div className="w-full max-w-md rounded-2xl bg-white border border-gray-100 shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-start justify-between gap-3 p-4 border-b border-gray-100 shrink-0">
+              <div>
+                <p className="text-sm font-bold text-[#1A1A1A]">{tx.addParticipant}</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {addParticipantMode === 'pair'
+                    ? 'Elegí primero al jugador 1 y después al jugador 2.'
+                    : t('tournament_add_participant_hint')}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -4232,63 +4438,428 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   setPlayerSearch('');
                   setSearchResults([]);
                   setSelectedPlayer(null);
+                  setSelectedPlayer2(null);
                   setGuestEmail('');
                   setLastInviteLink('');
                 }}
-                className="px-3 py-2 rounded-xl bg-gray-100 text-xs font-semibold"
+                className="w-8 h-8 rounded-lg border border-gray-100 flex items-center justify-center text-gray-400 hover:bg-gray-50 shrink-0"
               >
-                Cerrar
+                <X className="w-4 h-4" />
               </button>
+            </div>
+
+            <div className="p-4 space-y-3 overflow-y-auto flex-1">
+              {selected.registration_mode === 'both' && (
+                <div className="flex rounded-xl border border-gray-200 overflow-hidden">
+                  {(
+                    [
+                      ['individual', 'Individual'],
+                      ['pair', 'Pareja'],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setAddParticipantMode(mode);
+                        setSelectedPlayer(null);
+                        setSelectedPlayer2(null);
+                        setGuestEmail('');
+                        setPlayerSearch('');
+                        setSearchResults([]);
+                      }}
+                      className={`flex-1 px-3 py-2 text-xs font-semibold ${
+                        addParticipantMode === mode ? 'bg-[#E31E24] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {addParticipantMode === 'pair' && (
+                <div className="space-y-2">
+                  {(
+                    [
+                      { n: 1, label: 'Jugador 1', player: selectedPlayer, clear: () => setSelectedPlayer(null), active: !selectedPlayer },
+                      {
+                        n: 2,
+                        label: 'Jugador 2',
+                        player: selectedPlayer2,
+                        clear: () => setSelectedPlayer2(null),
+                        active: Boolean(selectedPlayer) && !selectedPlayer2,
+                      },
+                    ] as const
+                  ).map((slot) => (
+                    <div
+                      key={slot.n}
+                      className={`rounded-xl border px-3 py-2.5 transition-colors ${
+                        slot.active
+                          ? 'border-[#E31E24] bg-red-50/40 ring-1 ring-[#E31E24]/20'
+                          : slot.player
+                            ? 'border-emerald-200 bg-emerald-50/50'
+                            : 'border-gray-200 bg-gray-50/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black shrink-0 ${
+                            slot.player
+                              ? 'bg-emerald-600 text-white'
+                              : slot.active
+                                ? 'bg-[#E31E24] text-white'
+                                : 'bg-gray-200 text-gray-500'
+                          }`}
+                        >
+                          {slot.n}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{slot.label}</p>
+                          {slot.player ? (
+                            <p className="text-xs font-semibold text-[#1A1A1A] truncate">
+                              {slot.player.first_name} {slot.player.last_name}
+                            </p>
+                          ) : (
+                            <p className={`text-[11px] ${slot.active ? 'text-[#E31E24] font-semibold' : 'text-gray-400'}`}>
+                              {slot.active ? 'Buscá abajo y seleccioná' : 'Esperando al jugador 1…'}
+                            </p>
+                          )}
+                        </div>
+                        {slot.player && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              slot.clear();
+                              setPlayerSearch('');
+                              setSearchResults([]);
+                            }}
+                            className="text-[11px] font-semibold text-red-600 hover:underline shrink-0"
+                          >
+                            Cambiar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!(addParticipantMode === 'pair' && selectedPlayer && selectedPlayer2) && (
+                <div className="relative">
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-1">
+                    {addParticipantMode === 'pair'
+                      ? !selectedPlayer
+                        ? 'Buscar jugador 1'
+                        : 'Buscar jugador 2'
+                      : 'Buscar jugador'}
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                    <input
+                      value={playerSearch}
+                      onChange={(e) => {
+                        setPlayerSearch(e.target.value);
+                        if (addParticipantMode === 'individual') setSelectedPlayer(null);
+                      }}
+                      placeholder={t('tournament_add_participant_search_placeholder')}
+                      className="w-full rounded-xl border border-gray-200 pl-9 pr-3 py-2.5 text-xs focus:outline-none focus:border-[#1A1A1A]"
+                      autoFocus
+                    />
+                    {playerSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPlayerSearch('');
+                          setSearchResults([]);
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {playerSearch.trim().length > 0 && (
+                    <div className="mt-1.5 max-h-48 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+                      {searchingPlayers && (
+                        <p className="text-xs text-gray-500 px-3 py-2.5 flex items-center gap-2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...
+                        </p>
+                      )}
+                      {!searchingPlayers && searchResults.length === 0 && (
+                        <p className="text-xs text-gray-400 px-3 py-2.5">Sin resultados.</p>
+                      )}
+                      {!searchingPlayers &&
+                        searchResults
+                          .filter((p) => {
+                            if (addParticipantMode !== 'pair') return true;
+                            if (selectedPlayer?.id === p.id || selectedPlayer2?.id === p.id) return false;
+                            return true;
+                          })
+                          .map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                if (addParticipantMode === 'pair') {
+                                  if (!selectedPlayer) setSelectedPlayer(p);
+                                  else if (!selectedPlayer2) setSelectedPlayer2(p);
+                                } else {
+                                  setSelectedPlayer(p);
+                                  setGuestEmail(p.email ?? '');
+                                }
+                                setPlayerSearch('');
+                                setSearchResults([]);
+                              }}
+                              className="w-full text-left px-3 py-2.5 border-b border-gray-50 last:border-b-0 hover:bg-gray-50"
+                            >
+                              <p className="text-xs font-semibold text-[#1A1A1A]">
+                                {p.first_name} {p.last_name}
+                              </p>
+                              <p className="text-[11px] text-gray-500">
+                                {t('tournament_player_phone_elo_line', {
+                                  phone: p.phone?.trim() || t('tournament_no_phone'),
+                                  elo: formatPlayerElo(p.elo_rating),
+                                })}
+                              </p>
+                            </button>
+                          ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {addParticipantMode === 'individual' && selectedPlayer && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase text-emerald-700">Seleccionado</p>
+                    <p className="text-xs font-semibold text-[#1A1A1A] truncate">
+                      {selectedPlayer.first_name} {selectedPlayer.last_name}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPlayer(null);
+                      setGuestEmail('');
+                      setPlayerSearch('');
+                      setSearchResults([]);
+                    }}
+                    className="text-[11px] font-semibold text-red-600 shrink-0"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+              )}
+
+              {addParticipantMode === 'individual' && (
+                <div>
+                  <label className="text-[11px] text-gray-500">Email invitación (guest o jugador)</label>
+                  <input
+                    value={guestEmail}
+                    onChange={(e) => setGuestEmail(e.target.value)}
+                    placeholder="invitado@correo.com"
+                    className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                  />
+                </div>
+              )}
+
+              {lastInviteLink ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-2">
+                  <p className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wide">Link para compartir por WhatsApp</p>
+                  <div className="mt-1.5 flex gap-2">
+                    <input value={lastInviteLink} readOnly className="w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs text-emerald-900" />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(lastInviteLink);
+                        toast.success('Link copiado');
+                      }}
+                      className="rounded-lg border border-emerald-300 bg-white px-2.5 text-xs font-semibold text-emerald-700"
+                    >
+                      Copiar
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="p-4 border-t border-gray-100 flex flex-wrap justify-end gap-2 bg-gray-50/80 shrink-0">
               <button
                 type="button"
-                onClick={async () => {
-                  const email = guestEmail.trim().toLowerCase();
-                  if (!email) {
-                    toast.error('Indica un email para invitar (o elige un jugador que tenga email en su perfil)');
-                    return;
-                  }
-                  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                    toast.error('Email no válido');
-                    return;
-                  }
-                  const res = await tournamentsService.invite(selected.id, [{ email_1: email }]);
-                  const link = res.invite_urls?.[0] ?? '';
-                  if (link) {
-                    setLastInviteLink(link);
-                    toast.success('Invitación enviada. Copia el enlace cuando quieras compartirlo.');
-                  } else {
-                    toast.success('Invitación enviada');
-                  }
+                onClick={() => {
+                  setAddParticipantOpen(false);
                   setPlayerSearch('');
                   setSearchResults([]);
                   setSelectedPlayer(null);
+                  setSelectedPlayer2(null);
                   setGuestEmail('');
-                  await refreshDetail(selected.id);
-                  await refreshList(selected.id);
+                  setLastInviteLink('');
                 }}
-                className="px-3 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-semibold"
+                className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-xs font-semibold"
               >
-                Invitar
+                Cerrar
+              </button>
+              {addParticipantMode === 'individual' && selectedPlayer && (
+                <button
+                  type="button"
+                  disabled={addingParticipant}
+                  onClick={async () => {
+                    if (!selectedPlayer) return;
+                    setAddingParticipant(true);
+                    try {
+                      await tournamentsService.addParticipant(selected.id, selectedPlayer.id);
+                      toast.success('Jugador añadido y confirmado');
+                      setPlayerSearch('');
+                      setSearchResults([]);
+                      setSelectedPlayer(null);
+                      setGuestEmail('');
+                      await refreshDetail(selected.id);
+                      await refreshList(selected.id);
+                    } catch (e) {
+                      toast.error((e as Error)?.message || 'No se pudo añadir al jugador');
+                    } finally {
+                      setAddingParticipant(false);
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl border border-[#E31E24] text-[#E31E24] text-xs font-semibold disabled:opacity-60"
+                >
+                  {addingParticipant ? 'Añadiendo...' : 'Añadir confirmado'}
+                </button>
+              )}
+              {addParticipantMode === 'individual' && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const email = guestEmail.trim().toLowerCase();
+                    if (!email) {
+                      toast.error('Indica un email para invitar (o elige un jugador que tenga email en su perfil)');
+                      return;
+                    }
+                    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                      toast.error('Email no válido');
+                      return;
+                    }
+                    const res = await tournamentsService.invite(selected.id, [{ email_1: email }]);
+                    const link = res.invite_urls?.[0] ?? '';
+                    if (link) {
+                      setLastInviteLink(link);
+                      toast.success('Invitación enviada. Copia el enlace cuando quieras compartirlo.');
+                    } else {
+                      toast.success('Invitación enviada');
+                    }
+                    setPlayerSearch('');
+                    setSearchResults([]);
+                    setSelectedPlayer(null);
+                    setGuestEmail('');
+                    await refreshDetail(selected.id);
+                    await refreshList(selected.id);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-semibold"
+                >
+                  Invitar
+                </button>
+              )}
+              {addParticipantMode === 'pair' && (
+                <button
+                  type="button"
+                  disabled={!selectedPlayer || !selectedPlayer2 || addingParticipant}
+                  onClick={async () => {
+                    if (!selectedPlayer || !selectedPlayer2) return;
+                    setAddingParticipant(true);
+                    try {
+                      await tournamentsService.addParticipant(selected.id, selectedPlayer.id, selectedPlayer2.id);
+                      toast.success('Pareja añadida y confirmada');
+                      setPlayerSearch('');
+                      setSearchResults([]);
+                      setSelectedPlayer(null);
+                      setSelectedPlayer2(null);
+                      await refreshDetail(selected.id);
+                      await refreshList(selected.id);
+                    } catch (e) {
+                      toast.error((e as Error)?.message || 'No se pudo añadir la pareja');
+                    } finally {
+                      setAddingParticipant(false);
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-semibold disabled:opacity-60"
+                >
+                  {addingParticipant ? 'Añadiendo...' : 'Añadir pareja confirmada'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {chargeTarget && selected && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white border border-gray-100 shadow-xl p-4 space-y-3">
+            <p className="text-sm font-bold text-[#1A1A1A]">Cobrar en caja</p>
+            <p className="text-xs text-gray-500">
+              Inscripción de{' '}
+              <span className="font-semibold text-gray-700">
+                {chargeTarget.player.first_name} {chargeTarget.player.last_name}
+              </span>
+              . Elige el método con el que se cobró en el club.
+            </p>
+            <div>
+              <label className="text-[11px] text-gray-500">Importe (€)</label>
+              <input
+                value={chargeAmount}
+                onChange={(e) => setChargeAmount(e.target.value)}
+                placeholder="Ej. 11 o 11,50"
+                className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  ['cash', 'Efectivo'],
+                  ['card', 'Tarjeta'],
+                ] as const
+              ).map(([method, label]) => (
+                <button
+                  key={method}
+                  type="button"
+                  disabled={charging}
+                  onClick={async () => {
+                    if (!chargeTarget) return;
+                    setCharging(true);
+                    try {
+                      await tournamentsService.registerManualPayment(selected.id, chargeTarget.inscriptionId, {
+                        player_id: chargeTarget.player.id,
+                        method,
+                        amount_cents: eurosInputToCents(chargeAmount),
+                      });
+                      toast.success(`Pago registrado (${label.toLowerCase()})`);
+                      setChargeTarget(null);
+                      await refreshDetail(selected.id);
+                    } catch (e) {
+                      toast.error((e as Error)?.message || 'No se pudo registrar el pago');
+                    } finally {
+                      setCharging(false);
+                    }
+                  }}
+                  className={`px-3 py-2.5 rounded-xl text-xs font-bold text-white disabled:opacity-60 ${
+                    method === 'cash' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#1A1A1A] hover:opacity-90'
+                  }`}
+                >
+                  {charging ? 'Registrando...' : label}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                disabled={charging}
+                onClick={() => setChargeTarget(null)}
+                className="px-3 py-2 rounded-xl bg-gray-100 text-xs font-semibold"
+              >
+                Cancelar
               </button>
             </div>
-            {lastInviteLink ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-2">
-                <p className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wide">Link para compartir por WhatsApp</p>
-                <div className="mt-1.5 flex gap-2">
-                  <input value={lastInviteLink} readOnly className="w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs text-emerald-900" />
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(lastInviteLink);
-                      toast.success('Link copiado');
-                    }}
-                    className="rounded-lg border border-emerald-300 bg-white px-2.5 text-xs font-semibold text-emerald-700"
-                  >
-                    Copiar
-                  </button>
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
       )}

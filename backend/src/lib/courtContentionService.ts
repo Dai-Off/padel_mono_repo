@@ -438,6 +438,132 @@ function bookingShouldBeDisplacedByOccupyingReservation(booking: BookingContenti
   return false;
 }
 
+const INCOMPLETE_MATCH_TYPES = new Set(['open_match', 'pozo', 'standard']);
+
+/**
+ * Turno incompleto desplazable: partido/reserva con menos de 4 jugadores y sin pago completo.
+ * Misma regla que override-move en la grilla (prioridad club / bloqueo).
+ */
+export function isIncompleteDisplaceableBooking(booking: {
+  reservation_type?: string | null;
+  status?: string | null;
+  total_price_cents?: number | null;
+  booking_participants?: Array<{
+    payment_status?: string | null;
+    paid_amount_cents?: number | null;
+    wallet_amount_cents?: number | null;
+    share_amount_cents?: number | null;
+  }> | null;
+  payment_transactions?: Array<{
+    status?: string | null;
+    payer_player_id?: string | null;
+    amount_cents?: number | null;
+  }> | null;
+}): boolean {
+  if (booking.status === 'cancelled') return false;
+  const type = booking.reservation_type ?? 'standard';
+  if (!INCOMPLETE_MATCH_TYPES.has(type)) return false;
+
+  const pCount = booking.booking_participants?.length ?? 0;
+  if (pCount >= 4) return false;
+
+  const total = booking.total_price_cents ?? 0;
+  let paid = 0;
+  const txByPlayer = new Map<string, number>();
+  for (const t of booking.payment_transactions ?? []) {
+    if (t.status !== 'succeeded' || !t.payer_player_id) continue;
+    txByPlayer.set(
+      t.payer_player_id,
+      (txByPlayer.get(t.payer_player_id) ?? 0) + (t.amount_cents ?? 0),
+    );
+  }
+  const txTotal = Array.from(txByPlayer.values()).reduce((sum, n) => sum + n, 0);
+  if (txTotal > 0) {
+    paid = txTotal;
+  } else {
+    const bpTotal = (booking.booking_participants ?? []).reduce(
+      (sum, p) => sum + (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
+      0,
+    );
+    if (bpTotal > 0) {
+      paid = bpTotal;
+    } else {
+      paid = (booking.booking_participants ?? [])
+        .filter((p) => p.payment_status === 'paid')
+        .reduce((sum, p) => sum + (p.share_amount_cents ?? 0), 0);
+    }
+  }
+
+  const isPaid = total <= 0 ? paid > 0 || booking.status === 'confirmed' : paid >= total;
+  return !isPaid;
+}
+
+/**
+ * Cancela y reembolsa turnos incompletos que solapan el tramo (bloqueo / personalizado del club).
+ */
+export async function cancelAndRefundIncompleteOverlaps(
+  supabase: SupabaseClient,
+  courtId: string,
+  startAt: string,
+  endAt: string,
+  concept = 'Reembolso: el club reservó / bloqueó este horario',
+): Promise<string[]> {
+  const startMs = new Date(startAt).getTime();
+  const endMs = new Date(endAt).getTime();
+
+  const { data: rows, error } = await supabase
+    .from('bookings')
+    .select(
+      `
+      id,
+      start_at,
+      end_at,
+      status,
+      reservation_type,
+      total_price_cents,
+      booking_participants(
+        player_id,
+        payment_status,
+        paid_amount_cents,
+        wallet_amount_cents,
+        share_amount_cents
+      ),
+      payment_transactions(
+        payer_player_id,
+        amount_cents,
+        status
+      )
+    `,
+    )
+    .eq('court_id', courtId)
+    .neq('status', 'cancelled')
+    .is('deleted_at', null);
+  if (error) throw new Error(error.message);
+
+  const cancelled: string[] = [];
+  for (const b of rows ?? []) {
+    const s = new Date(b.start_at).getTime();
+    const e = new Date(b.end_at).getTime();
+    if (!(startMs < e && endMs > s)) continue;
+    if (!isIncompleteDisplaceableBooking(b)) continue;
+
+    await cancelContentionLoser(supabase, b.id);
+    await refundContentionLoserPayments(supabase, b.id, concept);
+    const nowIso = new Date().toISOString();
+    await supabase
+      .from('bookings')
+      .update({
+        deleted_at: nowIso,
+        cancelled_by: 'owner',
+        cancellation_reason: concept,
+        updated_at: nowIso,
+      })
+      .eq('id', b.id);
+    cancelled.push(b.id);
+  }
+  return cancelled;
+}
+
 /** Reserva confirmada/pagada que ocupa la pista: cancela turnos en competencia solapados y reembolsa. */
 export async function cancelDisplacedBookingsForOccupyingReservation(
   supabase: SupabaseClient,

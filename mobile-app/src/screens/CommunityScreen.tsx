@@ -29,6 +29,7 @@ import { ComingSoon } from '../components/community/ComingSoon';
 import { ClipsGrid } from '../components/community/ClipsGrid';
 import { ClipViewer } from '../components/community/ClipViewer';
 import { StoryEditor } from '../components/community/StoryEditor';
+import { CommunitySearch } from '../components/community/CommunitySearch';
 import { useTranslation } from '../i18n';
 
 interface CommunityScreenProps {
@@ -36,9 +37,11 @@ interface CommunityScreenProps {
   onMessagesPress?: () => void;
   /** Abre el perfil público de un autor (avatar/nombre en feed, comentarios, historias, clips). */
   onOpenPlayer?: (playerId: string) => void;
+  myPlayerId?: string;
+  onNavigateToTab?: (tab: any) => void;
 }
 
-export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMessagesPress, onOpenPlayer }) => {
+export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMessagesPress, onOpenPlayer, myPlayerId, onNavigateToTab }) => {
   const { t } = useTranslation();
   const { session } = useAuth();
   const token = session?.access_token;
@@ -62,6 +65,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
   const [selectedClip, setSelectedClip] = useState<CommunityPost | null>(null);
   const [isClipViewerVisible, setIsClipViewerVisible] = useState(false);
   const [isStoryEditorVisible, setIsStoryEditorVisible] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const loadData = useCallback(async (isRefreshing = false) => {
     if (isRefreshing) setRefreshing(true);
@@ -114,6 +118,15 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
     setIsCommentsVisible(false);
     setIsStoryViewerVisible(false);
     setIsClipViewerVisible(false);
+    setSearchOpen(false); // Asegurar cerrar buscador si estaba abierto
+
+    if (myPlayerId && playerId === myPlayerId) {
+      // Redirigir a mi propio perfil
+      onBack(); // Cierra comunidad
+      onNavigateToTab?.('perfil'); // Va a la pestaña de perfil propio
+      return;
+    }
+
     onOpenPlayer?.(playerId);
   };
 
@@ -155,10 +168,24 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
           <Ionicons name="chevron-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('community.title')}</Text>
-        <TouchableOpacity onPress={onMessagesPress} style={styles.backBtn}>
-          <Ionicons name="chatbubble-outline" size={22} color="#FFF" />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={() => setSearchOpen(true)} style={[styles.backBtn, { marginRight: 12 }]}>
+            <Ionicons name="search" size={22} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onMessagesPress} style={styles.backBtn}>
+            <Ionicons name="chatbubble-outline" size={22} color="#FFF" />
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {searchOpen ? (
+        <CommunitySearch
+          token={token}
+          onSelectPlayer={handleOpenPlayer}
+          onClose={() => setSearchOpen(false)}
+          myPlayerId={myPlayerId}
+        />
+      ) : null}
       
       {loading ? (
         <FeedSkeleton />
@@ -279,6 +306,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     fontFamily: 'Outfit_700Bold',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   backBtn: {
     padding: 4,

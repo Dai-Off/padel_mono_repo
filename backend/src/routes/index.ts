@@ -71,6 +71,7 @@ router.get("/", (_req, res) => {
 router.use("/auth", authRouter);
 router.use("/health", healthRouter);
 router.use("/players", playersRouter);
+router.use("/players", require("./playerFollows").default);
 router.use("/players", unlockablesRouter);
 router.use("/club-owners", clubOwnersRouter);
 router.use("/clubs", clubsRouter);

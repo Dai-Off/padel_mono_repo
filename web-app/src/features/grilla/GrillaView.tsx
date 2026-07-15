@@ -611,7 +611,9 @@ const useClubData = (dateOrStr: Date | string) => {
         addHiddenCourt,
         removeCourt,
         typeColorOverrides,
+        setTypeColorOverrides,
         typeConfigs,
+        setTypeConfigs,
     };
 };
 
@@ -842,7 +844,9 @@ function GrillaViewInner() {
     addHiddenCourt,
     removeCourt,
     typeColorOverrides,
+    setTypeColorOverrides,
     typeConfigs,
+    setTypeConfigs,
   } = useClubData(selectedDate);
 
   const gridBounds = useMemo(
@@ -945,7 +949,7 @@ function GrillaViewInner() {
   const [gridSelectMode, setGridSelectMode] = useState(false);
   const [checkedReservationIds, setCheckedReservationIds] = useState<Set<string>>(new Set());
   const [gridBulkVoidOpen, setGridBulkVoidOpen] = useState(false);
-  const [bulkMode, setBulkMode] = useState<'maintenance' | 'tournament'>('maintenance');
+  const [bulkMode, setBulkMode] = useState<'maintenance' | 'tournament' | 'custom'>('maintenance');
   const courtsGridRef = useRef<HTMLDivElement | null>(null);
   const gridShellRef = useRef<HTMLDivElement | null>(null);
 
@@ -2399,6 +2403,7 @@ function resolveManualBookingTotalCents(
     if (action === 'unblock_maintenance') { setBulkUnblockOpen(true); return; }
     if (action === 'maintenance') { setBulkMode('maintenance'); setBulkMaintenanceOpen(true); return; }
     if (action === 'tournament') { setBulkMode('tournament'); setBulkMaintenanceOpen(true); return; }
+    if (action === 'custom') { setBulkMode('custom'); setBulkMaintenanceOpen(true); return; }
     if (action === 'match') { openSingleCourtDraft('standard'); return; }
     if (action === 'class') { openSingleCourtDraft('school_individual'); return; }
   }, [openSingleCourtDraft]);
@@ -3300,15 +3305,25 @@ function resolveManualBookingTotalCents(
           <BulkSlotMaintenanceModal
             dateStr={selectedDateKey}
             slots={selectedSlots}
-            reservations={reservations}
+            reservations={serverListReservations.length > 0 ? serverListReservations : reservations}
             gridStartHour={gridBounds.startHour}
             mode={bulkMode}
+            typeConfigs={Object.keys(typeConfigs).length > 0 ? typeConfigs : undefined}
+            clubId={clubId}
+            onTypeConfigsChange={(configs) => {
+              setTypeConfigs(configs);
+              const colorMap: Record<string, string> = {};
+              for (const [type, entry] of Object.entries(configs)) {
+                if (entry.color) colorMap[type] = entry.color;
+              }
+              setTypeColorOverrides(colorMap);
+            }}
             onClose={() => {
               setBulkMaintenanceOpen(false);
               clearGridSelection();
             }}
             onDone={() => {
-              clearGridSelection();
+              // Solo refresca; el modal sigue abierto para ver omitidos hasta "Cerrar".
               refresh();
             }}
           />
@@ -3323,7 +3338,6 @@ function resolveManualBookingTotalCents(
               clearGridSelection();
             }}
             onDone={() => {
-              clearGridSelection();
               refresh();
             }}
           />

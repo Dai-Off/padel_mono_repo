@@ -61,6 +61,18 @@ function TurnIconLegend({ t }: { t: ReturnType<typeof useGrillaTranslation>['t']
                 <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">{t('legend.mobileBadge')}</span>
             </div>
             <div className="flex items-center gap-1 shrink-0">
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-700 shrink-0">
+                    <span className="text-[6px] font-black text-white leading-none">M</span>
+                </span>
+                <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">{t('legend.deskBadge')}</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+                <span className="inline-flex items-center justify-center h-3.5 min-w-[18px] px-1 rounded-full bg-white border border-gray-300 text-[8px] font-bold text-gray-800 leading-none shrink-0">
+                    2/4
+                </span>
+                <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">{t('legend.playersBadge')}</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
                 <span className="inline-block w-3 h-3 rounded-full bg-emerald-700 border border-emerald-900 shrink-0" />
                 <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">{t('legend.paidDot')}</span>
             </div>

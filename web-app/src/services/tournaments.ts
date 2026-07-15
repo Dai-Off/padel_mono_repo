@@ -39,7 +39,8 @@ export type TournamentListItem = {
   registration_mode: 'individual' | 'pair' | 'both';
   registration_closed_at: string | null;
   cancellation_cutoff_at: string | null;
-  invite_ttl_minutes: number;
+  /** Minutos hasta liberar cupos pendientes. null = sin expiración (desactivado). */
+  invite_ttl_minutes: number | null;
   status: 'open' | 'closed' | 'cancelled';
   visibility?: 'public' | 'private';
   /** Opcional. null/sin valor = sin filtro por género. male, female, mixed = categoría explícita. */
@@ -80,29 +81,31 @@ export type TournamentEntryRequest = {
   request_player?: TournamentEntryRequestPlayer | null;
 };
 
+export type TournamentInscriptionPlayer = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  phone?: string | null;
+  gender?: string | null;
+  avatar_url?: string | null;
+  elo_rating?: number | null;
+};
+
+export type TournamentInscriptionPayment = {
+  amount_cents: number;
+  method: 'cash' | 'card' | 'app' | 'other';
+};
+
 export type TournamentInscription = {
   id: string;
   status: 'pending' | 'confirmed' | 'expired' | 'cancelled' | 'rejected';
   invited_at: string;
-  expires_at: string;
+  expires_at: string | null;
   invite_email_1?: string | null;
   invite_email_2?: string | null;
-  players_1?: {
-    id: string;
-    first_name: string;
-    last_name: string;
-    email: string | null;
-    avatar_url?: string | null;
-    elo_rating?: number | null;
-  } | null;
-  players_2?: {
-    id: string;
-    first_name: string;
-    last_name: string;
-    email: string | null;
-    avatar_url?: string | null;
-    elo_rating?: number | null;
-  } | null;
+  players_1?: TournamentInscriptionPlayer | null;
+  players_2?: TournamentInscriptionPlayer | null;
   division_id?: string | null;
 };
 
@@ -113,6 +116,8 @@ type DetailResponse = {
   inscriptions: TournamentInscription[];
   divisions?: TournamentDivisionRow[];
   counts: { confirmed: number; pending: number };
+  /** Pagos del torneo agregados por jugador (Stripe app + caja manual). */
+  payments?: Record<string, TournamentInscriptionPayment>;
 };
 type RecurringCreateResponse = {
   ok: true;
@@ -254,10 +259,22 @@ export const tournamentsService = {
     });
   },
 
-  async addParticipant(tournamentId: string, playerId: string): Promise<void> {
+  async addParticipant(tournamentId: string, playerId: string, playerId2?: string): Promise<void> {
     await apiFetchWithAuth(`/tournaments/${tournamentId}/participants`, {
       method: 'POST',
-      body: JSON.stringify({ player_id: playerId }),
+      body: JSON.stringify({ player_id: playerId, ...(playerId2 ? { player_id_2: playerId2 } : {}) }),
+    });
+  },
+
+  /** Cobro en caja (efectivo/tarjeta) de la inscripción, por jugador. */
+  async registerManualPayment(
+    tournamentId: string,
+    inscriptionId: string,
+    payload: { player_id: string; method: 'cash' | 'card'; amount_cents?: number }
+  ): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/inscriptions/${inscriptionId}/manual-payment`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   },
 

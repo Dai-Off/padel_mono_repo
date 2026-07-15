@@ -144,4 +144,11 @@ export const profile: ProfileTranslationKeys = {
   coachLoadFail: 'No se pudo cargar el análisis del Coach IA.',
   partnersTitleOwn: 'Con quién juegas',
   clubsTitleOwn: 'Clubs donde sueles jugar',
+  unfollowBtn: 'Siguiendo',
+  unfollowConfirmTitle: 'Dejar de seguir',
+  unfollowConfirmBody: '¿Dejar de seguir a {name}?',
+  followersTitle: 'Seguidores',
+  followingTitle: 'Siguiendo',
+  followersEmpty: 'Aún no tiene seguidores',
+  followingEmpty: 'Aún no sigue a nadie',
 };

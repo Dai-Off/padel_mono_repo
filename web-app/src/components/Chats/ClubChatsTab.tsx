@@ -504,8 +504,15 @@ export function ClubChatsTab({ clubId, clubResolved }: Props) {
                 <p className="text-xs text-gray-500">Aún no hay mensajes.</p>
               ) : (
                 selectedChannel.messages.map((m) => (
-                  <div key={m.id} className={`max-w-[85%] rounded-xl px-3 py-2 text-xs ${m.role === 'me' ? 'ml-auto bg-[#1A1A1A] text-white' : 'bg-gray-100 text-[#1A1A1A]'}`}>
-                    <p className="mb-0.5 text-[10px] opacity-70">{m.author_name}</p>
+                  <div key={m.id} className={`w-fit max-w-[85%] rounded-xl px-3 py-2 text-xs ${m.role === 'me' ? 'ml-auto bg-[#E31E24] text-white' : 'bg-gray-100 text-[#1A1A1A]'}`}>
+                    <div className="mb-0.5 flex items-center gap-1.5">
+                      <p className="text-[10px] opacity-70 font-bold">{m.author_name}</p>
+                      {m.role === 'me' && (
+                        <span className="rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide bg-white/20">
+                          Club
+                        </span>
+                      )}
+                    </div>
                     <p>{m.text}</p>
                   </div>
                 ))

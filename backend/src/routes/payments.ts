@@ -1975,6 +1975,8 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
         bookings!inner (
           start_at,
           end_at,
+          status,
+          cancelled_by,
           courts!inner (
             id,
             name,
@@ -2103,6 +2105,8 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
         status: String(t.status ?? ''),
         created_at: String(t.created_at ?? ''),
         booking_id: bid,
+        booking_status: b?.status != null ? String(b.status) : null,
+        cancelled_by: b?.cancelled_by != null ? String(b.cancelled_by) : null,
         start_at: startAt,
         end_at: (b?.end_at as string | null) ?? null,
         court_name: courtName,
@@ -2649,6 +2653,8 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
         status,
         stripe_payment_intent_id,
         booking_id,
+        payer_player_id,
+        players ( first_name, last_name ),
         bookings (
           id,
           start_at,
@@ -2684,6 +2690,9 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       total_price_cents: number | null;
       cash_paid_cents: number;
       card_paid_cents: number;
+      client_name: string | null;
+      paid_at: string | null;
+      ref: string | null;
     };
 
     const byBooking = new Map<string, BookingExpected>();
@@ -2699,6 +2708,13 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       if (!Number.isFinite(createdMs)) return true;
       return createdMs > closingCutoffMs;
     });
+
+    const playerName = (raw: unknown): string | null => {
+      const p = (Array.isArray(raw) ? raw[0] : raw) as { first_name?: string | null; last_name?: string | null } | null;
+      if (!p) return null;
+      const n = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
+      return n || null;
+    };
 
     for (const r of filteredRows) {
       const rawBooking = (r as any).bookings;
@@ -2718,9 +2734,13 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       const sourceChannel = (b.source_channel as string | null) ?? null;
       const isCash =
         (typeof stripeRef === 'string' && stripeRef.startsWith('CASH_')) ||
-        sourceChannel === 'manual';
+        (typeof stripeRef === 'string' && stripeRef.startsWith('manual_cash')) ||
+        (sourceChannel === 'manual' &&
+          !(typeof stripeRef === 'string' && stripeRef.startsWith('manual_card')));
 
       const amount = typeof r.amount_cents === 'number' ? r.amount_cents : 0;
+      const paidAt = typeof r.created_at === 'string' ? r.created_at : null;
+      const clientFromPayer = playerName((r as any).players);
 
       const cur = byBooking.get(bookingId) ?? {
         booking_id: bookingId,
@@ -2730,10 +2750,15 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
         total_price_cents: typeof b.total_price_cents === 'number' ? b.total_price_cents : null,
         cash_paid_cents: 0,
         card_paid_cents: 0,
+        client_name: null,
+        paid_at: null,
+        ref: bookingId.replace(/-/g, '').slice(-7).toUpperCase(),
       };
 
       if (isCash) cur.cash_paid_cents += amount;
       else cur.card_paid_cents += amount;
+      if (!cur.client_name && clientFromPayer) cur.client_name = clientFromPayer;
+      if (paidAt && (!cur.paid_at || paidAt > cur.paid_at)) cur.paid_at = paidAt;
 
       byBooking.set(bookingId, cur);
     }

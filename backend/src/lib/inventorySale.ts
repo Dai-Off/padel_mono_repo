@@ -166,6 +166,10 @@ export type CashClosingStoreSaleLine = {
   movement_at: string | null;
   booking_id: string | null;
   player_id: string | null;
+  /** Nombre del cliente (si hay player_id). */
+  client_name?: string | null;
+  /** Referencia corta para el listado diario de caja. */
+  ref?: string | null;
 };
 
 export type StoreSalesCashClosingTotals = {
@@ -340,6 +344,30 @@ export async function buildStoreSalesForCashClosing(
 
   lines.sort((a, b) => (a.movement_at ?? '').localeCompare(b.movement_at ?? ''));
 
+  const playerIds = Array.from(
+    new Set(lines.map((l) => l.player_id).filter((id): id is string => Boolean(id))),
+  );
+  const nameByPlayer = new Map<string, string>();
+  if (playerIds.length > 0) {
+    const { data: players } = await supabase
+      .from('players')
+      .select('id, first_name, last_name')
+      .in('id', playerIds);
+    for (const p of players ?? []) {
+      const row = p as { id?: string; first_name?: string | null; last_name?: string | null };
+      const id = String(row.id ?? '');
+      if (!id) continue;
+      const name = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim();
+      if (name) nameByPlayer.set(id, name);
+    }
+  }
+
+  for (const line of lines) {
+    line.client_name = line.player_id ? nameByPlayer.get(line.player_id) ?? null : null;
+    const raw = (line.sale_id || line.movement_id).replace(/-/g, '');
+    line.ref = raw.slice(-7).toUpperCase() || null;
+  }
+
   return { cashCents, cardCents, lines };
 }
 
@@ -350,6 +378,8 @@ export type ClubPaymentLedgerEntry = {
   status: string;
   created_at: string;
   booking_id: string | null;
+  booking_status?: string | null;
+  cancelled_by?: string | null;
   start_at: string | null;
   end_at: string | null;
   court_name: string | null;

@@ -25,8 +25,7 @@ export function parseEloLevel(raw: unknown): number | null {
   if (raw === '' || raw == null) return null;
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
-  const snapped = Math.round(n / ELO_LEVEL_STEP) * ELO_LEVEL_STEP;
-  return Math.round(snapped * 10) / 10;
+  return Math.round(n * 100) / 100;
 }
 
 export type ParsedEloRange =
@@ -59,10 +58,10 @@ export function parseEloRange(eloMinRaw: unknown, eloMaxRaw: unknown): ParsedElo
 
 export function defaultFriendlyEloRange(organizerElo: number): { elo_min: number; elo_max: number } {
   const elo = Number.isFinite(organizerElo) ? organizerElo : 3.5;
-  const elo_min = Math.max(ELO_LEVEL_MIN, Math.round((elo - 1) / ELO_LEVEL_STEP) * ELO_LEVEL_STEP);
-  const elo_max = Math.min(ELO_LEVEL_MAX, Math.round((elo + 1) / ELO_LEVEL_STEP) * ELO_LEVEL_STEP);
+  const elo_min = Math.max(ELO_LEVEL_MIN, elo - 0.25);
+  const elo_max = Math.min(ELO_LEVEL_MAX, elo + 0.75);
   return {
-    elo_min: Math.round(elo_min * 10) / 10,
-    elo_max: Math.round(elo_max * 10) / 10,
+    elo_min: Math.round(elo_min * 100) / 100,
+    elo_max: Math.round(elo_max * 100) / 100,
   };
 }
