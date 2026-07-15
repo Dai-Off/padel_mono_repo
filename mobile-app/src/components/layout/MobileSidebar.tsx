@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
-import { Animated, BackHandler, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Animated, BackHandler, Easing, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
@@ -21,11 +21,14 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
 
   useEffect(() => {
     Animated.parallel([
-      Animated.spring(slideAnim, {
+      // timing (no spring): un spring tarda ~1s en reportar su fin (converge
+      // en subpixeles) y mientras la animacion nativa sigue viva los taps no
+      // llegan a los botones del panel. El timing termina exacto a los 220ms.
+      Animated.timing(slideAnim, {
         toValue: visible ? 0 : -width,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
-        damping: 25,
-        stiffness: 200,
       }),
       Animated.timing(backdropAnim, {
         toValue: visible ? 1 : 0,
