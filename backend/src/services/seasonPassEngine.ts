@@ -261,54 +261,79 @@ async function runEvaluation(
   const ctx = new SeasonPassEvalContext(supabase, playerId, tz);
   const graceFloorKey = addDaysToKey(periods.daily.period_start, -PAST_PERIOD_GRACE_DAYS);
 
-  for (const row of rows) {
-    if (row.rerolled_to) continue; // discarded via reroll — replacement has its own row
-    const def = defsById.get(row.mission_id);
-    if (!def) continue; // definition deactivated after assignment
-
-    // Crash recovery: completed but the SP grant never landed.
-    if (row.completed_at && row.sp_granted === null) {
-      try {
-        const grant = await grantSeasonPassSp(
-          playerId,
-          def.sp_reward,
-          { source: 'mission', missionId: def.id, tz },
-          season
-        );
-        await supabase
-          .from('player_season_pass_missions')
-          .update({ sp_granted: grant.granted_sp, updated_at: nowIso })
-          .eq('id', row.id);
-        row.sp_granted = grant.granted_sp;
-      } catch (e) {
-        console.warn('[season-pass] grant retry failed:', (e as Error).message);
-      }
-      continue;
+  // Fase A — Recuperación de grants: completadas cuyo SP nunca se otorgó (crash
+  // mid-grant). Escritura + posible level-up → en serie.
+  const pendingGrant = rows.filter(
+    (r) => !r.rerolled_to && r.completed_at && r.sp_granted === null && defsById.has(r.mission_id)
+  );
+  for (const row of pendingGrant) {
+    const def = defsById.get(row.mission_id)!;
+    try {
+      const grant = await grantSeasonPassSp(
+        playerId,
+        def.sp_reward,
+        { source: 'mission', missionId: def.id, tz },
+        season
+      );
+      await supabase
+        .from('player_season_pass_missions')
+        .update({ sp_granted: grant.granted_sp, updated_at: nowIso })
+        .eq('id', row.id);
+      row.sp_granted = grant.granted_sp;
+    } catch (e) {
+      console.warn('[season-pass] grant retry failed:', (e as Error).message);
     }
-    if (row.completed_at) continue;
+  }
 
+  // Fase B — Evaluación (SOLO LECTURA) de las incompletas evaluables, EN PARALELO.
+  // El ctx memoiza los datasets de forma síncrona (setea la promesa antes del
+  // await), así que datasets compartidos se consultan una vez y los distintos se
+  // lanzan concurrentemente: el tiempo pasa de suma a máximo.
+  type EvalOutcome = Awaited<ReturnType<typeof evaluateMissionCondition>>;
+  const toEval = rows.filter((row) => {
+    if (row.rerolled_to || row.completed_at) return false;
+    const def = defsById.get(row.mission_id);
+    if (!def) return false;
     const period = periodForRow(def.period, row.period_start, tz);
     const isCurrent = period.period_start === periods[def.period].period_start;
     const grantAtClose = def.condition_params?.grant_at_period_end === true;
-    // Past periods: only re-check recently-ended ones (late score confirmations)
-    // and "grant at period close" missions (evaluated on the first read after).
-    if (!isCurrent && !grantAtClose && period.period_end_exclusive < graceFloorKey) continue;
+    // Períodos pasados: solo re-evaluar los recién cerrados (marcadores tardíos)
+    // y las de "grant al cierre".
+    return isCurrent || grantAtClose || period.period_end_exclusive >= graceFloorKey;
+  });
+  const evaluated = await Promise.all(
+    toEval.map(async (row) => {
+      const def = defsById.get(row.mission_id)!;
+      const period = periodForRow(def.period, row.period_start, tz);
+      try {
+        const result = await evaluateMissionCondition(ctx, def, period, now);
+        return { row, def, result: result as EvalOutcome | null };
+      } catch (e) {
+        console.warn(`[season-pass] eval failed for ${def.slug}:`, (e as Error).message);
+        return { row, def, result: null as EvalOutcome | null };
+      }
+    })
+  );
 
-    let result;
-    try {
-      result = await evaluateMissionCondition(ctx, def, period, now);
-    } catch (e) {
-      console.warn(`[season-pass] eval failed for ${def.slug}:`, (e as Error).message);
-      continue;
-    }
-
+  // Fase C — Aplicar resultados. Progress (no completadas) son escrituras
+  // independientes → en paralelo. Las completadas otorgan SP y pueden subir de
+  // nivel, así que se procesan EN SERIE para acumular el SP en orden.
+  const progressUpdates: PromiseLike<unknown>[] = [];
+  for (const { row, def, result } of evaluated) {
+    if (!result) continue;
     if (!result.done) {
       if (result.current !== row.progress) {
-        await supabase
-          .from('player_season_pass_missions')
-          .update({ progress: result.current, updated_at: nowIso })
-          .eq('id', row.id);
-        row.progress = result.current;
+        const target = row.id;
+        const progress = result.current;
+        progressUpdates.push(
+          supabase
+            .from('player_season_pass_missions')
+            .update({ progress, updated_at: nowIso })
+            .eq('id', target)
+            .then(() => {
+              row.progress = progress;
+            })
+        );
       }
       continue;
     }
@@ -349,6 +374,7 @@ async function runEvaluation(
       console.warn('[season-pass] grant failed:', (e as Error).message);
     }
   }
+  await Promise.all(progressUpdates);
 
   return { rows, defsById, periods, completedNow };
 }
