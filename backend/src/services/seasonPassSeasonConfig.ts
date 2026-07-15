@@ -17,10 +17,17 @@ export type SeasonPassSeasonRow = {
   elite_modal_bullets: unknown;
 };
 
+// Config de temporada: cambia raras veces (y en dev se reinicia el backend al
+// tocar el SQL), así que la cacheamos brevemente para no releerla en cada /me
+// ni en cada acción. TTL corto para no arrastrar cambios demasiado tiempo.
+let seasonCache: { at: number; row: SeasonPassSeasonRow | null } | null = null;
+const SEASON_CACHE_MS = 60_000;
+
 /**
  * Temporada activa (`active = true`). Debe existir al menos una fila (migración 050).
  */
 export async function getActiveSeasonRow(): Promise<SeasonPassSeasonRow | null> {
+  if (seasonCache && Date.now() - seasonCache.at < SEASON_CACHE_MS) return seasonCache.row;
   const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
     .from('season_pass_seasons')
@@ -31,6 +38,7 @@ export async function getActiveSeasonRow(): Promise<SeasonPassSeasonRow | null> 
     .limit(1)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data) return null;
-  return data as unknown as SeasonPassSeasonRow;
+  const row = data ? (data as unknown as SeasonPassSeasonRow) : null;
+  seasonCache = { at: Date.now(), row };
+  return row;
 }

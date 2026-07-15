@@ -38,66 +38,64 @@ export async function getActiveSpBonus(
   const breakdown: SpBoostBreakdownRow[] = [];
   const tz = opts.tz && isValidTimezone(opts.tz) ? opts.tz : 'UTC';
 
-  // 1. lesson_streak — derived from learning_streaks, only while the streak
-  // is alive (last lesson today or yesterday in the player's timezone).
-  try {
-    const { data } = await supabase
+  // El catch_up solo aplica en el último mes de la temporada: calculamos la
+  // condición antes para lanzar su query solo cuando toca.
+  const season = opts.season;
+  const catchUpApplies = (() => {
+    if (!season?.ends_at) return false;
+    const end = new Date(season.ends_at).getTime();
+    const now = Date.now();
+    return now < end && end - now <= CATCH_UP_WINDOW_DAYS * 86_400_000;
+  })();
+
+  // Las tres fuentes son independientes → una sola tanda. Cada query de Supabase
+  // resuelve {data/count, error} (no rechaza), así que un fallo por tabla sin
+  // migrar degrada esa fuente sin romper las demás.
+  const [streakRes, boostsRes, catchUpRes] = await Promise.all([
+    supabase
       .from('learning_streaks')
       .select('current_streak, last_lesson_completed_at')
       .eq('player_id', playerId)
-      .maybeSingle();
-    if (data?.last_lesson_completed_at) {
-      const todayKey = dayKeyInTz(new Date(), tz);
-      const lastKey = dayKeyInTz(new Date(data.last_lesson_completed_at), tz);
-      const alive = lastKey === todayKey || lastKey === previousDayKey(todayKey);
-      const bonus = alive ? streakSpBonus(Number(data.current_streak ?? 0)) : 0;
-      if (bonus > 0) breakdown.push({ source: 'lesson_streak', bonus });
-    }
-  } catch (e) {
-    console.warn('[sp-boosts] streak lookup failed:', (e as Error).message);
-  }
-
-  // 2. Consumable boosters (auto-activated on grant; time window in S1,
-  // remaining_missions supported for future seasons).
-  try {
-    const nowIso = new Date().toISOString();
-    const { data, error } = await supabase
+      .maybeSingle(),
+    supabase
       .from('player_sp_boosts')
       .select('source, bonus, remaining_missions, expires_at')
       .eq('player_id', playerId)
-      .is('consumed_at', null);
-    if (!error) {
-      for (const b of data ?? []) {
-        const expired = b.expires_at ? String(b.expires_at) <= nowIso : false;
-        const drained = b.remaining_missions !== null && Number(b.remaining_missions) <= 0;
-        if (expired || drained) continue;
-        const source = String(b.source) as SpBoostBreakdownRow['source'];
-        breakdown.push({ source, bonus: Number(b.bonus), expires_at: b.expires_at ?? null });
-      }
-    }
-  } catch {
-    // Table not migrated yet (093) — boosters simply contribute nothing.
-  }
-
-  // 3. catch_up — season's last month and fewer than 10 missions completed.
-  const season = opts.season;
-  if (season?.ends_at) {
-    const end = new Date(season.ends_at).getTime();
-    const now = Date.now();
-    if (now < end && end - now <= CATCH_UP_WINDOW_DAYS * 86_400_000) {
-      try {
-        const { count } = await supabase
+      .is('consumed_at', null),
+    catchUpApplies
+      ? supabase
           .from('player_season_pass_missions')
           .select('*', { count: 'exact', head: true })
           .eq('player_id', playerId)
-          .not('completed_at', 'is', null);
-        if ((count ?? 0) < CATCH_UP_MISSION_LIMIT) {
-          breakdown.push({ source: 'catch_up', bonus: CATCH_UP_BONUS });
-        }
-      } catch (e) {
-        console.warn('[sp-boosts] catch-up lookup failed:', (e as Error).message);
-      }
+          .not('completed_at', 'is', null)
+      : Promise.resolve({ count: null as number | null, error: null }),
+  ]);
+
+  // 1. lesson_streak — vivo si la última lección fue hoy o ayer (tz del jugador).
+  const streak = streakRes.data;
+  if (!streakRes.error && streak?.last_lesson_completed_at) {
+    const todayKey = dayKeyInTz(new Date(), tz);
+    const lastKey = dayKeyInTz(new Date(streak.last_lesson_completed_at), tz);
+    const alive = lastKey === todayKey || lastKey === previousDayKey(todayKey);
+    const bonus = alive ? streakSpBonus(Number(streak.current_streak ?? 0)) : 0;
+    if (bonus > 0) breakdown.push({ source: 'lesson_streak', bonus });
+  }
+
+  // 2. Boosters consumibles (auto-activados al reclamar; ventana temporal en S1).
+  if (!boostsRes.error) {
+    const nowIso = new Date().toISOString();
+    for (const b of boostsRes.data ?? []) {
+      const expired = b.expires_at ? String(b.expires_at) <= nowIso : false;
+      const drained = b.remaining_missions !== null && Number(b.remaining_missions) <= 0;
+      if (expired || drained) continue;
+      const source = String(b.source) as SpBoostBreakdownRow['source'];
+      breakdown.push({ source, bonus: Number(b.bonus), expires_at: b.expires_at ?? null });
     }
+  }
+
+  // 3. catch_up — último mes de temporada y menos de 10 misiones completadas.
+  if (catchUpApplies && !catchUpRes.error && (catchUpRes.count ?? 0) < CATCH_UP_MISSION_LIMIT) {
+    breakdown.push({ source: 'catch_up', bonus: CATCH_UP_BONUS });
   }
 
   const total = breakdown.reduce((acc, b) => acc + b.bonus, 0);

@@ -39,20 +39,23 @@ router.get('/me', async (req: Request, res: Response) => {
       });
     }
 
-    const state = await buildSeasonPassState(playerId!, season, tz);
-    // After evaluation: fresh grants are already reflected in the SP row.
+    // Perf: la evaluación de misiones puede subir el SP, pero el resto de
+    // lecturas (sp_how, rewards, grants, boost) son independientes de ella y de
+    // la SP row, así que corren en una sola tanda en vez de encadenadas.
+    // (Claim manual: NO se auto-otorga; cada nivel alcanzado y no reclamado
+    //  queda `claimable`. El boost muestra streak + boosters + catch-up.)
+    const [state, sp_how, seasonRewards, grantedIds, activeBoost] = await Promise.all([
+      buildSeasonPassState(playerId!, season, tz),
+      listSpHowRows(season.slug),
+      loadSeasonRewards(season.slug),
+      listGrantedRewardIds(playerId!),
+      getActiveSpBonus(playerId!, { tz, season }),
+    ]);
+    // Tras la evaluación: la SP row ya refleja el SP recién otorgado.
     const row = await getOrCreateSeasonPassRow(playerId!);
     const c = computeSeasonPass(row.sp, season.sp_per_level, season.max_level);
-    const sp_how = await listSpHowRows(season.slug);
     const track_levels = computeTrackLevels(c.level, season.max_level, season.track_radius);
-
-    // Rewards track. Claim manual (bloque C): NO se auto-otorga; cada nivel
-    // alcanzado y no reclamado queda `claimable` y el jugador lo reclama.
-    const seasonRewards = await loadSeasonRewards(season.slug);
-    const grantedIds = await listGrantedRewardIds(playerId!);
     const tiers: ('free' | 'elite')[] = row.has_elite ? ['free', 'elite'] : ['free'];
-    // Active SP boost (phase 3): streak + consumable boosters + catch-up.
-    const activeBoost = await getActiveSpBonus(playerId!, { tz, season });
     const boosts = {
       total_bonus: Math.min(activeBoost.total, Math.max(0, Number(season.boost_cap ?? 2) - 1)),
       breakdown: activeBoost.breakdown,
