@@ -855,17 +855,31 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     return estado?.track_levels ?? [];
   }, [estado?.track_rewards, estado?.track_levels]);
 
-  // Auto-centrar el track en el nivel actual al cargar / cambiar de nivel.
+  // Índice del track que deja el nivel actual centrado (cuantizado a columna
+  // entera para que initialScrollIndex y el re-centrado coincidan exactos).
+  const trackCenterIndex = useMemo(() => {
+    if (trackAllLevels.length === 0) return 0;
+    const idx = Math.max(0, trackAllLevels.indexOf(level));
+    const target = idx * TRACK_COL_W - windowWidth / 2 + TRACK_COL_W / 2;
+    return Math.max(0, Math.min(trackAllLevels.length - 1, Math.round(target / TRACK_COL_W)));
+  }, [trackAllLevels, level, windowWidth]);
+
+  // Re-centrado tras el montaje: solo mueve si los datos llegaron con el
+  // track ya montado (primera carga en frío) o si cambió el nivel. En las
+  // vueltas a la pestaña el FlatList ya monta posicionado (initialScrollIndex)
+  // y este scroll aterriza donde ya está — sin salto visible.
   useEffect(() => {
     if (tab !== 'rewards' || trackAllLevels.length === 0) return;
-    const idx = Math.max(0, trackAllLevels.indexOf(level));
-    const target = Math.max(0, idx * TRACK_COL_W - windowWidth / 2 + TRACK_COL_W / 2);
     const id = setTimeout(
-      () => trackScrollRef.current?.scrollToOffset({ offset: target, animated: false }),
+      () =>
+        trackScrollRef.current?.scrollToOffset({
+          offset: trackCenterIndex * TRACK_COL_W,
+          animated: false,
+        }),
       80,
     );
     return () => clearTimeout(id);
-  }, [tab, trackAllLevels, level, windowWidth]);
+  }, [tab, trackAllLevels.length, trackCenterIndex]);
 
   const openRewardDetail = useCallback(
     (lvl: number, reward: SeasonPassTrackRewardDto) => setRewardDetail({ level: lvl, reward }),
@@ -1356,6 +1370,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                 keyExtractor={trackKeyExtractor}
                 renderItem={renderTrackColumn}
                 getItemLayout={getTrackItemLayout}
+                initialScrollIndex={trackCenterIndex}
                 initialNumToRender={7}
                 maxToRenderPerBatch={8}
                 windowSize={5}
