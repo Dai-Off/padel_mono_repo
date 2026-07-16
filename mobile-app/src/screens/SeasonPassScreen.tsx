@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Easing,
+  FlatList,
+  InteractionManager,
   Modal,
   Pressable,
   RefreshControl,
@@ -59,6 +61,14 @@ const BORDER = 'rgba(255,255,255,0.1)';
 const PAD = 20;
 const DEFAULT_SP_PER_LEVEL = 1000;
 const TRACK_COL_W = 88; // ancho de cada columna de nivel del track
+
+// Helpers del FlatList del track (fuera del componente: identidad estable).
+const trackKeyExtractor = (lvl: number) => String(lvl);
+const getTrackItemLayout = (_: unknown, index: number) => ({
+  length: TRACK_COL_W,
+  offset: TRACK_COL_W * index,
+  index,
+});
 
 function daysLeftFromEndsAt(endsAtIso: string | undefined): number {
   if (!endsAtIso) return 0;
@@ -428,7 +438,12 @@ function rewardShortLabel(reward: SeasonPassTrackRewardDto | null): string {
     : '';
 }
 
-function LevelTrackColumn({
+/**
+ * Columna de nivel del track. Memoizada: el FlatList virtualizado solo crea
+ * las visibles, y el memo evita re-renderizar las montadas en cada cambio de
+ * estado de la pantalla (claiming, refreshing, cambio de pestaña de misión…).
+ */
+const LevelTrackColumn = memo(function LevelTrackColumn({
   level,
   isUnlocked,
   isCurrent,
@@ -445,7 +460,8 @@ function LevelTrackColumn({
   hasElite: boolean;
   freeReward: SeasonPassTrackRewardDto | null;
   eliteReward: SeasonPassTrackRewardDto | null;
-  onPressReward: (reward: SeasonPassTrackRewardDto) => void;
+  /** Identidad estable (useCallback en la pantalla) para que el memo funcione. */
+  onPressReward: (level: number, reward: SeasonPassTrackRewardDto) => void;
   avatarUrl?: string | null;
   initials?: string;
 }) {
@@ -508,7 +524,7 @@ function LevelTrackColumn({
             reward={eliteReward}
             size={thumbSize}
             dimmed={!hasElite || !isUnlocked}
-            onPress={eliteReward ? () => onPressReward(eliteReward) : undefined}
+            onPress={eliteReward ? () => onPressReward(level, eliteReward) : undefined}
             avatarUrl={avatarUrl}
             initials={initials}
           />
@@ -597,7 +613,7 @@ function LevelTrackColumn({
             reward={freeReward}
             size={thumbSize}
             dimmed={!isUnlocked}
-            onPress={freeReward ? () => onPressReward(freeReward) : undefined}
+            onPress={freeReward ? () => onPressReward(level, freeReward) : undefined}
             avatarUrl={avatarUrl}
             initials={initials}
           />
@@ -608,7 +624,7 @@ function LevelTrackColumn({
       </View>
     </View>
   );
-}
+});
 
 function MissionRow({
   m,
@@ -711,7 +727,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
   const [claimAllRewards, setClaimAllRewards] = useState<ClaimedRewardDto[] | null>(null);
   const [celebrateReward, setCelebrateReward] = useState<SeasonPassTrackRewardDto | null>(null);
-  const trackScrollRef = useRef<ScrollView>(null);
+  const trackScrollRef = useRef<FlatList<number>>(null);
 
   // Patrón del perfil: /estado (rápido) es lo único que bloquea hero+track;
   // /misiones (evaluación lenta) llega por su cuenta y rellena su sección.
@@ -844,9 +860,37 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     if (tab !== 'rewards' || trackAllLevels.length === 0) return;
     const idx = Math.max(0, trackAllLevels.indexOf(level));
     const target = Math.max(0, idx * TRACK_COL_W - windowWidth / 2 + TRACK_COL_W / 2);
-    const id = setTimeout(() => trackScrollRef.current?.scrollTo({ x: target, animated: false }), 80);
+    const id = setTimeout(
+      () => trackScrollRef.current?.scrollToOffset({ offset: target, animated: false }),
+      80,
+    );
     return () => clearTimeout(id);
   }, [tab, trackAllLevels, level, windowWidth]);
+
+  const openRewardDetail = useCallback(
+    (lvl: number, reward: SeasonPassTrackRewardDto) => setRewardDetail({ level: lvl, reward }),
+    [],
+  );
+
+  const renderTrackColumn = useCallback(
+    ({ item: lvl }: { item: number }) => {
+      const levelRewards = trackRewardsByLevel.get(lvl) ?? [];
+      return (
+        <LevelTrackColumn
+          level={lvl}
+          isUnlocked={level >= lvl}
+          isCurrent={level === lvl}
+          hasElite={eliteActive}
+          freeReward={levelRewards.find((r) => r.tier === 'free') ?? null}
+          eliteReward={levelRewards.find((r) => r.tier === 'elite') ?? null}
+          onPressReward={openRewardDetail}
+          avatarUrl={profile?.avatarUrl ?? null}
+          initials={playerInitials}
+        />
+      );
+    },
+    [trackRewardsByLevel, level, eliteActive, openRewardDetail, profile?.avatarUrl, playerInitials],
+  );
 
   const boostPct = Math.round((estado?.boosts?.total_bonus ?? 0) * 100);
   const boostSourcesLabel = useMemo(() => {
@@ -924,6 +968,15 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const awaitingPassPayload =
     authLoading || (Boolean(estadoQuery.isPending && session?.access_token) && estado === null);
   const passReady = estado !== null;
+
+  // Partículas y pulso del hero: decorativos y caros de montar. Se difieren
+  // hasta que la transición de navegación y el primer pintado terminan, para
+  // que el tap → pantalla sea lo más ligero posible.
+  const [decorReady, setDecorReady] = useState(false);
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => setDecorReady(true));
+    return () => task.cancel();
+  }, []);
 
   // Skeleton como overlay con crossfade: en vez de desmontarse de golpe al
   // llegar el payload (dejaba un frame oscuro antes del fade del contenido),
@@ -1103,8 +1156,12 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                 end={{ x: 0.5, y: 1 }}
                 style={StyleSheet.absoluteFill}
               />
-              <RadialPulse />
-              <HeroParticles />
+              {decorReady ? (
+                <>
+                  <RadialPulse />
+                  <HeroParticles />
+                </>
+              ) : null}
 
               <Pressable
                 onPress={onBack}
@@ -1289,30 +1346,23 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                 </View>
               </View>
 
-              <ScrollView
+              {/* Virtualizado: solo se crean las columnas visibles (+colchón);
+                  el resto se materializa al hacer scroll. Los datos de los 50
+                  niveles ya están en memoria — esto solo dosifica el pintado. */}
+              <FlatList
                 ref={trackScrollRef}
                 horizontal
+                data={trackAllLevels}
+                keyExtractor={trackKeyExtractor}
+                renderItem={renderTrackColumn}
+                getItemLayout={getTrackItemLayout}
+                initialNumToRender={7}
+                maxToRenderPerBatch={8}
+                windowSize={5}
+                removeClippedSubviews
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.trackScroll}
-              >
-                {trackAllLevels.map((lvl) => {
-                  const levelRewards = trackRewardsByLevel.get(lvl) ?? [];
-                  return (
-                    <LevelTrackColumn
-                      key={lvl}
-                      level={lvl}
-                      isUnlocked={level >= lvl}
-                      isCurrent={level === lvl}
-                      hasElite={eliteActive}
-                      freeReward={levelRewards.find((r) => r.tier === 'free') ?? null}
-                      eliteReward={levelRewards.find((r) => r.tier === 'elite') ?? null}
-                      onPressReward={(reward) => setRewardDetail({ level: lvl, reward })}
-                      avatarUrl={profile?.avatarUrl ?? null}
-                      initials={playerInitials}
-                    />
-                  );
-                })}
-              </ScrollView>
+              />
 
               {(estado?.claimable_count ?? 0) > 0 ? (
                 <Pressable
