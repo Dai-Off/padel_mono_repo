@@ -140,6 +140,7 @@ export type SeasonPassMeOk = {
   next_milestone: unknown | null;
 };
 
+/** @deprecated El móvil usa /estado + /misiones; se mantiene por compatibilidad. */
 export async function fetchSeasonPassMe(
   token: string,
   timezone?: string | null
@@ -151,6 +152,50 @@ export async function fetchSeasonPassMe(
   const data = (await res.json()) as Record<string, unknown>;
   if (!res.ok || data.ok !== true) return null;
   return data as unknown as SeasonPassMeOk;
+}
+
+/** Respuesta de GET /season-pass/estado: el /me sin la parte de misiones (rápido). */
+export type SeasonPassEstadoOk = Omit<
+  SeasonPassMeOk,
+  'missions' | 'pending_celebrations' | 'reroll' | 'mission_period_tabs'
+>;
+
+/** Respuesta de GET /season-pass/misiones (evaluación lenta del período). */
+export type SeasonPassMisionesOk = {
+  ok: true;
+  mission_period_tabs?: unknown;
+  missions?: SeasonPassMissionDto[];
+  pending_celebrations?: SeasonPassPendingCelebrationDto[];
+  reroll?: { daily_available: boolean; weekly_available: boolean; tokens?: number };
+  /** SP/level tras la evaluación: si difieren del /estado cacheado, refrescarlo. */
+  sp: number;
+  level: number;
+};
+
+export async function fetchSeasonPassEstado(
+  token: string,
+  timezone?: string | null
+): Promise<SeasonPassEstadoOk | null> {
+  const tz = encodeURIComponent((timezone ?? 'UTC').trim() || 'UTC');
+  const res = await fetch(`${API_URL}/season-pass/estado?timezone=${tz}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json()) as Record<string, unknown>;
+  if (!res.ok || data.ok !== true) return null;
+  return data as unknown as SeasonPassEstadoOk;
+}
+
+export async function fetchSeasonPassMisiones(
+  token: string,
+  timezone?: string | null
+): Promise<SeasonPassMisionesOk | null> {
+  const tz = encodeURIComponent((timezone ?? 'UTC').trim() || 'UTC');
+  const res = await fetch(`${API_URL}/season-pass/misiones?timezone=${tz}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json()) as Record<string, unknown>;
+  if (!res.ok || data.ok !== true) return null;
+  return data as unknown as SeasonPassMisionesOk;
 }
 
 /** Reroll v1 (gratis): sustituye una misión del pool por otra. ids = assignment_id. */

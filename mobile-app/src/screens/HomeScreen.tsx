@@ -41,7 +41,7 @@ import { updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreference
 import { type SeasonPassMissionDto } from '../api/seasonPass';
 import { useQueryClient } from '@tanstack/react-query';
 import { seasonPassKeys } from '../queries/keys';
-import { useSeasonPassMe } from '../queries/seasonPass';
+import { useSeasonPassEstado, useSeasonPassMisiones } from '../queries/seasonPass';
 import {
   isSeasonPassSpCapped,
   seasonPassHomeNextLine,
@@ -204,13 +204,15 @@ export function HomeScreen({
     hasInitialError,
     refreshAll,
   } = useHomeData();
-  // Season pass: query compartida (misma que la pantalla del pase y el host
-  // de celebraciones). isLoading = primera carga en vuelo, como el antiguo
-  // seasonPassLoading del contexto.
-  const passQuery = useSeasonPassMe();
-  const { refetch: refetchPass } = passQuery;
-  const seasonPassMe = passQuery.data ?? null;
-  const seasonPassLoading = passQuery.isLoading;
+  // Season pass: queries compartidas con la pantalla del pase. La card usa
+  // /estado (rápido); las misiones del Home, /misiones (evaluación lenta).
+  // isLoading = primera carga en vuelo, como el antiguo seasonPassLoading.
+  const estadoQuery = useSeasonPassEstado();
+  const misionesQuery = useSeasonPassMisiones();
+  const { refetch: refetchPassEstado } = estadoQuery;
+  const { refetch: refetchPassMisiones } = misionesQuery;
+  const seasonPassEstado = estadoQuery.data ?? null;
+  const seasonPassLoading = estadoQuery.isLoading;
   const queryClient = useQueryClient();
   // Feedback visual mientras "Reintentar" del banner de error está en vuelo.
   const [retrying, setRetrying] = useState(false);
@@ -219,7 +221,8 @@ export function HomeScreen({
     try {
       await Promise.all([
         refreshAll(),
-        session?.access_token ? refetchPass() : Promise.resolve(),
+        session?.access_token ? refetchPassEstado() : Promise.resolve(),
+        session?.access_token ? refetchPassMisiones() : Promise.resolve(),
       ]);
     } finally {
       setRetrying(false);
@@ -425,27 +428,27 @@ export function HomeScreen({
   );
 
   const homeMissionsFromPass = useMemo(() => {
-    const list = seasonPassMe?.missions ?? [];
+    const list = misionesQuery.data?.missions ?? [];
     return list.filter((m) => m.period === 'daily').slice(0, 8).map((m) => mapSeasonMissionToHome(m, t));
-  }, [seasonPassMe?.missions, t]);
+  }, [misionesQuery.data?.missions, t]);
 
   const seasonPassCardProps =
-    seasonPassMe != null
+    seasonPassEstado != null
       ? {
           loading: false as const,
-          seasonLabel: seasonSlugToLabel(seasonPassMe.season.slug, t),
-          seasonTitle: seasonPassMe.season.title,
-          levelCurrent: String(seasonPassMe.level),
-          levelMax: String(levelMaxResolved(seasonPassMe)),
-          progressPercent: Math.min(100, Math.max(0, seasonPassMe.pct * 100)),
-          spCurrent: `${seasonPassMe.into_level.toLocaleString(numberLocale)} SP`,
-          spToNext: isSeasonPassSpCapped(seasonPassMe)
+          seasonLabel: seasonSlugToLabel(seasonPassEstado.season.slug, t),
+          seasonTitle: seasonPassEstado.season.title,
+          levelCurrent: String(seasonPassEstado.level),
+          levelMax: String(levelMaxResolved(seasonPassEstado)),
+          progressPercent: Math.min(100, Math.max(0, seasonPassEstado.pct * 100)),
+          spCurrent: `${seasonPassEstado.into_level.toLocaleString(numberLocale)} SP`,
+          spToNext: isSeasonPassSpCapped(seasonPassEstado)
             ? t('home.seasonPass.spCap')
             : t('home.seasonPass.spToNext', {
-                sp: seasonPassMe.sp_to_next.toLocaleString(numberLocale),
-                level: seasonPassNextLevel(seasonPassMe),
+                sp: seasonPassEstado.sp_to_next.toLocaleString(numberLocale),
+                level: seasonPassNextLevel(seasonPassEstado),
               }),
-          nextRewardName: seasonPassHomeNextLine(seasonPassMe, t),
+          nextRewardName: seasonPassHomeNextLine(seasonPassEstado, t),
         }
       : {
           loading: Boolean(session?.access_token && seasonPassLoading),

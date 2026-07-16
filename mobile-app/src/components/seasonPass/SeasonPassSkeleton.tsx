@@ -73,6 +73,51 @@ export function SeasonPassSkeleton() {
   );
 }
 
+/**
+ * Skeleton de la pestaña de misiones: se muestra mientras /misiones evalúa
+ * (la parte lenta del pase), con el hero/track ya pintados desde /estado.
+ * Imita tabs de período, las dos cajas de stats y filas de misión.
+ */
+export function MissionListSkeleton() {
+  return (
+    <View>
+      <View style={missionStyles.tabsRow}>
+        <Skeleton width={86} height={34} borderRadius={17} variant="dark" />
+        <Skeleton width={86} height={34} borderRadius={17} variant="dark" />
+        <Skeleton width={86} height={34} borderRadius={17} variant="dark" />
+      </View>
+      <View style={missionStyles.statsRow}>
+        <Skeleton height={64} borderRadius={16} variant="dark" style={missionStyles.statBox} />
+        <Skeleton height={64} borderRadius={16} variant="dark" style={missionStyles.statBox} />
+      </View>
+      {[0, 1, 2, 3].map((i) => (
+        <Skeleton
+          key={i}
+          height={78}
+          borderRadius={16}
+          variant="dark"
+          style={{ marginTop: i === 0 ? 14 : 10 }}
+        />
+      ))}
+    </View>
+  );
+}
+
+const missionStyles = StyleSheet.create({
+  tabsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statBox: {
+    flex: 1,
+  },
+});
+
 const styles = StyleSheet.create({
   root: {
     paddingTop: 64, // deja sitio al back FAB (top: 8) como el hero real

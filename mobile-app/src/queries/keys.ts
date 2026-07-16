@@ -8,5 +8,8 @@
  */
 export const seasonPassKeys = {
   all: (userId: string) => ['season-pass', userId] as const,
-  me: (userId: string) => ['season-pass', userId, 'me'] as const,
+  /** Hero + track (rápido). Lo que bloquea el primer pintado del pase. */
+  estado: (userId: string) => ['season-pass', userId, 'estado'] as const,
+  /** Evaluación de misiones + celebraciones (lento). Llega por su cuenta. */
+  misiones: (userId: string) => ['season-pass', userId, 'misiones'] as const,
 };

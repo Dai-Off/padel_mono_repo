@@ -41,7 +41,8 @@ export const persistOptions: Omit<PersistQueryClientOptions, 'queryClient'> = {
   persister: asyncStoragePersister,
   maxAge: PERSIST_MAX_AGE_MS,
   /** Subir la versión invalida todo el caché persistido (cambios de shape). */
-  buster: 'v1',
+  buster: 'v2', // v2: el pase pasa de /me a /estado + /misiones
+
   dehydrateOptions: {
     shouldDehydrateQuery: (query) =>
       query.state.status === 'success' && PERSIST_ROOTS.has(query.queryKey[0]),

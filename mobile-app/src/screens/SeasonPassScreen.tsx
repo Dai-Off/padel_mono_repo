@@ -35,14 +35,15 @@ import {
   useClaimAllRewards,
   useClaimReward,
   useRerollMission,
-  useSeasonPassMe,
+  useSeasonPassEstado,
+  useSeasonPassMisiones,
 } from '../queries/seasonPass';
 import { RARITY_CONFIG } from '../design/rarity';
 import { resolveUnlockableIcon } from '../design/unlockableIcons';
 import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { AuthButton } from '../components/auth/AuthButton';
 import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
-import { SeasonPassSkeleton } from '../components/seasonPass/SeasonPassSkeleton';
+import { MissionListSkeleton, SeasonPassSkeleton } from '../components/seasonPass/SeasonPassSkeleton';
 import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
 import { RewardClaimedModal } from '../components/seasonPass/RewardClaimedModal';
 import { BoostDetailSheet } from '../components/seasonPass/BoostDetailSheet';
@@ -712,15 +713,20 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const [celebrateReward, setCelebrateReward] = useState<SeasonPassTrackRewardDto | null>(null);
   const trackScrollRef = useRef<ScrollView>(null);
 
-  const passQuery = useSeasonPassMe();
-  const { refetch: refetchPass } = passQuery;
-  const me = passQuery.data ?? null;
+  // Patrón del perfil: /estado (rápido) es lo único que bloquea hero+track;
+  // /misiones (evaluación lenta) llega por su cuenta y rellena su sección.
+  const estadoQuery = useSeasonPassEstado();
+  const misionesQuery = useSeasonPassMisiones();
+  const { refetch: refetchEstado } = estadoQuery;
+  const { refetch: refetchMisiones } = misionesQuery;
+  const estado = estadoQuery.data ?? null;
+  const misiones = misionesQuery.data ?? null;
   // Solo el pull-to-refresh mueve el RefreshControl: los refetch en background
   // (tras claims, por foco…) no deben mostrar ese spinner.
   const [refreshing, setRefreshing] = useState(false);
   const loadErr = !session?.access_token
     ? t('alerts.seasonPass.loginRequiredLoad')
-    : passQuery.isError
+    : estadoQuery.isError
       ? t('alerts.seasonPass.loadFail')
       : null;
 
@@ -761,8 +767,8 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    void refetchPass().finally(() => setRefreshing(false));
-  }, [refetchPass]);
+    void Promise.all([refetchEstado(), refetchMisiones()]).finally(() => setRefreshing(false));
+  }, [refetchEstado, refetchMisiones]);
 
   // Confirmación de reroll: modal propio con el estilo dark de la app (el
   // Alert nativo desentona). rerollTarget != null = modal abierto.
@@ -799,39 +805,39 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
         // El modal se cierra ya; los botones de reroll siguen deshabilitados
         // (rerolling) hasta que el refetch trae la misión nueva.
         setRerollTarget(null);
-        await refetchPass();
+        await refetchMisiones();
       })
       .catch(() => {
         setRerollErr(t('alerts.seasonPass.rerollFail'));
       })
       .finally(() => setRerolling(false));
-  }, [rerollTarget, rerolling, rerollMutation, refetchPass, t]);
+  }, [rerollTarget, rerolling, rerollMutation, refetchMisiones, t]);
 
-  const spPer = me?.sp_per_level ?? DEFAULT_SP_PER_LEVEL;
-  const levelMax = me?.level_max ?? 50;
-  const level = me?.level ?? 1;
-  const sp = me?.sp ?? 0;
-  const into = me?.into_level ?? 0;
-  const pct = me?.pct ?? 0;
-  const spToNext = me?.sp_to_next ?? spPer;
-  const eliteActive = me?.has_elite ?? false;
-  const left = daysLeftFromEndsAt(me?.season.ends_at);
+  const spPer = estado?.sp_per_level ?? DEFAULT_SP_PER_LEVEL;
+  const levelMax = estado?.level_max ?? 50;
+  const level = estado?.level ?? 1;
+  const sp = estado?.sp ?? 0;
+  const into = estado?.into_level ?? 0;
+  const pct = estado?.pct ?? 0;
+  const spToNext = estado?.sp_to_next ?? spPer;
+  const eliteActive = estado?.has_elite ?? false;
+  const left = daysLeftFromEndsAt(estado?.season.ends_at);
 
   const trackRewardsByLevel = useMemo(() => {
     const map = new Map<number, SeasonPassTrackRewardDto[]>();
-    for (const entry of me?.track_rewards ?? []) {
+    for (const entry of estado?.track_rewards ?? []) {
       map.set(entry.level, entry.rewards);
     }
     return map;
-  }, [me?.track_rewards]);
+  }, [estado?.track_rewards]);
 
   // Track completo 1..max: si el backend manda track_rewards (100 niveles) los
   // usamos; si no, caemos al radio (track_levels) por compatibilidad.
   const trackAllLevels = useMemo(() => {
-    const fromRewards = (me?.track_rewards ?? []).map((e) => e.level);
+    const fromRewards = (estado?.track_rewards ?? []).map((e) => e.level);
     if (fromRewards.length > 0) return fromRewards;
-    return me?.track_levels ?? [];
-  }, [me?.track_rewards, me?.track_levels]);
+    return estado?.track_levels ?? [];
+  }, [estado?.track_rewards, estado?.track_levels]);
 
   // Auto-centrar el track en el nivel actual al cargar / cambiar de nivel.
   useEffect(() => {
@@ -842,21 +848,21 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     return () => clearTimeout(id);
   }, [tab, trackAllLevels, level, windowWidth]);
 
-  const boostPct = Math.round((me?.boosts?.total_bonus ?? 0) * 100);
+  const boostPct = Math.round((estado?.boosts?.total_bonus ?? 0) * 100);
   const boostSourcesLabel = useMemo(() => {
     const labels: Record<string, string> = {
-      lesson_streak: t('home.seasonPass.boostSourceStreak'),
-      pass_reward: t('home.seasonPass.boostSourceBooster'),
-      catch_up: t('home.seasonPass.boostSourceCatchUp'),
-      event: t('home.seasonPass.boostSourceEvent'),
+      lesson_streak: t('hoestado.seasonPass.boostSourceStreak'),
+      pass_reward: t('hoestado.seasonPass.boostSourceBooster'),
+      catch_up: t('hoestado.seasonPass.boostSourceCatchUp'),
+      event: t('hoestado.seasonPass.boostSourceEvent'),
     };
-    return (me?.boosts?.breakdown ?? [])
+    return (estado?.boosts?.breakdown ?? [])
       .map((b) => `${labels[b.source] ?? b.source} +${Math.round(b.bonus * 100)}%`)
       .join(' · ');
-  }, [me?.boosts?.breakdown, t]);
+  }, [estado?.boosts?.breakdown, t]);
 
   const missionsByPeriod = useMemo(() => {
-    const list = me?.missions ?? [];
+    const list = misiones?.missions ?? [];
     const g: Record<MissionPeriod, SeasonPassMissionDto[]> = { daily: [], weekly: [], monthly: [] };
     for (const m of list) {
       if (m.period === 'daily' || m.period === 'weekly' || m.period === 'monthly') {
@@ -864,10 +870,10 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
       }
     }
     return g;
-  }, [me?.missions]);
+  }, [misiones?.missions]);
 
   const periodTabs = useMemo(() => {
-    const raw = me?.mission_period_tabs;
+    const raw = misiones?.mission_period_tabs;
     const out: { period: MissionPeriod; label: string }[] = [];
     const seen = new Set<string>();
     if (Array.isArray(raw)) {
@@ -892,7 +898,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
       }
     });
     return out;
-  }, [me?.mission_period_tabs, missionsByPeriod]);
+  }, [misiones?.mission_period_tabs, missionsByPeriod]);
 
   useEffect(() => {
     if (!periodTabs.length) return;
@@ -916,8 +922,8 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
    * sin pintar chips/tabs con placeholders (evita cortes y renders por partes).
    */
   const awaitingPassPayload =
-    authLoading || (Boolean(passQuery.isPending && session?.access_token) && me === null);
-  const passReady = me !== null;
+    authLoading || (Boolean(estadoQuery.isPending && session?.access_token) && estado === null);
+  const passReady = estado !== null;
 
   // Skeleton como overlay con crossfade: en vez de desmontarse de golpe al
   // llegar el payload (dejaba un frame oscuro antes del fade del contenido),
@@ -972,7 +978,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const doneCount = useMemo(() => missions.filter((x) => x.done).length, [missions]);
 
   const eliteBullets = useMemo(() => {
-    const raw = me?.season?.elite_modal_bullets;
+    const raw = estado?.season?.elite_modal_bullets;
     if (!Array.isArray(raw)) return [];
     return raw
       .map((x) => {
@@ -983,7 +989,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
         return text ? { icon, text } : null;
       })
       .filter((x): x is { icon: string; text: string } => x != null);
-  }, [me?.season?.elite_modal_bullets]);
+  }, [estado?.season?.elite_modal_bullets]);
 
   const onTabChange = useCallback((t: PassTab) => {
     contentOp.setValue(0);
@@ -1034,7 +1040,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
         return;
       }
 
-      await refetchPass();
+      await refetchEstado();
       setShowElite(false);
       setShowEliteSuccess(true);
     } catch (e) {
@@ -1042,7 +1048,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     } finally {
       setElitePaying(false);
     }
-  }, [session?.access_token, initPaymentSheet, presentPaymentSheet, refetchPass, t]);
+  }, [session?.access_token, initPaymentSheet, presentPaymentSheet, refetchEstado, t]);
 
   // El pase es full-screen y oculta la tab bar (MainApp), así que no necesita
   // el scrollBottomPadding pensado para dejarle sitio: solo safe area + aire.
@@ -1126,7 +1132,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                     >
                       <Ionicons name="flame" size={14} color={ACCENT} />
                       <Text style={styles.seasonChipText}>
-                        {me.season.hero_chip_label?.trim() || me.season.slug || '—'}
+                        {estado.season.hero_chip_label?.trim() || estado.season.slug || '—'}
                       </Text>
                       <Ionicons name="flame" size={14} color={ACCENT} />
                     </LinearGradient>
@@ -1134,10 +1140,10 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                 </View>
 
                 <View>
-                  <Text style={styles.heroTitle}>{me.season.title ?? '—'}</Text>
+                  <Text style={styles.heroTitle}>{estado.season.title ?? '—'}</Text>
                   <Text style={styles.heroSub}>
-                    {me.season.subtitle ?? ''}
-                    {me.season.subtitle ? ' · ' : ''}
+                    {estado.season.subtitle ?? ''}
+                    {estado.season.subtitle ? ' · ' : ''}
                     <Text style={styles.heroSubAccent}>{t('alerts.seasonPass.daysRemaining', { count: left })}</Text>
                   </Text>
                 </View>
@@ -1201,7 +1207,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                           <View style={{ flex: 1 }}>
                             <Text style={styles.eliteTitle}>{t('alerts.seasonPass.elitePass')}</Text>
                             <Text style={styles.eliteSub}>
-                              {me.season.elite_card_subtitle?.trim() || '—'}
+                              {estado.season.elite_card_subtitle?.trim() || '—'}
                             </Text>
                           </View>
                           <Ionicons name="chevron-forward" size={16} color="#ca8a04" />
@@ -1260,7 +1266,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                   <View style={styles.boostBannerHeader}>
                     <Ionicons name="flame" size={16} color={ACCENT} />
                     <Text style={[styles.boostBannerTxt, { flex: 1 }]}>
-                      {t('home.seasonPass.boostActive', { pct: boostPct })}
+                      {t('hoestado.seasonPass.boostActive', { pct: boostPct })}
                     </Text>
                     <Ionicons name="chevron-forward" size={15} color="rgba(241,143,52,0.7)" />
                   </View>
@@ -1308,7 +1314,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                 })}
               </ScrollView>
 
-              {(me?.claimable_count ?? 0) > 0 ? (
+              {(estado?.claimable_count ?? 0) > 0 ? (
                 <Pressable
                   onPress={handleClaimAll}
                   disabled={claiming}
@@ -1324,13 +1330,28 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                     <>
                       <Ionicons name="gift" size={16} color="#0B1120" />
                       <Text style={styles.claimAllBtnTxt}>
-                        {t('alerts.seasonPass.claimAll', { count: me?.claimable_count ?? 0 })}
+                        {t('alerts.seasonPass.claimAll', { count: estado?.claimable_count ?? 0 })}
                       </Text>
                     </>
                   )}
                 </Pressable>
               ) : null}
             </View>
+          ) : misionesQuery.isPending ? (
+            // /misiones aún evaluando: estructura de la pestaña con skeletons
+            // de fila (patrón del perfil: cada sección se rellena al llegar).
+            <MissionListSkeleton />
+          ) : misionesQuery.isError ? (
+            <Pressable onPress={() => void refetchMisiones()} style={{ paddingVertical: 28 }}>
+              <Text style={[styles.missionDesc, { textAlign: 'center' }]}>
+                {t('alerts.seasonPass.loadFail')}
+              </Text>
+              <Text
+                style={[styles.missionDesc, { textAlign: 'center', color: ACCENT, marginTop: 6 }]}
+              >
+                {t('common.retry')}
+              </Text>
+            </Pressable>
           ) : (
             <View>
               {periodTabs.length > 0 ? (
@@ -1369,11 +1390,11 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
               {missions.map((m) => {
                 const quotaAvailable =
                   m.period === 'daily'
-                    ? me?.reroll?.daily_available === true
+                    ? misiones?.reroll?.daily_available === true
                     : m.period === 'weekly'
-                      ? me?.reroll?.weekly_available === true
+                      ? misiones?.reroll?.weekly_available === true
                       : false;
-                const tokensLeft = me?.reroll?.tokens ?? 0;
+                const tokensLeft = misiones?.reroll?.tokens ?? 0;
                 const canReroll =
                   (m.rerollable ?? false) && (quotaAvailable || tokensLeft > 0) && !rerolling;
                 return (
@@ -1480,11 +1501,11 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                 {(() => {
                   const freeAvailable =
                     rerollTarget?.period === 'weekly'
-                      ? me?.reroll?.weekly_available === true
-                      : me?.reroll?.daily_available === true;
+                      ? misiones?.reroll?.weekly_available === true
+                      : misiones?.reroll?.daily_available === true;
                   if (rerollTarget && !freeAvailable) {
                     return t('alerts.seasonPass.rerollTokenMsg', {
-                      count: me?.reroll?.tokens ?? 0,
+                      count: misiones?.reroll?.tokens ?? 0,
                     });
                   }
                   return rerollTarget?.period === 'weekly'
@@ -1547,7 +1568,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
           <Text style={{ fontSize: 36 }}>👑</Text>
         </View>
         <Text style={styles.modalSub}>
-          {[me?.season.slug, me?.season.title].filter(Boolean).join(' · ') || t('alerts.seasonPass.elitePass')}
+          {[estado?.season.slug, estado?.season.title].filter(Boolean).join(' · ') || t('alerts.seasonPass.elitePass')}
         </Text>
         <View style={{ gap: 12, marginBottom: 4 }}>
           {eliteBullets.length > 0 ? (
@@ -1566,7 +1587,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
       <PassHelpSheet
         visible={showHowTo}
         onClose={() => setShowHowTo(false)}
-        period={me?.season.subtitle ?? ''}
+        period={estado?.season.subtitle ?? ''}
         daysLeft={left}
         spPerLevel={spPer}
         levelMax={levelMax}
@@ -1576,7 +1597,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
         visible={showBoostDetail}
         onClose={() => setShowBoostDetail(false)}
         totalPct={boostPct}
-        breakdown={me?.boosts?.breakdown ?? []}
+        breakdown={estado?.boosts?.breakdown ?? []}
       />
 
       <RewardDetailSheet
@@ -1669,7 +1690,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
             <Text style={styles.eliteOkBody}>{t('alerts.seasonPass.eliteOkBody')}</Text>
             <Pressable onPress={() => setShowEliteSuccess(false)} style={({ pressed }) => pressed && styles.pressed}>
               <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.eliteOkCta}>
-                <Text style={styles.eliteOkCtaTxt}>{t('home.seasonPass.celebrationCta')}</Text>
+                <Text style={styles.eliteOkCtaTxt}>{t('hoestado.seasonPass.celebrationCta')}</Text>
               </LinearGradient>
             </Pressable>
           </View>

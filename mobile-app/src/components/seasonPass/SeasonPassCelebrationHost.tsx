@@ -2,25 +2,25 @@ import React, { useMemo } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../../i18n';
-import { useAckCelebrations, useSeasonPassMe } from '../../queries/seasonPass';
+import { useAckCelebrations, useSeasonPassMisiones } from '../../queries/seasonPass';
 import { MissionCelebrationCard } from './MissionCelebrationCard';
 
 /**
  * Cola diferida de celebraciones (plan §6.7): misiones que se completaron
  * "fuera" (el rival confirmó el marcador, cayó una semanal…). Se alimenta de
- * `pending_celebrations` del /season-pass/me (query compartida) y se ackea al
- * cerrar. Mismo patrón que UnlockModalHost: montado global en MainApp — eso
- * mantiene la query siempre activa, así que el refetch por foco cubre el
- * antiguo refresh de background de HomeDataContext.
+ * `pending_celebrations` del /season-pass/misiones (query compartida) y se
+ * ackea al cerrar. Mismo patrón que UnlockModalHost: montado global en
+ * MainApp — eso mantiene la query siempre activa, así que el refetch por
+ * foco cubre el antiguo refresh de background de HomeDataContext.
  */
 export function SeasonPassCelebrationHost() {
   const { t } = useTranslation();
-  const { data: seasonPassMe } = useSeasonPassMe();
+  const { data: misiones } = useSeasonPassMisiones();
   const ackMutation = useAckCelebrations();
 
   const pending = useMemo(
-    () => seasonPassMe?.pending_celebrations ?? [],
-    [seasonPassMe?.pending_celebrations],
+    () => misiones?.pending_celebrations ?? [],
+    [misiones?.pending_celebrations],
   );
 
   if (pending.length === 0) return null;
