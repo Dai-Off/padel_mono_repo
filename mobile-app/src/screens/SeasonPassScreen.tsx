@@ -705,6 +705,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const [showElite, setShowElite] = useState(false);
   const [showEliteSuccess, setShowEliteSuccess] = useState(false);
   const [showHowTo, setShowHowTo] = useState(false);
+  const [showBoostDetail, setShowBoostDetail] = useState(false);
   const [elitePaying, setElitePaying] = useState(false);
   const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
   const [claimAllRewards, setClaimAllRewards] = useState<ClaimedRewardDto[] | null>(null);
@@ -1252,19 +1253,23 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
           {tab === 'rewards' ? (
             <View>
               {boostPct > 0 ? (
-                <View style={styles.boostBanner}>
+                <Pressable
+                  onPress={() => setShowBoostDetail(true)}
+                  style={({ pressed }) => [styles.boostBanner, pressed && styles.pressed]}
+                >
                   <View style={styles.boostBannerHeader}>
                     <Ionicons name="flame" size={16} color={ACCENT} />
-                    <Text style={styles.boostBannerTxt}>
+                    <Text style={[styles.boostBannerTxt, { flex: 1 }]}>
                       {t('home.seasonPass.boostActive', { pct: boostPct })}
                     </Text>
+                    <Ionicons name="chevron-forward" size={15} color="rgba(241,143,52,0.7)" />
                   </View>
                   {boostSourcesLabel ? (
                     <Text style={styles.boostBannerSources} numberOfLines={2}>
                       {boostSourcesLabel}
                     </Text>
                   ) : null}
-                </View>
+                </Pressable>
               ) : null}
 
               <View style={styles.legendRow}>
@@ -1565,6 +1570,13 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
         daysLeft={left}
         spPerLevel={spPer}
         levelMax={levelMax}
+      />
+
+      <BoostDetailSheet
+        visible={showBoostDetail}
+        onClose={() => setShowBoostDetail(false)}
+        totalPct={boostPct}
+        breakdown={me?.boosts?.breakdown ?? []}
       />
 
       <RewardDetailSheet

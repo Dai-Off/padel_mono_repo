@@ -106,6 +106,14 @@ export interface HomeTranslationKeys {
     boostSourceBooster: string;
     boostSourceCatchUp: string;
     boostSourceEvent: string;
+    boostDetailTitle: string;
+    boostDetailIntro: string;
+    boostSourceStreakDesc: string;
+    boostSourceBoosterDesc: string;
+    boostSourceCatchUpDesc: string;
+    boostSourceEventDesc: string;
+    boostExpiresIn: string;
+    boostHint: string;
   };
   competitiveLeague: {
     title: string;

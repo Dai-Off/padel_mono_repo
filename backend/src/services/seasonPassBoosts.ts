@@ -28,7 +28,7 @@ export type ActiveSpBonus = { total: number; breakdown: SpBoostBreakdownRow[] };
 
 const CATCH_UP_BONUS = 0.15;
 const CATCH_UP_MISSION_LIMIT = 10;
-const CATCH_UP_WINDOW_DAYS = 30;
+const CATCH_UP_WINDOW_DAYS = 15; // recta final: temporada de 45 días → últimos 15
 
 export async function getActiveSpBonus(
   playerId: string,
