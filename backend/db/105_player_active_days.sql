@@ -1,4 +1,5 @@
--- 096_player_active_days.sql — One row per player per active day (opening the app).
+-- 105_player_active_days.sql — One row per player per active day (opening the app).
+-- (renumbered from 096; applied to Supabase under the old number)
 --
 -- Fed from authenticated requests with an in-process 1/day throttle (backend).
 -- Supports season pass missions: D01 "open the app" (daily) and the monthly

@@ -1,4 +1,5 @@
--- 099_player_season_pass_by_season.sql — Aisla el SP/elite por temporada (fase 6).
+-- 108_player_season_pass_by_season.sql — Aisla el SP/elite por temporada (fase 6).
+-- (renumerada desde 099; aplicada en Supabase con el numero antiguo)
 --
 -- Antes: player_season_pass tenía PK (player_id) => el SP y has_elite eran
 -- GLOBALES por jugador, así que se arrastraban a la siguiente temporada (la

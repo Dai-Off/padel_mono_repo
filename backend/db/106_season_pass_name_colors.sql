@@ -1,6 +1,7 @@
--- 097_season_pass_name_colors.sql — Color/gradiente de nombre (cosmetico, fase 4b).
+-- 106_season_pass_name_colors.sql — Color/gradiente de nombre (cosmetico, fase 4b).
+-- (renumerada desde 097; aplicada en Supabase con el numero antiguo)
 --
--- ORDER: ejecutar ANTES de re-ejecutar 092 (que ahora referencia name_color ids
+-- ORDER: ejecutar ANTES de re-ejecutar 101 (que ahora referencia name_color ids
 -- en el track). Requiere 077 (unlockables), 080 (player_profile_customization),
 -- 081 (columna colors).
 --

@@ -1,6 +1,7 @@
--- 091_season_pass_missions_v2.sql — Mission pool schema v2 + per-player assignments/progress.
+-- 100_season_pass_missions_v2.sql — Mission pool schema v2 + per-player assignments/progress.
+-- (renumbered from 091 to avoid clashing with develop's 091; applied to Supabase under the old number)
 --
--- ORDER: run BEFORE 094_season_pass_season_s1.sql (the S1 pool seed uses the
+-- ORDER: run BEFORE 103_season_pass_season_s1.sql (the S1 pool seed uses the
 -- columns added here). Requires 050_season_pass_content.sql.
 --
 -- assignment semantics:

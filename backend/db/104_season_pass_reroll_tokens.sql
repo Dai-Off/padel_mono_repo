@@ -1,7 +1,8 @@
--- 095_season_pass_reroll_tokens.sql — Reroll tokens consumibles del pase (fase 4a).
+-- 104_season_pass_reroll_tokens.sql — Reroll tokens consumibles del pase (fase 4a).
+-- (renumerada desde 095; aplicada en Supabase con el numero antiguo)
 --
--- ORDER: ejecutar ANTES de re-ejecutar 092 (que ahora reserva huecos para
--- reward_type 'reroll_token'; los token rows se siembran aqui). Requiere 092
+-- ORDER: ejecutar ANTES de re-ejecutar 101 (que ahora reserva huecos para
+-- reward_type 'reroll_token'; los token rows se siembran aqui). Requiere 101
 -- (season_pass_rewards) y 050 (season_pass_seasons).
 --
 -- Modelo (decidido 2026-07-10): la cuota gratis sigue siendo 1 reroll/dia +
@@ -49,7 +50,7 @@ comment on table public.player_reroll_tokens is
   'Reroll tokens del pase (consumibles). Balance activo = consumed_at null. Se ganan en el track y se gastan en rerolls extra tras agotar la cuota gratis del periodo.';
 
 -- ────────────────────────────────────────────────────────────
--- 3) Track rewards de tipo reroll_token (rellenan huecos que reserva 092)
+-- 3) Track rewards de tipo reroll_token (rellenan huecos que reserva 101)
 --    Free 26/43, Elite 14/32/43. Re-seed idempotente.
 -- ────────────────────────────────────────────────────────────
 delete from public.season_pass_rewards

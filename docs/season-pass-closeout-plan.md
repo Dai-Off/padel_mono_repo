@@ -125,7 +125,7 @@ memoria + cooldowns de `HomeDataContext`).
 - **Prueba end-to-end** con backend real: `/me` (track 50, boosts), completar
   lección, reroll (con tokens), cruzar nivel (grants + level-up), modales,
   comprar Elite (retroactivo + modal éxito).
-- **Migración 095** — SP por temporada con reset (antes del fin de temporada).
+- **Migración 108** — SP por temporada con reset (antes del fin de temporada).
 
 ---
 

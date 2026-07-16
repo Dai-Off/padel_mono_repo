@@ -122,7 +122,7 @@ Con los valores decididos (racha +15/30/50/70%), el gap deja de ser un muro: un 
 
 | ID | Evento backend | ¿Trackeable hoy? | Dónde engancha |
 |---|---|---|---|
-| D01 login | `daily_active` | ✅ Decidido: cuenta **abrir la app** (día activo) | Nueva tabla `player_active_days` (migración 096) alimentada con throttle 1/día desde requests autenticadas (`getPlayerIdFromBearer` o bootstrap del Home) |
+| D01 login | `daily_active` | ✅ Decidido: cuenta **abrir la app** (día activo) | Nueva tabla `player_active_days` (migración 105) alimentada con throttle 1/día desde requests autenticadas (`getPlayerIdFromBearer` o bootstrap del Home) |
 | D02 partido completado | `match_completed` | ✅ | Confirmación de marcador en `matchScores.ts` → `runLevelingPipeline` / `applyFriendlyPlayCounts`; datos en `matches` + `match_players` |
 | D03 partido de Liga | `match_completed (league)` | ✅ | Ídem, filtrando tipo de partido |
 | D04 partido Matchmaking IA | `match_completed (match_ia)` | ✅ | Ídem |
@@ -171,9 +171,9 @@ Derivables casi todas (volumen de partidos, victorias, rachas de victorias, logi
 
 ## 6. Diseño técnico propuesto
 
-### 6.1 Modelo de datos (migraciones nuevas, siguiente número libre: `091_`)
+### 6.1 Modelo de datos (migraciones nuevas; renumeradas a `100_`–`108_` porque los 09x colisionaron con develop)
 
-**`091_season_pass_missions_v2.sql`**
+**`100_season_pass_missions_v2.sql`**
 ```sql
 -- Extiende season_pass_mission_definitions (el pool)
 alter table season_pass_mission_definitions
@@ -198,7 +198,7 @@ create table player_season_pass_missions (
 );
 ```
 
-**`092_season_pass_rewards.sql`**
+**`101_season_pass_rewards.sql`**
 ```sql
 create table season_pass_rewards (
   id uuid primary key default gen_random_uuid(),
@@ -223,7 +223,7 @@ create table player_season_pass_reward_grants (
 );
 ```
 
-**`093_player_sp_boosts.sql`**
+**`102_player_sp_boosts.sql`**
 ```sql
 create table player_sp_boosts (
   id uuid primary key default gen_random_uuid(),
@@ -238,7 +238,7 @@ create table player_sp_boosts (
 -- La fuente 'lesson_streak' NO se materializa: se deriva en runtime de learning_streaks.
 ```
 
-**`094_season_pass_season_s1.sql`** — decidido 2026-07-07: **extender `s1`** como si hubiera empezado el 2026-06-01:
+**`103_season_pass_season_s1.sql`** — decidido 2026-07-07: **extender `s1`** como si hubiera empezado el 2026-06-01:
 ```sql
 update season_pass_seasons
   set ends_at = '2026-09-01T00:00:00Z', subtitle = 'Jun – Sep 2026'
@@ -246,9 +246,9 @@ update season_pass_seasons
 ```
 (3 meses; a fecha de hoy la temporada iría por ~1/3). Este `update` es un one-liner que conviene aplicar en prod **ya**, sin esperar al resto de la fase 1, porque corrige la temporada caducada visible en la app. La migración añade además `boost_cap` por temporada y siembra el pool completo de misiones (lección fija + D01–D08 + D11 remapeada, semanales, mensuales trackeables) con `sp_reward` según el PDF.
 
-**`095_player_season_pass_per_season.sql`** — decidido: el SP es **por temporada y se resetea**. `player_season_pass` pasa a clave compuesta `(player_id, season_slug)` (backfill: las filas actuales se asignan a `s1`); `has_elite` también pasa a ser por temporada (el pase Elite se compra en cada temporada). Las filas de temporadas pasadas quedan como histórico (visible en perfil si algún día se quiere). `addSeasonPassSp`, `computeSeasonPass`, `finalizeSeasonPassElitePurchase` y `GET /season-pass/me` pasan a operar sobre la temporada activa.
+**`108_player_season_pass_by_season.sql`** (nombre final implementado) — decidido: el SP es **por temporada y se resetea**. `player_season_pass` pasa a clave compuesta `(player_id, season_slug)` (backfill: las filas actuales se asignan a `s1`); `has_elite` también pasa a ser por temporada (el pase Elite se compra en cada temporada). Las filas de temporadas pasadas quedan como histórico (visible en perfil si algún día se quiere). `addSeasonPassSp`, `computeSeasonPass`, `finalizeSeasonPassElitePurchase` y `GET /season-pass/me` pasan a operar sobre la temporada activa.
 
-**`096_player_active_days.sql`** — tabla `player_active_days (player_id, day date, primary key (player_id, day))` alimentada con throttle 1/día desde requests autenticadas. Soporta D01 ("abrir la app" = día activo, decidido 2026-07-07) y la mensual "login en 15 días distintos".
+**`105_player_active_days.sql`** — tabla `player_active_days (player_id, day date, primary key (player_id, day))` alimentada con throttle 1/día desde requests autenticadas. Soporta D01 ("abrir la app" = día activo, decidido 2026-07-07) y la mensual "login en 15 días distintos".
 
 ### 6.2 Motor de misiones (backend)
 
@@ -368,7 +368,7 @@ Reroll v1 (gratis) → luego con moneda virtual (proyecto aparte). Misiones de c
 
 ## 8. Riesgos y notas operativas
 
-- **Temporada `s1` caducada pero `active=true`** (`ends_at 2026-04-30`): la app sigue mostrándola. Decidido: extender a 2026-09-01 ("Jun – Sep 2026"); el `update` de una línea (§6.1, migración 094) conviene aplicarlo en prod cuanto antes, sin esperar a la fase 1.
+- **Temporada `s1` caducada pero `active=true`** (`ends_at 2026-04-30`): la app sigue mostrándola. Decidido: extender a 2026-09-01 ("Jun – Sep 2026"); el `update` de una línea (§6.1, migración 103) conviene aplicarlo en prod cuanto antes, sin esperar a la fase 1.
 - **Recalibración del SP de la lección**: baja de 600–1800 a ~150–180/día. Si hay usuarios con SP acumulado, decidir si se conserva (recomendado: sí, no se toca lo ya ganado).
 - **Números de migración duplicados** en `backend/db/` (dos `049_`, `050_`…): confirmar el siguiente número libre (`091_`) en el momento de crear las migraciones.
 - **Idempotencia del grant**: todo pasa por uniques de tabla (`player_season_pass_missions`, `player_season_pass_reward_grants`) — sin doble grant aunque se reevalúe on-read.
@@ -390,8 +390,8 @@ Reroll v1 (gratis) → luego con moneda virtual (proyecto aparte). Misiones de c
 6. **Bonus global de racha: +15% / +30% / +50% / +70%** (rachas 3 / 8 / 21 / 46). Deliberadamente generoso: la constancia con la lección diaria debe recompensar mucho, y la economía del PDF hacía el nivel 100 demasiado duro para actividad presencial. Esto resuelve también la antigua pregunta 10: la racha **es** la gran recompensa (junto a los unlockables por hito).
 7. **Misiones sociales del PDF:** D09 (voto MVP), W15 y la mensual MVP×4 — **descartadas** (la feature no existe). D10 (seguir usuario) y D12 (compartir RRSS) — cubiertas por sus planes propios (`docs/follow-system-implementation-plan.md` y `docs/sharing-implementation-plan.md`), que se implementan **antes** del pase → nacen activas. D11 — **remapeada a "Comenta en la comunidad"** (el feed ya existe; no es el feedback post-partido).
 8. **W13 clases:** la reserva de clase cuenta como asistencia (v1).
-9. **"Login diario":** cuenta abrir la app → `player_active_days` (migración 096).
-10. **SP por temporada con reset:** `player_season_pass` pasa a `(player_id, season_slug)`; `has_elite` por temporada (migración 095).
+9. **"Login diario":** cuenta abrir la app → `player_active_days` (migración 105).
+10. **SP por temporada con reset:** `player_season_pass` pasa a `(player_id, season_slug)`; `has_elite` por temporada (migración 108).
 11. **Recompensas S1:** sistema de personalización existente (títulos, insignias, trofeos, marcos). Los **marcos**, reservados a hitos difíciles (niveles altos / Elite). Los "42 iconos" aplazados hasta que lleguen de diseño (semi-abierto).
 12. **Temporada `s1`: se extiende** como si hubiera empezado el 2026-06-01 → termina el **2026-09-01** ("Jun – Sep 2026"). El `update` puede aplicarse en prod ya.
 13. **"Penalizaciones en 0"** (mensual): definida — son las **penalizaciones de matchmaking** (`matchmaking_reject_faults`, creadas al rechazar partidos encontrados en cola). Condición: 0 faults en el mes; grant al cierre del período (§5.3).

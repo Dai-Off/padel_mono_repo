@@ -1,7 +1,8 @@
--- 098_season_pass_catalog_expansion.sql — Tipo 'theme' + ampliacion de catalogos (bloque A).
+-- 107_season_pass_catalog_expansion.sql — Tipo 'theme' + ampliacion de catalogos (bloque A).
+-- (renumerada desde 098; aplicada en Supabase con el numero antiguo)
 --
 -- ORDER: requiere 077 (unlockables), 080 (player_profile_customization),
--- 081 (colors), 097 (kind name_color). NO toca el track (092); solo amplia el
+-- 081 (colors), 106 (kind name_color). NO toca el track (101); solo amplia el
 -- catalogo. El track se re-rellena en el bloque B (quitar SP).
 --
 -- Modelo del tema: fondo animado del perfil (cover). `colors` = paleta base

@@ -1,14 +1,15 @@
--- 092_season_pass_rewards.sql — Level rewards for the season pass (phase 2).
+-- 101_season_pass_rewards.sql — Level rewards for the season pass (phase 2).
+-- (renumbered from 092; applied to Supabase under the old number)
 --
 -- ORDER: requires 050 (seasons) and 077/081/082 (unlockables catalog).
 -- Re-seed idempotente: borra las rewards unlockable/sp de s1 y las re-siembra.
--- Los boosters (reward_type 'sp_boost') los gestiona 093 y NO se tocan aquí.
+-- Los boosters (reward_type 'sp_boost') los gestiona 102 y NO se tocan aquí.
 --
 -- Reward semantics:
 --   unlockable → grants a row in player_unlockables (existing UnlockModalHost
 --                shows it; display derives from the catalog at read time)
 --   sp         → direct SP, re-enters via the grant path WITHOUT boosts
---   sp_boost   → consumable booster (player_sp_boosts, sembrado en 093)
+--   sp_boost   → consumable booster (player_sp_boosts, sembrado en 102)
 --
 -- Cosméticos: emoji en insignias (Ionicons no va en la miniapp) y marcos
 -- procedurales (animation_type + style + colors). Todo unlock_type 'manual'
@@ -127,7 +128,7 @@ on conflict (id) do update set
 -- SIN SP directo (decidido 2026-07-14): el progreso viene 100% de misiones,
 -- asi que el track es todo cosmetico/consumible y se reclama (bloque C).
 -- Rareza creciente con el nivel; hitos (multiplos de 5) destacados y los hitos
--- grandes (cada 10) legendary. Boosters en 093, tokens en 095.
+-- grandes (cada 10) legendary. Boosters en 102, tokens en 104.
 -- Re-seed idempotente de unlockable/sp.
 -- ════════════════════════════════════════════════════════════
 
@@ -149,7 +150,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 11, 'free', 'unlockable', 'nc_brasa', null, '{}'),
   ('s1', 12, 'free', 'unlockable', 'sp_t_peloteo', null, '{}'),
   ('s1', 13, 'free', 'unlockable', 'sp_t_muralla', null, '{}'),
-  -- 14 free -> booster (093)
+  -- 14 free -> booster (102)
   ('s1', 15, 'free', 'unlockable', 'sp_f_brasa', null, '{}'),             -- hito
   ('s1', 16, 'free', 'unlockable', 'th_brasa', null, '{}'),               -- tema
   ('s1', 17, 'free', 'unlockable', 'sp_t_aprendiz', null, '{}'),
@@ -161,7 +162,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 23, 'free', 'unlockable', 'sp_t_francotirador', null, '{}'),
   ('s1', 24, 'free', 'unlockable', 'th_ceniza', null, '{}'),              -- tema
   ('s1', 25, 'free', 'unlockable', 'sp_t_competidor', null, '{}'),        -- hito
-  -- 26 free -> reroll_token (095)
+  -- 26 free -> reroll_token (104)
   ('s1', 27, 'free', 'unlockable', 'sp_f_arena', null, '{}'),
   ('s1', 28, 'free', 'unlockable', 'sp_t_habitual', null, '{}'),
   ('s1', 29, 'free', 'unlockable', 'nc_rosa', null, '{}'),
@@ -169,7 +170,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 31, 'free', 'unlockable', 'sp_b_madrugador', null, '{}'),
   ('s1', 32, 'free', 'unlockable', 'sp_t_globero', null, '{}'),
   ('s1', 33, 'free', 'unlockable', 'sp_t_retador', null, '{}'),
-  -- 34 free -> booster (093)
+  -- 34 free -> booster (102)
   ('s1', 35, 'free', 'unlockable', 'sp_t_tactico', null, '{}'),           -- hito
   ('s1', 36, 'free', 'unlockable', 'th_pista', null, '{}'),               -- tema
   ('s1', 37, 'free', 'unlockable', 'sp_f_neon', null, '{}'),
@@ -178,13 +179,13 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 40, 'free', 'unlockable', 'sp_t_guerrero', null, '{}'),          -- hito grande
   ('s1', 41, 'free', 'unlockable', 'th_oceano', null, '{}'),              -- tema
   ('s1', 42, 'free', 'unlockable', 'sp_t_vibora', null, '{}'),
-  -- 43 free -> reroll_token (095)
+  -- 43 free -> reroll_token (104)
   ('s1', 44, 'free', 'unlockable', 'sp_b_nocturno', null, '{}'),
   ('s1', 45, 'free', 'unlockable', 'sp_t_alma', null, '{}'),              -- hito · legendary
   ('s1', 46, 'free', 'unlockable', 'nc_iris', null, '{}'),
   ('s1', 47, 'free', 'unlockable', 'sp_f_toxico', null, '{}'),
   ('s1', 48, 'free', 'unlockable', 'th_fenix', null, '{}'),               -- tema legendary
-  -- 49 free -> booster (093)
+  -- 49 free -> booster (102)
   ('s1', 50, 'free', 'unlockable', 'sp_b_campeon', null, '{}');           -- final
 
 -- ── ELITE (50 niveles · 100% cosmetico/consumible, sin SP) ──
@@ -196,18 +197,18 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1',  5, 'elite', 'unlockable', 'sp_b_elite', null, '{}'),            -- hito
   ('s1',  6, 'elite', 'unlockable', 'sp_b_perfecto', null, '{}'),
   ('s1',  7, 'elite', 'unlockable', 'sp_t_sangre_fria', null, '{}'),
-  -- 8 elite -> booster (093)
+  -- 8 elite -> booster (102)
   ('s1',  9, 'elite', 'unlockable', 's1_ember', null, '{}'),
   ('s1', 10, 'elite', 'unlockable', 'sp_f_azul', null, '{}'),             -- hito grande
   ('s1', 11, 'elite', 'unlockable', 'th_aurora', null, '{}'),             -- tema
   ('s1', 12, 'elite', 'unlockable', 'sp_t_muro', null, '{}'),
   ('s1', 13, 'elite', 'unlockable', 'sp_t_metralla', null, '{}'),
-  -- 14 elite -> reroll_token (095)
+  -- 14 elite -> reroll_token (104)
   ('s1', 15, 'elite', 'unlockable', 'sp_f_chispa', null, '{}'),           -- hito
   ('s1', 16, 'elite', 'unlockable', 'sp_f_oro', null, '{}'),
   ('s1', 17, 'elite', 'unlockable', 'sp_t_estrella', null, '{}'),
   ('s1', 18, 'elite', 'unlockable', 'nc_holo', null, '{}'),
-  -- 19 elite -> booster (093)
+  -- 19 elite -> booster (102)
   ('s1', 20, 'elite', 'unlockable', 'sp_b_veterano', null, '{}'),         -- hito grande
   ('s1', 21, 'elite', 'unlockable', 'nc_aurora', null, '{}'),
   ('s1', 22, 'elite', 'unlockable', 'sp_t_virtuoso', null, '{}'),
@@ -215,26 +216,26 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, u
   ('s1', 24, 'elite', 'unlockable', 'sp_b_mitad', null, '{}'),
   ('s1', 25, 'elite', 'unlockable', 'sp_t_calculador', null, '{}'),       -- hito
   ('s1', 26, 'elite', 'unlockable', 'th_cosmos', null, '{}'),             -- tema legendary
-  -- 27 elite -> booster (093)
+  -- 27 elite -> booster (102)
   ('s1', 28, 'elite', 'unlockable', 'sp_t_implacable', null, '{}'),
   ('s1', 29, 'elite', 'unlockable', 'sp_f_prisma', null, '{}'),
   ('s1', 30, 'elite', 'unlockable', 's1_corona_llamas', null, '{}'),      -- hito grande
   ('s1', 31, 'elite', 'unlockable', 'nc_dorado', null, '{}'),
-  -- 32 elite -> reroll_token (095)
+  -- 32 elite -> reroll_token (104)
   ('s1', 33, 'elite', 'unlockable', 'sp_t_resiliente', null, '{}'),
   ('s1', 34, 'elite', 'unlockable', 'sp_b_finalista', null, '{}'),
   ('s1', 35, 'elite', 'unlockable', 'sp_f_fatuo', null, '{}'),            -- hito
   ('s1', 36, 'elite', 'unlockable', 'th_prisma', null, '{}'),             -- tema legendary
   ('s1', 37, 'elite', 'unlockable', 'sp_t_senor', null, '{}'),
-  -- 38 elite -> booster (093)
+  -- 38 elite -> booster (102)
   ('s1', 39, 'elite', 'unlockable', 'sp_f_vortice', null, '{}'),
   ('s1', 40, 'elite', 'unlockable', 'sp_f_fenix', null, '{}'),            -- hito grande
   ('s1', 41, 'elite', 'unlockable', 'nc_espectro', null, '{}'),
   ('s1', 42, 'elite', 'unlockable', 'sp_b_imparable', null, '{}'),
-  -- 43 elite -> reroll_token (095)
+  -- 43 elite -> reroll_token (104)
   ('s1', 44, 'elite', 'unlockable', 'sp_b_semifinal', null, '{}'),
   ('s1', 45, 'elite', 'unlockable', 'sp_t_mente', null, '{}'),            -- hito · legendary
-  -- 46 elite -> booster (093)
+  -- 46 elite -> booster (102)
   ('s1', 47, 'elite', 'unlockable', 'sp_t_depredador', null, '{}'),
   ('s1', 48, 'elite', 'unlockable', 'sp_t_cazagigantes', null, '{}'),
   ('s1', 49, 'elite', 'unlockable', 'sp_t_intocable', null, '{}'),

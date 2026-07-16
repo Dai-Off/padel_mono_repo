@@ -1,6 +1,7 @@
--- 094_season_pass_season_s1.sql — Real S1 season window + full mission pool (season pass v2, phase 1).
+-- 103_season_pass_season_s1.sql — Real S1 season window + full mission pool (season pass v2, phase 1).
+-- (renumbered from 094; applied to Supabase under the old number)
 --
--- ORDER: run AFTER 091_season_pass_missions_v2.sql (adds `assignment` and
+-- ORDER: run AFTER 100_season_pass_missions_v2.sql (adds `assignment` and
 -- `condition_params` to season_pass_mission_definitions). Fixes the seeded
 -- season that expired 2026-04-30 while still active=true.
 --
@@ -32,13 +33,13 @@ set max_level = 50,
 where slug = 's1';
 
 -- ────────────────────────────────────────────────────────────
--- SECTION 2 — Mission pool (requires 091).
+-- SECTION 2 — Mission pool (requires 100).
 --
 -- condition_key = event type; the mission `period` bounds the date range,
 -- `target_count` is the event count, `condition_params` refines the filter.
 -- Keys the engine must support (phase 1 evaluators):
 --   daily_lesson            learning_sessions completed in period
---   active_day              player_active_days rows in period (table in 096)
+--   active_day              player_active_days rows in period (table in 105)
 --   match_completed         finished matches w/ confirmed score; params:
 --                           {"kind":"league"|"matchmaking"}, {"weekend":true},
 --                           {"start_after":"20:00"}, {"start_before":"14:00"},

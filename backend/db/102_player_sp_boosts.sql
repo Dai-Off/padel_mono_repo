@@ -1,6 +1,7 @@
--- 093_player_sp_boosts.sql — Consumable SP boosters + booster rewards (phase 3).
+-- 102_player_sp_boosts.sql — Consumable SP boosters + booster rewards (phase 3).
+-- (renumbered from 093; applied to Supabase under the old number)
 --
--- ORDER: requires 092 (season_pass_rewards). Run AFTER 092.
+-- ORDER: requires 101 (season_pass_rewards). Run AFTER 101.
 --
 -- Boost engine (plan §3/§6.4): sp_final = sp_base * clamp(1 + Σ bonuses, 1, boost_cap).
 -- Sources:
@@ -32,7 +33,7 @@ comment on table public.player_sp_boosts is
   'Consumable SP boosters (pass rewards). Active = consumed_at null and not expired; lesson_streak/catch_up derive at runtime.';
 
 -- ────────────────────────────────────────────────────────────
--- Booster rewards in the S1 track (50 niveles). Rellenan los huecos que 092
+-- Booster rewards in the S1 track (50 niveles). Rellenan los huecos que 101
 -- reserva (free 14/34/49, elite 8/19/27/38/46) — una recompensa por celda, sin
 -- colision con cosmeticos/SP. Auto-activan al otorgarse con ventana 24-72h.
 -- Re-seed idempotente: borra los boosters de s1 y re-siembra (limpia niveles
@@ -57,7 +58,7 @@ insert into public.season_pass_rewards (season_slug, level, tier, reward_type, b
   ('s1', 38, 'elite', 'sp_boost', '{"bonus":0.50,"expires_hours":72}', '{"icon":"🚀","label":"+50% SP · 72h"}', 0),
   ('s1', 46, 'elite', 'sp_boost', '{"bonus":0.60,"expires_hours":72}', '{"icon":"🚀","label":"+60% SP · 72h"}', 0);
 
--- "How to earn SP": streak boost row (deferred from 094 until the engine existed)
+-- "How to earn SP": streak boost row (deferred from 103 until the engine existed)
 insert into public.season_pass_sp_how_rows (season_slug, sort_order, icon, label, sp_hint) values
   ('s1', 4, '🔥', 'Racha diaria', 'Potencia todo el SP que ganas (+15% a +70%)')
 on conflict (season_slug, sort_order) do update set
