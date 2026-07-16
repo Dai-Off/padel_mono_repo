@@ -27,15 +27,16 @@ import { useTranslation } from '../i18n';
 import { useStripe } from '../stripe';
 import { confirmPaymentFromClient, createIntentForSeasonPassElite } from '../api/payments';
 import {
-  claimAllSeasonPassRewards,
-  claimSeasonPassReward,
-  fetchSeasonPassMe,
-  rerollSeasonPassMission,
   type ClaimedRewardDto,
-  type SeasonPassMeOk,
   type SeasonPassMissionDto,
   type SeasonPassTrackRewardDto,
 } from '../api/seasonPass';
+import {
+  useClaimAllRewards,
+  useClaimReward,
+  useRerollMission,
+  useSeasonPassMe,
+} from '../queries/seasonPass';
 import { RARITY_CONFIG } from '../design/rarity';
 import { resolveUnlockableIcon } from '../design/unlockableIcons';
 import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
@@ -704,75 +705,61 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const [showHowTo, setShowHowTo] = useState(false);
   const [elitePaying, setElitePaying] = useState(false);
   const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
-  const [claiming, setClaiming] = useState(false);
   const [claimAllRewards, setClaimAllRewards] = useState<ClaimedRewardDto[] | null>(null);
   const [celebrateReward, setCelebrateReward] = useState<SeasonPassTrackRewardDto | null>(null);
   const trackScrollRef = useRef<ScrollView>(null);
-  const [me, setMe] = useState<SeasonPassMeOk | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const token = session?.access_token;
-    if (!token) {
-      setMe(null);
-      setLoadErr(t('alerts.seasonPass.loginRequiredLoad'));
-      setLoading(false);
-      return;
-    }
-    setLoadErr(null);
-    const tz = 'Europe/Madrid';
-    const data = await fetchSeasonPassMe(token, tz);
-    if (!data) {
-      setLoadErr(t('alerts.seasonPass.loadFail'));
-      setMe(null);
-    } else {
-      setMe(data);
-    }
-    setLoading(false);
-  }, [session?.access_token, t]);
+  const passQuery = useSeasonPassMe();
+  const { refetch: refetchPass } = passQuery;
+  const me = passQuery.data ?? null;
+  // Solo el pull-to-refresh mueve el RefreshControl: los refetch en background
+  // (tras claims, por foco…) no deben mostrar ese spinner.
+  const [refreshing, setRefreshing] = useState(false);
+  const loadErr = !session?.access_token
+    ? t('alerts.seasonPass.loginRequiredLoad')
+    : passQuery.isError
+      ? t('alerts.seasonPass.loadFail')
+      : null;
+
+  const claimMutation = useClaimReward();
+  const claimAllMutation = useClaimAllRewards();
+  const rerollMutation = useRerollMission();
+  const claiming = claimMutation.isPending || claimAllMutation.isPending;
 
   // Reclama una recompensa concreta del track (claim manual).
   const handleClaim = useCallback(
     async (reward: SeasonPassTrackRewardDto) => {
-      const token = session?.access_token;
-      if (!token || claiming) return;
-      setClaiming(true);
-      const res = await claimSeasonPassReward(token, reward.id);
-      setClaiming(false);
-      if (res.ok) {
-        // Cierra el detalle, celebra la recompensa y refresca el track.
+      if (claiming) return;
+      try {
+        await claimMutation.mutateAsync(reward.id);
+        // Cierra el detalle y celebra con el reward del track: el caché ya
+        // quedó marcado como claimed y el /me reconcilia en background.
         setRewardDetail(null);
         setCelebrateReward({ ...reward, status: 'claimed' });
-        load();
+      } catch {
+        // Paridad con el comportamiento anterior: el claim fallido no avisa.
       }
     },
-    [session?.access_token, claiming, load]
+    [claiming, claimMutation]
   );
 
   // Reclama de una vez todas las recompensas disponibles.
   const handleClaimAll = useCallback(async () => {
-    const token = session?.access_token;
-    if (!token || claiming) return;
-    setClaiming(true);
-    const res = await claimAllSeasonPassRewards(token);
-    setClaiming(false);
-    if (res.ok && res.count > 0) {
-      setClaimAllRewards(res.rewards);
-      load();
+    if (claiming) return;
+    try {
+      const res = await claimAllMutation.mutateAsync();
+      if (res.count > 0) {
+        setClaimAllRewards(res.rewards);
+      }
+    } catch {
+      // Paridad: silencioso.
     }
-  }, [session?.access_token, claiming, load]);
-
-  useEffect(() => {
-    setLoading(true);
-    void load();
-  }, [load]);
+  }, [claiming, claimAllMutation]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    void load().finally(() => setRefreshing(false));
-  }, [load]);
+    void refetchPass().finally(() => setRefreshing(false));
+  }, [refetchPass]);
 
   // Confirmación de reroll: modal propio con el estilo dark de la app (el
   // Alert nativo desentona). rerollTarget != null = modal abierto.
@@ -799,22 +786,23 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   );
 
   const confirmReroll = useCallback(() => {
-    const token = session?.access_token;
     const target = rerollTarget;
-    if (!token || !target?.assignment_id || rerolling) return;
+    if (!target?.assignment_id || rerolling) return;
     setRerolling(true);
     setRerollErr(null);
-    void rerollSeasonPassMission(token, target.assignment_id, 'Europe/Madrid')
-      .then(async (r) => {
-        if (!r.ok) {
-          setRerollErr(t('alerts.seasonPass.rerollFail'));
-          return;
-        }
+    rerollMutation
+      .mutateAsync(target.assignment_id)
+      .then(async () => {
+        // El modal se cierra ya; los botones de reroll siguen deshabilitados
+        // (rerolling) hasta que el refetch trae la misión nueva.
         setRerollTarget(null);
-        await load();
+        await refetchPass();
+      })
+      .catch(() => {
+        setRerollErr(t('alerts.seasonPass.rerollFail'));
       })
       .finally(() => setRerolling(false));
-  }, [session?.access_token, rerollTarget, rerolling, load, t]);
+  }, [rerollTarget, rerolling, rerollMutation, refetchPass, t]);
 
   const spPer = me?.sp_per_level ?? DEFAULT_SP_PER_LEVEL;
   const levelMax = me?.level_max ?? 50;
@@ -925,7 +913,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
    * sin pintar chips/tabs con placeholders (evita cortes y renders por partes).
    */
   const awaitingPassPayload =
-    authLoading || (Boolean(loading && session?.access_token) && me === null);
+    authLoading || (Boolean(passQuery.isPending && session?.access_token) && me === null);
   const passReady = me !== null;
 
   const obtainedSP = useMemo(
@@ -998,7 +986,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
         return;
       }
 
-      await load();
+      await refetchPass();
       setShowElite(false);
       setShowEliteSuccess(true);
     } catch (e) {
@@ -1006,7 +994,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     } finally {
       setElitePaying(false);
     }
-  }, [session?.access_token, initPaymentSheet, presentPaymentSheet, load, t]);
+  }, [session?.access_token, initPaymentSheet, presentPaymentSheet, refetchPass, t]);
 
   // El pase es full-screen y oculta la tab bar (MainApp), así que no necesita
   // el scrollBottomPadding pensado para dejarle sitio: solo safe area + aire.
