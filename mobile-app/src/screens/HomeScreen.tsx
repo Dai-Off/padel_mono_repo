@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CompetitiveLeagueHomeCard,
@@ -229,40 +229,40 @@ export function HomeScreen({
       setRetrying(false);
     }
   };
-  // Entrada escalonada "tipo remount" sin remontar: al perder el foco los
-  // bloques se esconden en seco (la pantalla ya está tapada u oculta — nadie
-  // lo ve) y al volver la cascada corre sobre lienzo limpio. Nunca se resetea
-  // contenido a la vista, que era lo que producía el salto.
+  // Entrada escalonada "tipo remount" sin remontar. Solo se re-arma en
+  // CAMBIOS DE TAB: el swap es instantáneo, así que esconder en el blur es
+  // garantizado invisible y la vuelta entra en cascada sobre lienzo limpio.
+  // Al volver de pantallas apiladas (pase, detalles…) NO hay replay — el
+  // contenido sigue en su sitio, como hacen las apps grandes: cualquier
+  // reset ahí compite con la transición (timers = carreras perdidas) y
+  // acababa viéndose como un parpadeo.
   const [enterNonce, setEnterNonce] = useState(0);
   const [resetNonce, setResetNonce] = useState(0);
   const isFirstFocusRef = useRef(true);
-  const pendingResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabNavigation = useNavigation();
+  const tabRoute = useRoute();
   useFocusEffect(
     useCallback(() => {
-      // Vuelta rápida (back inmediato): cancela un reset todavía pendiente
-      // para no esconder contenido con la pantalla ya enfocada.
-      if (pendingResetRef.current) {
-        clearTimeout(pendingResetRef.current);
-        pendingResetRef.current = null;
-      }
-      let enterId: ReturnType<typeof setTimeout> | null = null;
       if (isFirstFocusRef.current) {
         // Primera carga: los bloques ya animan al montar; re-disparar aquí
         // haría tartamudear la entrada inicial.
         isFirstFocusRef.current = false;
       } else {
-        // Margen para que el fade de la pantalla saliente termine antes de
-        // que arranque la cascada.
-        enterId = setTimeout(() => setEnterNonce((n) => n + 1), 150);
+        // Si el blur anterior no escondió nada (vuelta de una pantalla
+        // apilada), animar visible→visible no produce ningún cambio.
+        setEnterNonce((n) => n + 1);
       }
       return () => {
-        if (enterId) clearTimeout(enterId);
-        // El blur puede llegar con la transición aún en marcha: se espera a
-        // que la pantalla entrante cubra del todo (fade de 220ms) antes de
-        // esconder, para que el reset sea siempre invisible.
-        pendingResetRef.current = setTimeout(() => setResetNonce((n) => n + 1), 260);
+        // ¿Este blur es un cambio de tab o una pantalla apilada encima?
+        // Si el tab activo ya no es este, el Home quedó oculto en este mismo
+        // frame: esconder aquí es seguro e invisible.
+        const state = tabNavigation.getState?.();
+        const activeTab = state?.routes?.[state.index ?? 0]?.name;
+        if (activeTab !== tabRoute.name) {
+          setResetNonce((n) => n + 1);
+        }
       };
-    }, []),
+    }, [tabNavigation, tabRoute.name]),
   );
 
   const [affinityModalVisible, setAffinityModalVisible] = useState(() => consumeAffinityModalPendingReopen());
