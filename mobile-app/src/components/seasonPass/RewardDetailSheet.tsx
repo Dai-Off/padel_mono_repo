@@ -344,7 +344,7 @@ const styles = StyleSheet.create({
   badgeRing: {
     width: 92,
     height: 92,
-    borderRadius: 46,
+    borderRadius: 26,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
