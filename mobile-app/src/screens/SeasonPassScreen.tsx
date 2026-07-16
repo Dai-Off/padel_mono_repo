@@ -42,6 +42,7 @@ import { resolveUnlockableIcon } from '../design/unlockableIcons';
 import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { AuthButton } from '../components/auth/AuthButton';
 import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
+import { SeasonPassSkeleton } from '../components/seasonPass/SeasonPassSkeleton';
 import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
 import { RewardClaimedModal } from '../components/seasonPass/RewardClaimedModal';
 import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
@@ -916,6 +917,25 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     authLoading || (Boolean(passQuery.isPending && session?.access_token) && me === null);
   const passReady = me !== null;
 
+  // Entrada escalonada al llegar el payload (skeleton → contenido): el hero
+  // aparece primero y tabs+cuerpo justo detrás. Corta (240ms) para que el
+  // warm start siga sintiéndose instantáneo.
+  const heroIn = useRef(new Animated.Value(0)).current;
+  const bodyIn = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!passReady) return;
+    Animated.stagger(70, [
+      Animated.timing(heroIn, { toValue: 1, duration: 240, useNativeDriver: true }),
+      Animated.timing(bodyIn, { toValue: 1, duration: 240, useNativeDriver: true }),
+    ]).start();
+  }, [passReady, heroIn, bodyIn]);
+  const heroInStyle = {
+    opacity: heroIn,
+    transform: [
+      { translateY: heroIn.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+    ],
+  };
+
   const obtainedSP = useMemo(
     () => missions.filter((x) => x.done).reduce((a, x) => a + x.sp_reward, 0),
     [missions]
@@ -1031,7 +1051,6 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
               end={{ x: 0.5, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
-            <RadialPulse />
             <Pressable
               onPress={onBack}
               hitSlop={14}
@@ -1039,10 +1058,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
             >
               <Ionicons name="arrow-back" size={18} color="#fff" />
             </Pressable>
-            <View style={[styles.heroInner, styles.passLoadingInner]}>
-              <ActivityIndicator color={ACCENT} size="large" />
-              <Text style={styles.passLoadingHint}>{t('alerts.seasonPass.loading')}</Text>
-            </View>
+            <SeasonPassSkeleton />
           </View>
         ) : passReady ? (
           <>
@@ -1074,7 +1090,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                 <Ionicons name="help" size={18} color="#fff" />
               </Pressable>
 
-              <View style={styles.heroInner}>
+              <Animated.View style={[styles.heroInner, heroInStyle]}>
                 <View style={{ alignItems: 'center', marginBottom: 10 }}>
                   <View>
                     <LinearGradient
@@ -1172,12 +1188,12 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                     )}
                   </View>
                 </View>
-              </View>
+              </Animated.View>
             </View>
 
             {/* —— TABS (X7: activo naranja sólido) —— */}
             <View style={[styles.tabsSticky, { paddingTop: 10 }]}>
-          <View style={styles.tabsRow}>
+          <Animated.View style={[styles.tabsRow, { opacity: bodyIn }]}>
             <Pressable
               onPress={() => onTabChange('rewards')}
               style={[styles.tabMain, tab === 'rewards' && styles.tabMainOn]}
@@ -1194,21 +1210,34 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                 {t('alerts.seasonPass.tabMissions')}
               </Text>
             </Pressable>
-          </View>
+          </Animated.View>
         </View>
 
-        <Animated.View style={{ opacity: contentOp, paddingHorizontal: PAD, paddingTop: 8 }}>
+        <Animated.View
+          style={{
+            opacity: Animated.multiply(contentOp, bodyIn),
+            transform: [
+              { translateY: bodyIn.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
+            ],
+            paddingHorizontal: PAD,
+            paddingTop: 8,
+          }}
+        >
           {tab === 'rewards' ? (
             <View>
               {boostPct > 0 ? (
                 <View style={styles.boostBanner}>
-                  <Ionicons name="flame" size={16} color={ACCENT} />
-                  <Text style={styles.boostBannerTxt}>
-                    {t('home.seasonPass.boostActive', { pct: boostPct })}
-                  </Text>
-                  <Text style={styles.boostBannerSources} numberOfLines={1}>
-                    {boostSourcesLabel}
-                  </Text>
+                  <View style={styles.boostBannerHeader}>
+                    <Ionicons name="flame" size={16} color={ACCENT} />
+                    <Text style={styles.boostBannerTxt}>
+                      {t('home.seasonPass.boostActive', { pct: boostPct })}
+                    </Text>
+                  </View>
+                  {boostSourcesLabel ? (
+                    <Text style={styles.boostBannerSources} numberOfLines={2}>
+                      {boostSourcesLabel}
+                    </Text>
+                  ) : null}
                 </View>
               ) : null}
 
@@ -1984,9 +2013,8 @@ const styles = StyleSheet.create({
   },
   claimSummaryCtaTxt: { color: '#0B1120', fontSize: 15, fontWeight: '800' },
   boostBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    flexDirection: 'column',
+    gap: 3,
     backgroundColor: 'rgba(241,143,52,0.08)',
     borderColor: 'rgba(241,143,52,0.25)',
     borderWidth: 1,
@@ -1995,8 +2023,9 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     marginBottom: 10,
   },
+  boostBannerHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   boostBannerTxt: { color: ACCENT, fontSize: 13, fontWeight: '800' },
-  boostBannerSources: { flex: 1, color: 'rgba(255,255,255,0.55)', fontSize: 11, textAlign: 'right' },
+  boostBannerSources: { color: 'rgba(255,255,255,0.5)', fontSize: 9.5, lineHeight: 13 },
   rerollBtn: {
     width: 24,
     height: 24,
