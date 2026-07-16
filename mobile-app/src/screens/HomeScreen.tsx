@@ -39,6 +39,9 @@ import { MatchInviteBanner } from '../components/partido/MatchInviteBanner';
 import type { ReceivedMatchInvite } from '../api/matchInvites';
 import { updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
 import { type SeasonPassMissionDto } from '../api/seasonPass';
+import { useQueryClient } from '@tanstack/react-query';
+import { seasonPassKeys } from '../queries/keys';
+import { useSeasonPassMe } from '../queries/seasonPass';
 import {
   isSeasonPassSpCapped,
   seasonPassHomeNextLine,
@@ -195,21 +198,29 @@ export function HomeScreen({
     courtReservationsLoading,
     publicTournamentsCount,
     tournamentsLoading,
-    seasonPassMe,
-    seasonPassLoading,
-    refreshSeasonPass,
     stats,
     statsLoading,
     refreshStreak,
     hasInitialError,
     refreshAll,
   } = useHomeData();
+  // Season pass: query compartida (misma que la pantalla del pase y el host
+  // de celebraciones). isLoading = primera carga en vuelo, como el antiguo
+  // seasonPassLoading del contexto.
+  const passQuery = useSeasonPassMe();
+  const { refetch: refetchPass } = passQuery;
+  const seasonPassMe = passQuery.data ?? null;
+  const seasonPassLoading = passQuery.isLoading;
+  const queryClient = useQueryClient();
   // Feedback visual mientras "Reintentar" del banner de error está en vuelo.
   const [retrying, setRetrying] = useState(false);
   const handleRetry = async () => {
     setRetrying(true);
     try {
-      await refreshAll();
+      await Promise.all([
+        refreshAll(),
+        session?.access_token ? refetchPass() : Promise.resolve(),
+      ]);
     } finally {
       setRetrying(false);
     }
@@ -305,10 +316,13 @@ export function HomeScreen({
   // a través de su TTL en HomeDataContext.
   useEffect(() => {
     if (streakRefreshKey > 0) {
-      void refreshSeasonPass({ force: true });
+      const userId = session?.user?.id;
+      if (userId) {
+        void queryClient.invalidateQueries({ queryKey: seasonPassKeys.all(userId) });
+      }
       void refreshStreak({ force: true });
     }
-  }, [streakRefreshKey, refreshSeasonPass, refreshStreak]);
+  }, [streakRefreshKey, queryClient, session?.user?.id, refreshStreak]);
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 

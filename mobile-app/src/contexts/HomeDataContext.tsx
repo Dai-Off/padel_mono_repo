@@ -13,7 +13,6 @@ import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { fetchPublicTournaments } from '../api/tournaments';
-import { ackSeasonPassMissions, fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchMyCourtReservations, type CourtReservation } from '../api/bookings';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
@@ -91,13 +90,6 @@ type HomeDataValue = {
   tournamentsLoading: boolean;
   refreshTournaments: (opts?: { force?: boolean }) => Promise<void>;
 
-  // Season Pass
-  seasonPassMe: SeasonPassMeOk | null;
-  seasonPassLoading: boolean;
-  refreshSeasonPass: (opts?: { force?: boolean }) => Promise<void>;
-  /** Ack de celebraciones diferidas: las quita localmente y avisa al backend. */
-  ackSeasonPassCelebrations: (assignmentIds: string[]) => Promise<void>;
-
   // Home stats (count pistas libres + jugadores) — quick actions del home.
   stats: HomeStats | null;
   statsLoading: boolean;
@@ -162,10 +154,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
   const [tournamentsLoading, setTournamentsLoading] = useState(false);
   const tournamentsLoadedAt = useRef(0);
-
-  const [seasonPassMe, setSeasonPassMe] = useState<SeasonPassMeOk | null>(null);
-  const [seasonPassLoading, setSeasonPassLoading] = useState(false);
-  const seasonPassLoadedAt = useRef(0);
 
   const [stats, setStats] = useState<HomeStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -538,53 +526,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
-  const refreshSeasonPass = useCallback(
-    async ({ force = false }: { force?: boolean } = {}) => {
-      if (!token) {
-        setSeasonPassMe(null);
-        return;
-      }
-      if (!force && seasonPassLoadedAt.current > 0) return;
-      const isFirst = seasonPassLoadedAt.current === 0;
-      if (isFirst) setSeasonPassLoading(true);
-      try {
-        const tz = CLUB_IANA_TIMEZONE;
-        /** No refrescamos token ante 4xx/5xx: si /season-pass/me falla (p. ej.
-         * 500 sin migración 050), refrescar token cambia access_token, re-dispara
-         * efectos y entra en bucle infinito. */
-        const data = await fetchSeasonPassMe(token, tz);
-        setSeasonPassMe(data);
-        seasonPassLoadedAt.current = Date.now();
-        // No tocamos hasInitialError aquí: el season pass puede dar 500 sin
-        // migración aplicada en clubs en desarrollo, no es bloqueante para
-        // el Home. Las cards principales (profile, matches, tournaments)
-        // mandan en este flag.
-      } catch {
-        // Silencioso, mismo motivo.
-      } finally {
-        if (isFirst) setSeasonPassLoading(false);
-      }
-    },
-    [token],
-  );
-
-  const ackSeasonPassCelebrations = useCallback(
-    async (assignmentIds: string[]) => {
-      if (assignmentIds.length === 0) return;
-      // Limpieza optimista: el modal se cierra al instante; si el ack falla,
-      // el backend las re-entrega en el siguiente /me y se vuelven a mostrar.
-      setSeasonPassMe((prev) => {
-        if (!prev?.pending_celebrations?.length) return prev;
-        const remaining = prev.pending_celebrations.filter(
-          (c) => !assignmentIds.includes(c.assignment_id),
-        );
-        return { ...prev, pending_celebrations: remaining };
-      });
-      if (token) await ackSeasonPassMissions(token, assignmentIds);
-    },
-    [token],
-  );
-
   const refreshStats = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       if (!force && statsLoadedAt.current > 0) return;
@@ -645,7 +586,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       refreshMatches({ force: true }),
       refreshCourtReservations({ force: true }),
       refreshTournaments({ force: true }),
-      refreshSeasonPass({ force: true }),
       refreshStats({ force: true }),
       refreshStreak({ force: true }),
     ]);
@@ -654,7 +594,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     refreshMatches,
     refreshCourtReservations,
     refreshTournaments,
-    refreshSeasonPass,
     refreshStats,
     refreshStreak,
   ]);
@@ -675,7 +614,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     matchesLoadedAt.current = 0;
     courtReservationsLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
-    seasonPassLoadedAt.current = 0;
     statsLoadedAt.current = 0;
     streakLoadedAt.current = 0;
     setHasInitialError(false);
@@ -684,7 +622,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     setMisPartidos([]);
     setMisReservasPista([]);
     setPublicTournamentsCount(null);
-    setSeasonPassMe(null);
     setStats(null);
     setStreak({ currentStreak: 0, longestStreak: 0, multiplier: 0, lastCompleted: null });
   }, [userId]);
@@ -702,7 +639,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       profileLoadedAt.current = 0;
       matchesLoadedAt.current = 0;
       tournamentsLoadedAt.current = 0;
-      seasonPassLoadedAt.current = 0;
       statsLoadedAt.current = 0;
       streakLoadedAt.current = 0;
     }
@@ -715,7 +651,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     matchesLoadedAt.current = 0;
     courtReservationsLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
-    seasonPassLoadedAt.current = 0;
     statsLoadedAt.current = 0;
     streakLoadedAt.current = 0;
     setHasInitialError(false);
@@ -723,7 +658,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     void refreshMatches({ force: true });
     void refreshCourtReservations({ force: true });
     void refreshTournaments({ force: true });
-    void refreshSeasonPass({ force: true });
     void refreshStats({ force: true });
     void refreshStreak({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -734,7 +668,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     refreshMatches,
     refreshCourtReservations,
     refreshTournaments,
-    refreshSeasonPass,
     refreshStats,
     refreshStreak,
   });
@@ -743,7 +676,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     refreshMatches,
     refreshCourtReservations,
     refreshTournaments,
-    refreshSeasonPass,
     refreshStats,
     refreshStreak,
   };
@@ -766,7 +698,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         void fns.refreshMatches({ force: true });
         void fns.refreshCourtReservations({ force: true });
         void fns.refreshTournaments({ force: true });
-        void fns.refreshSeasonPass({ force: true });
         void fns.refreshStats({ force: true });
         void fns.refreshStreak({ force: true });
       }
@@ -792,10 +723,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       publicTournamentsCount,
       tournamentsLoading,
       refreshTournaments,
-      seasonPassMe,
-      seasonPassLoading,
-      refreshSeasonPass,
-      ackSeasonPassCelebrations,
       stats,
       statsLoading,
       refreshStats,
@@ -822,10 +749,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       publicTournamentsCount,
       tournamentsLoading,
       refreshTournaments,
-      seasonPassMe,
-      seasonPassLoading,
-      refreshSeasonPass,
-      ackSeasonPassCelebrations,
       stats,
       statsLoading,
       refreshStats,
