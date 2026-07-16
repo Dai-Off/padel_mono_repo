@@ -45,6 +45,7 @@ import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
 import { SeasonPassSkeleton } from '../components/seasonPass/SeasonPassSkeleton';
 import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
 import { RewardClaimedModal } from '../components/seasonPass/RewardClaimedModal';
+import { BoostDetailSheet } from '../components/seasonPass/BoostDetailSheet';
 import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 type Props = { onBack: () => void; onGoToProfile?: () => void };
@@ -917,16 +918,42 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     authLoading || (Boolean(passQuery.isPending && session?.access_token) && me === null);
   const passReady = me !== null;
 
-  // Entrada escalonada al llegar el payload (skeleton → contenido): el hero
-  // aparece primero y tabs+cuerpo justo detrás. Corta (240ms) para que el
-  // warm start siga sintiéndose instantáneo.
+  // Skeleton como overlay con crossfade: en vez de desmontarse de golpe al
+  // llegar el payload (dejaba un frame oscuro antes del fade del contenido),
+  // vive encima del contenido y se desvanece mientras este entra por debajo.
+  const [skeletonVisible, setSkeletonVisible] = useState(awaitingPassPayload);
+  const skeletonOp = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (awaitingPassPayload || !skeletonVisible) return;
+    Animated.timing(skeletonOp, {
+      toValue: 0,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setSkeletonVisible(false);
+    });
+  }, [awaitingPassPayload, skeletonVisible, skeletonOp]);
+
+  // Entrada escalonada del contenido (hero primero, tabs+cuerpo 80ms detrás),
+  // con ease-out para que frene suave en vez de cortarse en seco.
   const heroIn = useRef(new Animated.Value(0)).current;
   const bodyIn = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (!passReady) return;
-    Animated.stagger(70, [
-      Animated.timing(heroIn, { toValue: 1, duration: 240, useNativeDriver: true }),
-      Animated.timing(bodyIn, { toValue: 1, duration: 240, useNativeDriver: true }),
+    Animated.stagger(80, [
+      Animated.timing(heroIn, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(bodyIn, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
     ]).start();
   }, [passReady, heroIn, bodyIn]);
   const heroInStyle = {
@@ -1058,7 +1085,6 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
             >
               <Ionicons name="arrow-back" size={18} color="#fff" />
             </Pressable>
-            <SeasonPassSkeleton />
           </View>
         ) : passReady ? (
           <>
@@ -1402,6 +1428,26 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
           </View>
         )}
       </ScrollView>
+
+      {skeletonVisible ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { opacity: skeletonOp }]}
+        >
+          <LinearGradient
+            colors={['#1f0900', '#2d1200', BG]}
+            locations={[0, 0.55, 1]}
+            start={{ x: 0.1, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+          {/* Réplica visual del back FAB: el real (táctil) queda debajo. */}
+          <View style={[styles.backFab, { top: 8 }]}>
+            <Ionicons name="arrow-back" size={18} color="#fff" />
+          </View>
+          <SeasonPassSkeleton />
+        </Animated.View>
+      ) : null}
 
       <Modal
         visible={rerollTarget !== null}
