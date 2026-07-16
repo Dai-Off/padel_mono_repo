@@ -119,11 +119,12 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="CrearPartido" component={CrearPartidoRoute} />
             <RootStack.Screen name="CourtReservationDetail" component={CourtReservationDetailRoute} />
             {/* El pase pinta al instante (skeleton/cache), así que puede
-                permitirse la animación nativa de push sin mostrar cascarón. */}
+                permitirse animación de entrada sin mostrar cascarón. Fade
+                discreto: el slide se descartó por brusco para esta pantalla. */}
             <RootStack.Screen
               name="SeasonPass"
               component={SeasonPassRoute}
-              options={{ animation: 'slide_from_right' }}
+              options={{ animation: 'fade', animationDuration: 220 }}
             />
             {/* Grafo social / partidos */}
             <RootStack.Screen name="PartidoDetail" component={PartidoDetailRoute} />
