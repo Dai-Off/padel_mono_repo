@@ -611,7 +611,9 @@ const useClubData = (dateOrStr: Date | string) => {
         addHiddenCourt,
         removeCourt,
         typeColorOverrides,
+        setTypeColorOverrides,
         typeConfigs,
+        setTypeConfigs,
     };
 };
 
@@ -719,12 +721,12 @@ function mapBookings(
                     const tournament = link ? (Array.isArray(link.tournaments) ? link.tournaments[0] : link.tournaments) : null;
                     const inscriptions: any[] = tournament?.tournament_inscriptions ?? [];
                     const active = inscriptions.filter((ins: any) => ins.status === 'confirmed' || ins.status === 'pending');
-                    const players: { name: string; isMember: boolean; level: number; paidAmount: number; paymentMethod: null }[] = [];
+                    const players: { name: string; isMember: boolean; level: number; paidAmount: number; paymentMethod: null; phone: string | null }[] = [];
                     for (const ins of active) {
                         const p1 = Array.isArray(ins.players_1) ? ins.players_1[0] : ins.players_1;
                         const p2 = Array.isArray(ins.players_2) ? ins.players_2[0] : ins.players_2;
-                        if (p1) players.push({ name: `${p1.first_name} ${p1.last_name}`, isMember: false, level: p1.elo_rating ?? 0, paidAmount: 0, paymentMethod: null });
-                        if (p2) players.push({ name: `${p2.first_name} ${p2.last_name}`, isMember: false, level: p2.elo_rating ?? 0, paidAmount: 0, paymentMethod: null });
+                        if (p1) players.push({ name: `${p1.first_name} ${p1.last_name}`, isMember: false, level: p1.elo_rating ?? 0, paidAmount: 0, paymentMethod: null, phone: p1.phone ?? null });
+                        if (p2) players.push({ name: `${p2.first_name} ${p2.last_name}`, isMember: false, level: p2.elo_rating ?? 0, paidAmount: 0, paymentMethod: null, phone: p2.phone ?? null });
                     }
                     return players;
                 }
@@ -733,7 +735,7 @@ function mapBookings(
                     // Only organizer, no booking_participants — use payment_transactions
                     const txInfo = txByPlayer.get(b.organizer_player_id);
                     const orgName = formatPlayerDisplayName(organizer) || playerName;
-                    return [{ name: orgName, isMember: false, level: organizer.elo_rating ?? 0, paidAmount: (txInfo?.amount ?? 0) / 100, paymentMethod: (txInfo?.method ?? null) as any }];
+                    return [{ name: orgName, isMember: false, level: organizer.elo_rating ?? 0, paidAmount: (txInfo?.amount ?? 0) / 100, paymentMethod: (txInfo?.method ?? null) as any, phone: organizer.phone ?? null }];
                 }
                 return participants.map((p: any) => {
                     const pl = Array.isArray(p.players) ? p.players[0] : p.players;
@@ -746,7 +748,7 @@ function mapBookings(
                     const paidAmount = paidFromTx > 0 ? paidFromTx : (paidFromBp > 0 ? paidFromBp : paidFromShare);
                     // For app payments method is null in BP but they always pay via card (Stripe)
                     const paymentMethod = (p.payment_method ?? txInfo?.method ?? (p.payment_status === 'paid' ? 'card' : null)) as any;
-                    return { name, isMember: false, level: pl?.elo_rating ?? 0, paidAmount, paymentMethod };
+                    return { name, isMember: false, level: pl?.elo_rating ?? 0, paidAmount, paymentMethod, phone: pl?.phone ?? null };
                 });
             })(),
             isPublicOpenMatch,
@@ -842,7 +844,9 @@ function GrillaViewInner() {
     addHiddenCourt,
     removeCourt,
     typeColorOverrides,
+    setTypeColorOverrides,
     typeConfigs,
+    setTypeConfigs,
   } = useClubData(selectedDate);
 
   const gridBounds = useMemo(
@@ -945,7 +949,7 @@ function GrillaViewInner() {
   const [gridSelectMode, setGridSelectMode] = useState(false);
   const [checkedReservationIds, setCheckedReservationIds] = useState<Set<string>>(new Set());
   const [gridBulkVoidOpen, setGridBulkVoidOpen] = useState(false);
-  const [bulkMode, setBulkMode] = useState<'maintenance' | 'tournament'>('maintenance');
+  const [bulkMode, setBulkMode] = useState<'maintenance' | 'tournament' | 'custom'>('maintenance');
   const courtsGridRef = useRef<HTMLDivElement | null>(null);
   const gridShellRef = useRef<HTMLDivElement | null>(null);
 
@@ -2399,6 +2403,7 @@ function resolveManualBookingTotalCents(
     if (action === 'unblock_maintenance') { setBulkUnblockOpen(true); return; }
     if (action === 'maintenance') { setBulkMode('maintenance'); setBulkMaintenanceOpen(true); return; }
     if (action === 'tournament') { setBulkMode('tournament'); setBulkMaintenanceOpen(true); return; }
+    if (action === 'custom') { setBulkMode('custom'); setBulkMaintenanceOpen(true); return; }
     if (action === 'match') { openSingleCourtDraft('standard'); return; }
     if (action === 'class') { openSingleCourtDraft('school_individual'); return; }
   }, [openSingleCourtDraft]);
@@ -3300,15 +3305,25 @@ function resolveManualBookingTotalCents(
           <BulkSlotMaintenanceModal
             dateStr={selectedDateKey}
             slots={selectedSlots}
-            reservations={reservations}
+            reservations={serverListReservations.length > 0 ? serverListReservations : reservations}
             gridStartHour={gridBounds.startHour}
             mode={bulkMode}
+            typeConfigs={Object.keys(typeConfigs).length > 0 ? typeConfigs : undefined}
+            clubId={clubId}
+            onTypeConfigsChange={(configs) => {
+              setTypeConfigs(configs);
+              const colorMap: Record<string, string> = {};
+              for (const [type, entry] of Object.entries(configs)) {
+                if (entry.color) colorMap[type] = entry.color;
+              }
+              setTypeColorOverrides(colorMap);
+            }}
             onClose={() => {
               setBulkMaintenanceOpen(false);
               clearGridSelection();
             }}
             onDone={() => {
-              clearGridSelection();
+              // Solo refresca; el modal sigue abierto para ver omitidos hasta "Cerrar".
               refresh();
             }}
           />
@@ -3323,7 +3338,6 @@ function resolveManualBookingTotalCents(
               clearGridSelection();
             }}
             onDone={() => {
-              clearGridSelection();
               refresh();
             }}
           />

@@ -1,6 +1,7 @@
 import React from 'react';
-import { X, Pencil, Banknote, CreditCard, Wallet } from 'lucide-react';
+import { X, Pencil, Banknote, CreditCard, Wallet, Copy } from 'lucide-react';
 import clsx from 'clsx';
+import { toast } from 'sonner';
 import type { Reservation } from '../types';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import {
@@ -120,7 +121,26 @@ export const ReservationDetailModal: React.FC<Props> = ({
                                             </span>
                                             <div className="min-w-0">
                                                 <span className="font-medium text-gray-900 truncate block">{p.name}</span>
-                                                <span className="text-[11px] text-gray-500">Elo {p.level.toFixed(2)}</span>
+                                                <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                                                    <span>Elo {p.level.toFixed(2)}</span>
+                                                    {p.phone?.trim() && (
+                                                        <>
+                                                            <span>·</span>
+                                                            <span
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    void navigator.clipboard.writeText(p.phone!.trim());
+                                                                    toast.success('Teléfono copiado');
+                                                                }}
+                                                                className="inline-flex items-center gap-1 cursor-pointer hover:text-blue-600 transition-colors group/phone font-medium"
+                                                                title="Copiar teléfono"
+                                                            >
+                                                                <span>{p.phone.trim()}</span>
+                                                                <Copy className="w-3 h-3 text-gray-400 opacity-0 group-hover/phone:opacity-100 transition-opacity" />
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-1 shrink-0">

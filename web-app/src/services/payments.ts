@@ -20,6 +20,8 @@ export type PaymentTransaction = {
   status: string;
   created_at: string;
   booking_id?: string | null;
+  booking_status?: string | null;
+  cancelled_by?: string | null;
   start_at: string | null;
   end_at: string | null;
   court_name: string | null;
@@ -44,6 +46,9 @@ export type CashClosingBookingExpected = {
   total_price_cents: number | null;
   cash_paid_cents: number;
   card_paid_cents: number;
+  client_name?: string | null;
+  paid_at?: string | null;
+  ref?: string | null;
 };
 
 export type CashClosingStoreSaleLine = {
@@ -55,6 +60,8 @@ export type CashClosingStoreSaleLine = {
   movement_at: string | null;
   booking_id: string | null;
   player_id: string | null;
+  client_name?: string | null;
+  ref?: string | null;
 };
 
 export type CashMovementType = 'withdrawal' | 'deposit';
@@ -154,6 +161,39 @@ export const paymentsService = {
       `/payments/club-transactions?${q}`
     );
     return res.transactions ?? [];
+  },
+
+  exportClubTransactionsCsv: async (
+    clubId: string,
+    dateFrom?: string,
+    dateTo?: string,
+    timezone?: string,
+  ): Promise<Blob> => {
+    const q = new URLSearchParams({ club_id: clubId });
+    if (dateFrom) q.set('date_from', dateFrom);
+    if (dateTo) q.set('date_to', dateTo);
+    if (timezone) q.set('timezone', timezone);
+
+    const { getApiBase } = await import('./api');
+
+    // Hacemos fetch manual usando la URL base correcta del API y el token del almacenamiento de padel
+    const apiBase = getApiBase();
+    const token = localStorage.getItem('padel_session') 
+      ? JSON.parse(localStorage.getItem('padel_session')!).access_token 
+      : null;
+
+    const headers: Record<string, string> = {
+      'Authorization': token ? `Bearer ${token}` : '',
+    };
+    const response = await fetch(`${apiBase}/payments/club-transactions/export?${q}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Error al exportar transacciones');
+    }
+    return response.blob();
   },
 
   getCashClosingExpected: async (clubId: string, date?: string, timezone?: string): Promise<CashClosingExpected> => {

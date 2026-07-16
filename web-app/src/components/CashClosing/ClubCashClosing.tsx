@@ -400,6 +400,34 @@ export function ClubCashClosingTab({
 
   const timelineEntries = useMemo((): CashTimelineEntry[] => {
     const items: CashTimelineEntry[] = [];
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const fmtSlot = (iso: string | null | undefined) => {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (!Number.isFinite(d.getTime())) return '';
+      return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    };
+    const fmtTime = (iso: string | null | undefined) => {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (!Number.isFinite(d.getTime())) return '';
+      return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    };
+    const shortId = (id: string) => id.replace(/-/g, '').slice(-7).toUpperCase();
+    const bookingPaymentMethod = (cash: number, card: number) => {
+      if (cash > 0 && card > 0) return 'Efectivo / Tarjeta';
+      if (cash > 0) return 'Efectivo';
+      if (card > 0) return 'Tarjeta';
+      return '—';
+    };
+    const storePaymentMethod = (method: string) => {
+      const m = method.toLowerCase();
+      if (m === 'cash') return 'Efectivo';
+      if (m === 'card') return 'Tarjeta';
+      if (m === 'wallet') return 'Monedero';
+      return method || '—';
+    };
+
     for (const o of openingsForDay) {
       items.push({
         id: `open-${o.id}`,
@@ -410,6 +438,7 @@ export function ClubCashClosingTab({
         amountEur: o.opening_cash_cents / 100,
         tone: 'green',
         subtitle: o.notes ?? undefined,
+        ref: shortId(o.id),
       });
     }
     for (const r of historyRecords) {
@@ -421,10 +450,13 @@ export function ClubCashClosingTab({
         title: isCierre ? t('cash_section_close') : t('cash_section_count'),
         employeeName: r.employeeName,
         tone: isCierre ? 'neutral' : 'blue',
+        ref: shortId(r.id),
         details: [
-          `Real: ${(r.realCashTotal + r.realCardTotal).toFixed(2)} €`,
-          `Sistema: ${(r.systemCashTotal + r.systemCardTotal).toFixed(2)} €`,
-          `Diferencia: ${r.totalDifference > 0 ? '+' : ''}${r.totalDifference.toFixed(2)} €`,
+          isCierre
+            ? `Efectivo según programa: ${r.systemCashTotal.toFixed(2).replace('.', ',')} €`
+            : `Efectivo según programa: ${r.systemCashTotal.toFixed(2).replace('.', ',')} €`,
+          `Tarjeta sistema: ${r.systemCardTotal.toFixed(2).replace('.', ',')} €`,
+          `Diferencia: ${r.totalDifference > 0 ? '+' : ''}${r.totalDifference.toFixed(2).replace('.', ',')} €`,
         ],
       });
     }
@@ -438,20 +470,30 @@ export function ClubCashClosingTab({
         amountEur: m.amount_cents / 100,
         tone: m.movement_type === 'withdrawal' ? 'red' : 'emerald',
         subtitle: m.notes ?? undefined,
+        paymentMethod: 'Efectivo',
+        clientName: null,
+        ref: shortId(m.id),
       });
     }
     for (const b of expectedBookings) {
-      if (!b.start_at) continue;
       const total = (b.cash_paid_cents + b.card_paid_cents) / 100;
       if (total <= 0) continue;
+      const atIso = b.paid_at || b.start_at;
+      if (!atIso) continue;
+      const ref = b.ref || shortId(b.booking_id);
+      const slotStart = fmtSlot(b.start_at);
+      const slotEnd = fmtTime(b.end_at);
+      const court = b.court_name ?? 'Pista';
       items.push({
         id: `sale-${b.booking_id}`,
-        at: new Date(b.start_at),
+        at: new Date(atIso),
         kind: 'sale',
-        title: b.court_name ?? 'Reserva',
+        title: `Reserva ref. ${ref}${slotStart ? ` ${slotStart}` : ''}${slotEnd ? `–${slotEnd}` : ''}, ${court}`,
         tone: 'neutral',
         amountEur: total,
-        subtitle: `Efectivo ${(b.cash_paid_cents / 100).toFixed(2)} € · Tarjeta ${(b.card_paid_cents / 100).toFixed(2)} €`,
+        clientName: b.client_name ?? null,
+        paymentMethod: bookingPaymentMethod(b.cash_paid_cents, b.card_paid_cents),
+        ref,
         booking_id: b.booking_id,
         onOpenBooking: openBookingInGrilla,
         onOpenCart: openCart,
@@ -459,6 +501,7 @@ export function ClubCashClosingTab({
     }
     for (const line of storeSaleLines) {
       if (!line.movement_at) continue;
+      const ref = line.ref || shortId(line.sale_id || line.movement_id);
       items.push({
         id: `store-${line.movement_id}`,
         at: new Date(line.movement_at),
@@ -466,7 +509,9 @@ export function ClubCashClosingTab({
         title: line.name,
         tone: 'neutral',
         amountEur: line.amount_cents / 100,
-        subtitle: `Tienda · ${line.payment_method}`,
+        clientName: line.client_name ?? null,
+        paymentMethod: storePaymentMethod(line.payment_method),
+        ref,
         booking_id: line.booking_id ?? undefined,
         player_id: line.player_id,
         sale_id: line.sale_id,
@@ -585,7 +630,9 @@ export function ClubCashClosingTab({
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <h3 className="text-xs font-bold text-[#1A1A1A] mb-3">{t('cash_day_timeline')}</h3>
+            <h3 className="text-xs font-bold text-[#1A1A1A] mb-3 uppercase tracking-wide">
+              Listado diario de caja
+            </h3>
             <CashDayTimeline entries={timelineEntries} emptyLabel={t('cash_sales_empty')} />
           </div>
 

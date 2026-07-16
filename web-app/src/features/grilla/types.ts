@@ -28,7 +28,9 @@ export interface PlayerDetails {
     paidAmount: number; // e.g., 3.67
     paymentMethod?: PaymentMethod;
     walletAmountCents?: number;
+    phone?: string | null;
 }
+
 
 export interface Court {
     id: string;

@@ -166,6 +166,7 @@ router.post('/:id/gift-to-player', requireAuthUser, async (req: Request, res: Re
                         price_cents: 0,
                         currency: 'EUR',
                         status: 'active',
+                        bonus_id: id,
                     })
                     .select()
                     .single();

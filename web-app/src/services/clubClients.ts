@@ -33,6 +33,8 @@ export type ClubClientFilters = {
   has_current_booking?: boolean;
   /** Solo clientes inscritos en algún torneo activo del club. */
   has_tournament?: boolean;
+  has_class_bono?: boolean;
+  bonus_id?: string;
 };
 
 function buildQs(clubId: string, filters?: string | ClubClientFilters): URLSearchParams {
@@ -61,6 +63,8 @@ function buildQs(clubId: string, filters?: string | ClubClientFilters): URLSearc
   if (f.bookings_to?.trim()) qs.set('bookings_to', f.bookings_to.trim());
   if (typeof f.has_current_booking === 'boolean') qs.set('has_current_booking', f.has_current_booking ? '1' : '0');
   if (typeof f.has_tournament === 'boolean') qs.set('has_tournament', f.has_tournament ? '1' : '0');
+  if (typeof f.has_class_bono === 'boolean') qs.set('has_class_bono', f.has_class_bono ? '1' : '0');
+  if (f.bonus_id?.trim()) qs.set('bonus_id', f.bonus_id.trim());
   return qs;
 }
 

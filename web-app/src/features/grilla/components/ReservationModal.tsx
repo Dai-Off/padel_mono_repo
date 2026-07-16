@@ -18,6 +18,7 @@ import {
     MessageSquare,
     Send,
     Link2,
+    Copy,
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
@@ -130,6 +131,8 @@ interface ReservationModalProps {
     onCancelMaintenance?: (bookingIds: string[]) => Promise<void>;
     /** Embebido en Partidos: sin overlay ni portal. */
     presentation?: 'modal' | 'inline';
+    /** Pestaña inicial al abrir (p. ej. chat desde lista de partidos). */
+    initialTab?: 'details' | 'chat';
 }
 
 // Helper: Player Search Component
@@ -234,11 +237,33 @@ export const PlayerSearch: React.FC<{
                                 <p className="text-sm font-bold text-gray-900 truncate">
                                     {`${selectedPlayer.first_name ?? ''} ${selectedPlayer.last_name ?? ''}`.trim() || formatPlayerLabel(selectedPlayer)}
                                 </p>
-                                <p className="text-[10px] text-gray-500 truncate">
-                                    {selectedPlayer.username?.trim()
-                                        ? `@${selectedPlayer.username.trim()}`
-                                        : (formatPlayerSubline(selectedPlayer) || t('playerSearch.noContactLine'))}
-                                </p>
+                                <div className="flex flex-col text-[10px] text-gray-500 mt-0.5">
+                                    {selectedPlayer.username?.trim() && (
+                                        <span className="truncate">@{selectedPlayer.username.trim()}</span>
+                                    )}
+                                    {selectedPlayer.email?.trim() && (
+                                        <span className="truncate">{selectedPlayer.email.trim()}</span>
+                                    )}
+                                    {selectedPlayer.phone?.trim() && (
+                                        <span
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                void navigator.clipboard.writeText(selectedPlayer.phone!.trim());
+                                                toast.success('Teléfono copiado');
+                                            }}
+                                            className="inline-flex items-center gap-1 cursor-pointer hover:text-blue-600 transition-colors group/phone font-medium w-fit"
+                                            title="Copiar teléfono"
+                                        >
+                                            <span>{selectedPlayer.phone.trim()}</span>
+                                            <Copy className="w-3 h-3 text-gray-400 opacity-0 group-hover/phone:opacity-100 transition-opacity" />
+                                        </span>
+                                    )}
+                                    {!selectedPlayer.username?.trim() && !selectedPlayer.email?.trim() && !selectedPlayer.phone?.trim() && (
+                                        <span className="truncate">
+                                            {t('playerSearch.noContactLine')}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                         </div>
                         <button
@@ -387,7 +412,7 @@ export const PlayerSearch: React.FC<{
 
 // ─── Tipos de pago por slot ───────────────────────────────────────────────────
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance, presentation = 'modal',
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance, presentation = 'modal', initialTab = 'details',
 }) => {
     const isInline = presentation === 'inline';
     const vvStyle = useVisualViewportFix(isOpen && !isInline);
@@ -456,6 +481,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setChatMessages([]);
             setChatDraft('');
         } else {
+            setActiveTab(initialTab);
             authService.getMe().then((res) => {
                 setMe({
                     authUserId: res.user?.id ?? null,
@@ -463,7 +489,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 });
             }).catch(() => {});
         }
-    }, [isOpen]);
+    }, [isOpen, initialTab]);
 
     const loadBookingChat = useCallback(async () => {
         if (!editingBookingData?.id) return;
@@ -564,7 +590,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     first_name: orgPlayer.first_name ?? '',
                     last_name: orgPlayer.last_name ?? '',
                     email: (orgPlayer as { email?: string }).email || '',
-                    phone: null,
+                    phone: orgPlayer.phone || null,
                     elo_rating: normalizePlayerElo(orgPlayer.elo_rating) ?? 0,
                     status: 'active',
                     created_at: '',
@@ -582,7 +608,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     first_name: p.players.first_name,
                     last_name: p.players.last_name,
                     email: p.players.email || '',
-                    phone: null,
+                    phone: p.players.phone || null,
                     elo_rating: normalizePlayerElo(p.players.elo_rating) ?? 0,
                     status: 'active' as const,
                     created_at: '',
@@ -1450,17 +1476,24 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     </div>
                                 ) : (
                                     chatMessages.map((m) => {
-                                        const isMyMessage = me.authUserId && m.author_user_id === me.authUserId;
+                                        const isClubMessage = Boolean(me.authUserId && m.author_user_id === me.authUserId);
                                         return (
                                             <div
                                                 key={m.id}
-                                                className={`max-w-[75%] rounded-xl px-3 py-2 text-xs ${
-                                                    isMyMessage
-                                                        ? "ml-auto bg-[#1A1A1A] text-white"
+                                                className={`w-fit max-w-[75%] rounded-xl px-3 py-2 text-xs ${
+                                                    isClubMessage
+                                                        ? "ml-auto bg-[#006A6A] text-white"
                                                         : "bg-gray-100 text-[#1A1A1A]"
                                                 }`}
                                             >
-                                                <p className="mb-0.5 text-[9px] opacity-75 font-bold">{m.author_name}</p>
+                                                <div className="mb-0.5 flex items-center gap-1.5">
+                                                    <p className="text-[9px] opacity-75 font-bold">{m.author_name}</p>
+                                                    {isClubMessage && (
+                                                        <span className="rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide bg-white/20">
+                                                            Club
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <p className="wrap-break-word">{m.message}</p>
                                                 <span className="block text-[8px] opacity-60 text-right mt-1">
                                                     {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

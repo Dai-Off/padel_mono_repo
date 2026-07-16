@@ -56,6 +56,8 @@ export interface TranslationKeys {
     legend: {
         iconsTitle: string;
         mobileBadge: string;
+        deskBadge: string;
+        playersBadge: string;
         paidDot: string;
         pendingDot: string;
         alertDot: string;

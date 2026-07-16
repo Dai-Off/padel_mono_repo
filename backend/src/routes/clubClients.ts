@@ -354,6 +354,8 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
   const bookings_to = parseIsoDateParam(req.query.bookings_to);
   const has_current_booking = parseBoolParam(req.query.has_current_booking);
   const has_tournament = parseBoolParam(req.query.has_tournament);
+  const has_class_bono = parseBoolParam(req.query.has_class_bono);
+  const bonus_id = typeof req.query.bonus_id === 'string' ? req.query.bonus_id.trim() : '';
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   if (!canAccessClub(req, club_id, 'clientes')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
@@ -374,7 +376,98 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
     });
     const playerIds = players.map((p) => String(p.id));
 
-    if ((has_wallet !== null || has_school !== null || bookings_min !== null || bookings_max !== null) && playerIds.length > 0) {
+    if (
+      (has_wallet !== null ||
+        has_school !== null ||
+        bookings_min !== null ||
+        bookings_max !== null ||
+        has_class_bono !== null ||
+        bonus_id) &&
+      playerIds.length > 0
+    ) {
+      // has_class_bono filter
+      if (has_class_bono !== null && players.length > 0) {
+        const currentIds = players.map((p) => String(p.id));
+        const withClassBono = new Set<string>();
+        for (const batch of chunk(currentIds, 500)) {
+          const { data: cbs, error: cbErr } = await supabase
+            .from('class_bonos')
+            .select('player_id')
+            .eq('club_id', club_id)
+            .eq('status', 'active')
+            .gt('remaining_classes', 0)
+            .in('player_id', batch)
+            .limit(10000);
+          if (cbErr) {
+            const msg = String(cbErr.message ?? '').toLowerCase();
+            const code = String((cbErr as { code?: string }).code ?? '');
+            if (!(code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache'))) {
+              return res.status(500).json({ ok: false, error: cbErr.message });
+            }
+          }
+          for (const row of cbs ?? []) {
+            const pid = String((row as { player_id: string }).player_id);
+            if (pid) withClassBono.add(pid);
+          }
+        }
+        players = players.filter((p) => {
+          const pid = String(p.id);
+          const has = withClassBono.has(pid);
+          return has_class_bono ? has : !has;
+        });
+      }
+
+      // bonus_id filter
+      if (bonus_id && players.length > 0) {
+        const currentIds = players.map((p) => String(p.id));
+        const matchedPlayerIds = new Set<string>();
+
+        // 1. Check wallet transactions notes
+        for (const batch of chunk(currentIds, 500)) {
+          const { data: txs, error: txErr } = await supabase
+            .from('wallet_transactions')
+            .select('player_id')
+            .eq('club_id', club_id)
+            .in('player_id', batch)
+            .like('notes', `%bonus_id=${bonus_id}%`)
+            .limit(10000);
+          if (txErr) {
+            const msg = String(txErr.message ?? '').toLowerCase();
+            const code = String((txErr as { code?: string }).code ?? '');
+            if (!(code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache'))) {
+              return res.status(500).json({ ok: false, error: txErr.message });
+            }
+          }
+          for (const row of txs ?? []) {
+            const pid = String((row as { player_id: string }).player_id);
+            if (pid) matchedPlayerIds.add(pid);
+          }
+        }
+
+        // 2. Check class bonos bonus_id
+        for (const batch of chunk(currentIds, 500)) {
+          const { data: cbs, error: cbErr } = await supabase
+            .from('class_bonos')
+            .select('player_id')
+            .eq('club_id', club_id)
+            .eq('bonus_id', bonus_id)
+            .in('player_id', batch)
+            .limit(10000);
+          if (cbErr) {
+            const msg = String(cbErr.message ?? '').toLowerCase();
+            const code = String((cbErr as { code?: string }).code ?? '');
+            if (!(code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache'))) {
+              return res.status(500).json({ ok: false, error: cbErr.message });
+            }
+          }
+          for (const row of cbs ?? []) {
+            const pid = String((row as { player_id: string }).player_id);
+            if (pid) matchedPlayerIds.add(pid);
+          }
+        }
+
+        players = players.filter((p) => matchedPlayerIds.has(String(p.id)));
+      }
       // wallet filter
       if (has_wallet !== null) {
         const withTx = new Set<string>();
@@ -605,6 +698,8 @@ router.get('/export', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
   const bookings_max = parseIntParam(req.query.bookings_max);
   const bookings_from = parseIsoDateParam(req.query.bookings_from);
   const bookings_to = parseIsoDateParam(req.query.bookings_to);
+  const has_class_bono = parseBoolParam(req.query.has_class_bono);
+  const bonus_id = typeof req.query.bonus_id === 'string' ? req.query.bonus_id.trim() : '';
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   if (!canAccessClub(req, club_id, 'clientes')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
@@ -630,8 +725,99 @@ router.get('/export', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
     });
     const playerIds = rows.map((p) => String(p.id));
 
-    // Apply same advanced filters as list (wallet/school/bookings)
-    if ((has_wallet !== null || has_school !== null || bookings_min !== null || bookings_max !== null) && playerIds.length > 0) {
+    // Apply same advanced filters as list (wallet/school/bookings/class_bonos/bonus_id)
+    if (
+      (has_wallet !== null ||
+        has_school !== null ||
+        bookings_min !== null ||
+        bookings_max !== null ||
+        has_class_bono !== null ||
+        bonus_id) &&
+      playerIds.length > 0
+    ) {
+      // has_class_bono filter
+      if (has_class_bono !== null && rows.length > 0) {
+        const currentIds = rows.map((p) => String(p.id));
+        const withClassBono = new Set<string>();
+        for (const batch of chunk(currentIds, 500)) {
+          const { data: cbs, error: cbErr } = await supabase
+            .from('class_bonos')
+            .select('player_id')
+            .eq('club_id', club_id)
+            .eq('status', 'active')
+            .gt('remaining_classes', 0)
+            .in('player_id', batch)
+            .limit(10000);
+          if (cbErr) {
+            const msg = String(cbErr.message ?? '').toLowerCase();
+            const code = String((cbErr as { code?: string }).code ?? '');
+            if (!(code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache'))) {
+              return res.status(500).json({ ok: false, error: cbErr.message });
+            }
+          }
+          for (const row of cbs ?? []) {
+            const pid = String((row as { player_id: string }).player_id);
+            if (pid) withClassBono.add(pid);
+          }
+        }
+        rows = rows.filter((p) => {
+          const pid = String(p.id);
+          const has = withClassBono.has(pid);
+          return has_class_bono ? has : !has;
+        });
+      }
+
+      // bonus_id filter
+      if (bonus_id && rows.length > 0) {
+        const currentIds = rows.map((p) => String(p.id));
+        const matchedPlayerIds = new Set<string>();
+
+        // 1. Check wallet transactions notes
+        for (const batch of chunk(currentIds, 500)) {
+          const { data: txs, error: txErr } = await supabase
+            .from('wallet_transactions')
+            .select('player_id')
+            .eq('club_id', club_id)
+            .in('player_id', batch)
+            .like('notes', `%bonus_id=${bonus_id}%`)
+            .limit(10000);
+          if (txErr) {
+            const msg = String(txErr.message ?? '').toLowerCase();
+            const code = String((txErr as { code?: string }).code ?? '');
+            if (!(code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache'))) {
+              return res.status(500).json({ ok: false, error: txErr.message });
+            }
+          }
+          for (const row of txs ?? []) {
+            const pid = String((row as { player_id: string }).player_id);
+            if (pid) matchedPlayerIds.add(pid);
+          }
+        }
+
+        // 2. Check class bonos bonus_id
+        for (const batch of chunk(currentIds, 500)) {
+          const { data: cbs, error: cbErr } = await supabase
+            .from('class_bonos')
+            .select('player_id')
+            .eq('club_id', club_id)
+            .eq('bonus_id', bonus_id)
+            .in('player_id', batch)
+            .limit(10000);
+          if (cbErr) {
+            const msg = String(cbErr.message ?? '').toLowerCase();
+            const code = String((cbErr as { code?: string }).code ?? '');
+            if (!(code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache'))) {
+              return res.status(500).json({ ok: false, error: cbErr.message });
+            }
+          }
+          for (const row of cbs ?? []) {
+            const pid = String((row as { player_id: string }).player_id);
+            if (pid) matchedPlayerIds.add(pid);
+          }
+        }
+
+        rows = rows.filter((p) => matchedPlayerIds.has(String(p.id)));
+      }
       if (has_wallet !== null) {
         const withTx = new Set<string>();
         for (const batch of chunk(playerIds, 500)) {

@@ -5,7 +5,6 @@ import {
     X,
     Calendar,
     Users,
-    Settings,
     Filter,
     ChevronLeft,
     ChevronRight,
@@ -15,6 +14,7 @@ import {
     Pencil,
     LayoutGrid,
     Link2,
+    MessageCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetchWithAuth } from '../../../services/api';
@@ -93,6 +93,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
     const [inlineEditingData, setInlineEditingData] = useState<Record<string, unknown> | null>(null);
     const [inlineReservation, setInlineReservation] = useState<Reservation | null>(null);
     const [inlineLoading, setInlineLoading] = useState(false);
+    const [inlineInitialTab, setInlineInitialTab] = useState<'details' | 'chat'>('details');
 
     const filterPanelRef = useRef<HTMLDivElement>(null);
     const datePickerRef = useRef<HTMLDivElement>(null);
@@ -379,14 +380,25 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         setInlineEditingData(null);
         setInlineReservation(null);
         setInlineLoading(false);
+        setInlineInitialTab('details');
     }, []);
 
-    const openInlineEdit = useCallback(async (bookingId: string) => {
+    const openInlineEdit = useCallback(async (bookingId: string, opts?: { tab?: 'details' | 'chat' }) => {
         if (!onUpdateBooking) return;
+        const tab = opts?.tab ?? 'details';
         if (expandedBookingId === bookingId) {
+            if (tab === 'chat') {
+                setInlineInitialTab('chat');
+                return;
+            }
+            if (inlineInitialTab === 'chat' && tab === 'details') {
+                setInlineInitialTab('details');
+                return;
+            }
             closeInlineEdit();
             return;
         }
+        setInlineInitialTab(tab);
         setExpandedBookingId(bookingId);
         setInlineLoading(true);
         setInlineEditingData(null);
@@ -420,7 +432,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         } finally {
             setInlineLoading(false);
         }
-    }, [closeInlineEdit, courts, expandedBookingId, onUpdateBooking]);
+    }, [closeInlineEdit, courts, expandedBookingId, inlineInitialTab, onUpdateBooking]);
 
     const formatTime = (isoString: string) => {
         const d = new Date(isoString);
@@ -730,9 +742,6 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                         <span className="hidden sm:inline">Crear Partido</span>
                         <span className="sm:hidden">Crear</span>
                     </button>
-                    <button className="p-1.5 border border-gray-200 text-[#005bc5] bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Settings className="w-4 h-4" />
-                    </button>
                 </div>
             </div>
 
@@ -863,6 +872,17 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                             <div className="flex items-center justify-end gap-0.5">
                                                 <button
                                                     type="button"
+                                                    title="Chat del partido"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (booking?.id) void openInlineEdit(String(booking.id), { tab: 'chat' });
+                                                    }}
+                                                    className="p-2 hover:bg-[#006A6A]/10 rounded-full text-gray-400 hover:text-[#006A6A] transition-colors"
+                                                >
+                                                    <MessageCircle size={16} />
+                                                </button>
+                                                <button
+                                                    type="button"
                                                     title="Copiar invitación"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -873,66 +893,71 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                     <Link2 size={16} />
                                                 </button>
                                                 <div className="relative inline-block text-left">
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (menuOpenFor === match.id) {
-                                                            setMenuOpenFor(null);
-                                                            return;
-                                                        }
-                                                        const rect = e.currentTarget.getBoundingClientRect();
-                                                        const spaceBelow = window.innerHeight - rect.bottom;
-                                                        setMenuAnchor({ bottom: spaceBelow < 120, top: rect.bottom, left: rect.left });
-                                                        setMenuOpenFor(match.id);
-                                                    }}
-                                                    className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors"
-                                                >
-                                                    <MoreVertical size={16} />
-                                                </button>
-                                                {menuOpenFor === match.id && (
-                                                    <>
-                                                        <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); }} />
-                                                        <div className={`absolute right-0 w-44 bg-white border border-gray-200 shadow-xl rounded-lg z-50 overflow-hidden text-left ${menuAnchor.bottom ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setMenuOpenFor(null);
-                                                                    const bookingId = booking?.id;
-                                                                    if (bookingId) {
-                                                                        void openInlineEdit(String(bookingId));
-                                                                    }
-                                                                }}
-                                                                className="w-full text-left px-3 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 font-medium"
-                                                            >
-                                                                <Pencil className="w-3.5 h-3.5" />
-                                                                Editar partido
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setMenuOpenFor(null);
-                                                                    void copyMatchInvitation(match);
-                                                                }}
-                                                                className="w-full text-left px-3 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 font-medium border-t border-gray-100"
-                                                            >
-                                                                <Link2 className="w-3.5 h-3.5" />
-                                                                Copiar invitación
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setMenuOpenFor(null);
-                                                                    setRemovingFromMatch(match);
-                                                                }}
-                                                                className="w-full text-left px-3 py-2.5 text-xs text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 font-medium border-t border-gray-100"
-                                                            >
-                                                                <Trash2 className="w-3.5 h-3.5" />
-                                                                Remover jugador
-                                                            </button>
-                                                        </div>
-                                                    </>
-                                                )}
-                                            </div>
+                                                    <button
+                                                        type="button"
+                                                        title="Opciones"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (menuOpenFor === match.id) {
+                                                                setMenuOpenFor(null);
+                                                                return;
+                                                            }
+                                                            const rect = e.currentTarget.getBoundingClientRect();
+                                                            const spaceBelow = window.innerHeight - rect.bottom;
+                                                            setMenuAnchor({ bottom: spaceBelow < 120, top: rect.bottom, left: rect.left });
+                                                            setMenuOpenFor(match.id);
+                                                        }}
+                                                        className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors"
+                                                    >
+                                                        <MoreVertical size={16} />
+                                                    </button>
+                                                    {menuOpenFor === match.id && (
+                                                        <>
+                                                            <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); }} />
+                                                            <div className={`absolute right-0 w-44 bg-white border border-gray-200 shadow-xl rounded-lg z-50 overflow-hidden text-left ${menuAnchor.bottom ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setMenuOpenFor(null);
+                                                                        const bookingId = booking?.id;
+                                                                        if (bookingId) {
+                                                                            void openInlineEdit(String(bookingId));
+                                                                        }
+                                                                    }}
+                                                                    className="w-full text-left px-3 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 font-medium"
+                                                                >
+                                                                    <Pencil className="w-3.5 h-3.5" />
+                                                                    Editar partido
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setMenuOpenFor(null);
+                                                                        void copyMatchInvitation(match);
+                                                                    }}
+                                                                    className="w-full text-left px-3 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 font-medium border-t border-gray-100"
+                                                                >
+                                                                    <Link2 className="w-3.5 h-3.5" />
+                                                                    Copiar invitación
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setMenuOpenFor(null);
+                                                                        setRemovingFromMatch(match);
+                                                                    }}
+                                                                    className="w-full text-left px-3 py-2.5 text-xs text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 font-medium border-t border-gray-100"
+                                                                >
+                                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                                    Remover jugador
+                                                                </button>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
                                             </div>
                                         </td>
                                     </tr>
@@ -946,6 +971,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                 ) : (
                                                     <ReservationModal
                                                         presentation="inline"
+                                                        initialTab={inlineInitialTab}
                                                         clubId={clubId}
                                                         gridDate={currentDateStr}
                                                         weeklySchedule={weeklySchedule}

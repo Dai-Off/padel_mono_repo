@@ -193,7 +193,11 @@ export async function assertBookingWithinClubOperatingHours(
     reservationType?: string | null;
   },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const skipForBlocked = params.reservationType === 'blocked';
+  const skipForBlocked =
+    params.reservationType === 'blocked' ||
+    params.reservationType === 'tournament' ||
+    params.reservationType === 'school_individual' ||
+    (typeof params.reservationType === 'string' && params.reservationType.startsWith('custom_'));
   const { data: court, error: cErr } = await supabase
     .from('courts')
     .select('club_id')

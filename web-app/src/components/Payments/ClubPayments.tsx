@@ -15,9 +15,6 @@ import {
   Wallet,
   HelpCircle,
   X,
-  MoreVertical,
-  ExternalLink,
-  Pencil,
   Trash2,
   AlertTriangle,
 } from 'lucide-react';
@@ -31,7 +28,7 @@ import { PageSpinner } from '../Layout/PageSpinner';
 import { localDateYmd, shiftDateYmd } from '../CashClosing/cashRegisterUi';
 
 type PaymentMethod = 'cash' | 'card' | 'wallet' | 'app';
-type PaymentStatus = 'completed' | 'pending' | 'failed' | 'refunded';
+type PaymentStatus = 'completed' | 'pending' | 'failed' | 'refunded' | 'cancelled_admin';
 type DateFilterMode = 'day' | 'range' | 'all';
 type PaymentSource = 'booking' | 'store';
 
@@ -135,7 +132,23 @@ function PulseDot({ color }: { color: string }) {
   );
 }
 
-function mapStatus(status: string): PaymentStatus {
+function mapStatus(
+  status: string,
+  bookingStatus?: string | null,
+  cancelledBy?: string | null,
+): PaymentStatus {
+  if (bookingStatus === 'cancelled') {
+    // Reserva anulada por el club (fiesta, personalizado, etc.): no etiquetar como Fallido.
+    if (status === 'refunded') return 'refunded';
+    if (status === 'succeeded') {
+      // Cobro OK antes de cancelar; si hay marca de admin lo mostramos como cancelación.
+      if (cancelledBy === 'owner' || cancelledBy === 'admin' || cancelledBy === 'staff') {
+        return 'cancelled_admin';
+      }
+      return 'completed';
+    }
+    return 'cancelled_admin';
+  }
   if (status === 'succeeded') return 'completed';
   if (status === 'requires_action') return 'pending';
   if (status === 'failed') return 'failed';
@@ -203,7 +216,7 @@ function toPayment(tx: PaymentTransaction): Payment {
     method,
     source: tx.source ?? (tx.booking_id ? 'booking' : 'store'),
     amount: Math.round((tx.amount_cents ?? 0) / 100),
-    status: mapStatus(tx.status),
+    status: mapStatus(tx.status, tx.booking_status, tx.cancelled_by),
     courtName: tx.court_name ?? undefined,
     bookingId: tx.booking_id ?? null,
     payerPlayerId: tx.payer_player_id ?? null,
@@ -218,6 +231,7 @@ function PaymentStatusBadge({ status }: { status: PaymentStatus }) {
     pending: { dot: '#EAB308', label: 'Pendiente', bg: 'bg-yellow-50 text-yellow-600 border-yellow-100' },
     failed: { dot: '#E31E24', label: 'Fallido', bg: 'bg-red-50 text-red-500 border-red-100' },
     refunded: { dot: '#9CA3AF', label: 'Reembolso', bg: 'bg-gray-50 text-gray-500 border-gray-100' },
+    cancelled_admin: { dot: '#6B7280', label: 'Cancelado por admin', bg: 'bg-gray-50 text-gray-600 border-gray-200' },
   };
   const item = config[status];
   return (
@@ -251,7 +265,6 @@ export function ClubPaymentsTab({
   const [dateFrom, setDateFrom] = useState(todayYmd);
   const [dateTo, setDateTo] = useState(todayYmd);
   const [showFilters, setShowFilters] = useState(false);
-  const [rowMenuOpenId, setRowMenuOpenId] = useState<string | null>(null);
   const [editSaleId, setEditSaleId] = useState<string | null>(null);
   const [voidConfirmPayment, setVoidConfirmPayment] = useState<Payment | null>(null);
   const [voidingSaleId, setVoidingSaleId] = useState<string | null>(null);
@@ -344,14 +357,6 @@ export function ClubPaymentsTab({
     navigate(`/grilla?booking=${encodeURIComponent(bookingId)}`);
   }, [navigate]);
 
-  const openCartForPayment = useCallback((payment: Payment) => {
-    const q = new URLSearchParams();
-    if (payment.payerPlayerId) q.set('player', payment.payerPlayerId);
-    if (payment.bookingId) q.set('booking', payment.bookingId);
-    if (payment.saleId) q.set('sale', payment.saleId);
-    navigate(q.toString() ? `/carrito?${q}` : '/carrito');
-  }, [navigate]);
-
   const confirmVoidSale = useCallback(async () => {
     if (!clubId || !voidConfirmPayment?.saleId) return;
     const saleId = voidConfirmPayment.saleId;
@@ -365,7 +370,6 @@ export function ClubPaymentsTab({
       toast.error((e as Error).message || 'No se pudo anular la venta');
     } finally {
       setVoidingSaleId(null);
-      setRowMenuOpenId(null);
     }
   }, [clubId, voidConfirmPayment, reloadPayments]);
   const isRangeSingleDay = dateMode === 'range' && dateFrom === dateTo;
@@ -417,31 +421,32 @@ export function ClubPaymentsTab({
     setDateTo(todayYmd);
   };
 
-  const exportCsv = () => {
-    if (!filteredPayments.length) {
-      toast.error(t('payments_no_data_export'));
-      return;
+  const exportCsv = async () => {
+    if (!clubId) return;
+    const toastId = toast.loading('Generando exportación de transacciones...');
+    try {
+      const dFrom = dateMode === 'all' ? undefined : (dateMode === 'day' ? selectedDate : dateFrom);
+      const dTo = dateMode === 'all' ? undefined : (dateMode === 'day' ? selectedDate : dateTo);
+
+      // Usar la zona horaria predeterminada o del club si es necesario.
+      const blob = await paymentsService.exportClubTransactionsCsv(
+        clubId,
+        dFrom,
+        dTo,
+        'Europe/Madrid'
+      );
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transacciones_${clubId}_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Exportación descargada correctamente', { id: toastId });
+    } catch (e) {
+      console.error(e);
+      toast.error((e as Error).message || 'Error al descargar la exportación', { id: toastId });
     }
-    const header = ['id', 'fecha', 'hora', 'cliente', 'concepto', 'metodo', 'importe', 'estado', 'pista'];
-    const rows = filteredPayments.map((p) => [
-      p.id,
-      p.dateLabel,
-      p.time,
-      p.client,
-      p.concept,
-      p.method,
-      String(p.amount),
-      p.status,
-      p.courtName ?? '',
-    ]);
-    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `payments_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   if (!clubResolved) {
@@ -696,6 +701,7 @@ export function ClubPaymentsTab({
                     <option value="completed">Completado</option>
                     <option value="pending">Pendiente</option>
                     <option value="refunded">Reembolso</option>
+                    <option value="cancelled_admin">Cancelado por admin</option>
                     <option value="failed">Fallido</option>
                   </select>
                 </div>
@@ -773,7 +779,6 @@ export function ClubPaymentsTab({
             </div>
           ) : filteredPayments.length > 0 ? (
             filteredPayments.map((payment) => {
-              const menuOpen = rowMenuOpenId === payment.id;
               const canOpenGrilla = payment.source === 'booking' && Boolean(payment.bookingId);
               const canEditStore = payment.source === 'store' && Boolean(payment.saleId);
               return (
@@ -796,6 +801,14 @@ export function ClubPaymentsTab({
                         >
                           {payment.concept}
                         </button>
+                      ) : canEditStore ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditSaleId(payment.saleId!)}
+                          className="font-semibold text-[#006A6A] hover:underline text-left"
+                        >
+                          {payment.concept}
+                        </button>
                       ) : (
                         <span>{payment.concept}</span>
                       )}
@@ -810,76 +823,17 @@ export function ClubPaymentsTab({
                     </div>
                   </div>
                   <PaymentStatusBadge status={payment.status} />
-                  <div className="relative shrink-0">
+                  {canEditStore && (
                     <button
                       type="button"
-                      onClick={() => setRowMenuOpenId(menuOpen ? null : payment.id)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-50"
-                      aria-label="Acciones"
+                      title="Anular venta"
+                      disabled={voidingSaleId === payment.saleId}
+                      onClick={() => setVoidConfirmPayment(payment)}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
                     >
-                      <MoreVertical className="w-4 h-4" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
-                    {menuOpen && (
-                      <div className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-gray-100 rounded-xl shadow-lg py-1">
-                        {canOpenGrilla && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRowMenuOpenId(null);
-                              openBookingInGrilla(payment.bookingId!);
-                            }}
-                            className="w-full text-left px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            Abrir en grilla
-                          </button>
-                        )}
-                        {canEditStore && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRowMenuOpenId(null);
-                                setEditSaleId(payment.saleId!);
-                              }}
-                              className="w-full text-left px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                              Editar venta
-                            </button>
-                            <button
-                              type="button"
-                              disabled={voidingSaleId === payment.saleId}
-                              onClick={() => {
-                                setRowMenuOpenId(null);
-                                setVoidConfirmPayment(payment);
-                              }}
-                              className="w-full text-left px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              Anular venta
-                            </button>
-                          </>
-                        )}
-                        {payment.source === 'store' && !canEditStore && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRowMenuOpenId(null);
-                              openCartForPayment(payment);
-                            }}
-                            className="w-full text-left px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            Abrir en carrito
-                          </button>
-                        )}
-                        {!canOpenGrilla && !canEditStore && payment.source !== 'store' && (
-                          <p className="px-3 py-2 text-[10px] text-gray-400">Sin acciones disponibles</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
                 {payment.participants.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-gray-50">
