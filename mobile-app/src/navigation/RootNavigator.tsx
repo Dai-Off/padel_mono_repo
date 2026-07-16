@@ -118,7 +118,13 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="PublicCourseDetail" component={PublicCourseDetailRoute} />
             <RootStack.Screen name="CrearPartido" component={CrearPartidoRoute} />
             <RootStack.Screen name="CourtReservationDetail" component={CourtReservationDetailRoute} />
-            <RootStack.Screen name="SeasonPass" component={SeasonPassRoute} />
+            {/* El pase pinta al instante (skeleton/cache), así que puede
+                permitirse la animación nativa de push sin mostrar cascarón. */}
+            <RootStack.Screen
+              name="SeasonPass"
+              component={SeasonPassRoute}
+              options={{ animation: 'slide_from_right' }}
+            />
             {/* Grafo social / partidos */}
             <RootStack.Screen name="PartidoDetail" component={PartidoDetailRoute} />
             <RootStack.Screen name="PublicProfile" component={PublicProfileRoute} />
