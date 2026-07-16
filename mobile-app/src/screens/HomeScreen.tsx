@@ -229,18 +229,41 @@ export function HomeScreen({
       setRetrying(false);
     }
   };
-  // Re-dispara la entrada escalonada de las secciones cada vez que el Home
-  // recupera el foco (volver de otra pantalla o de otro tab): con la
-  // navegación por tabs el Home ya no se remonta, así que sin esto la
-  // entrada solo se veía una vez por sesión. La primera vez usa el recorrido
-  // completo (20px); las vueltas, uno más sutil.
+  // Entrada escalonada "tipo remount" sin remontar: al perder el foco los
+  // bloques se esconden en seco (la pantalla ya está tapada u oculta — nadie
+  // lo ve) y al volver la cascada corre sobre lienzo limpio. Nunca se resetea
+  // contenido a la vista, que era lo que producía el salto.
   const [enterNonce, setEnterNonce] = useState(0);
+  const [resetNonce, setResetNonce] = useState(0);
+  const isFirstFocusRef = useRef(true);
+  const pendingResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useFocusEffect(
     useCallback(() => {
-      setEnterNonce((n) => n + 1);
+      // Vuelta rápida (back inmediato): cancela un reset todavía pendiente
+      // para no esconder contenido con la pantalla ya enfocada.
+      if (pendingResetRef.current) {
+        clearTimeout(pendingResetRef.current);
+        pendingResetRef.current = null;
+      }
+      let enterId: ReturnType<typeof setTimeout> | null = null;
+      if (isFirstFocusRef.current) {
+        // Primera carga: los bloques ya animan al montar; re-disparar aquí
+        // haría tartamudear la entrada inicial.
+        isFirstFocusRef.current = false;
+      } else {
+        // Margen para que el fade de la pantalla saliente termine antes de
+        // que arranque la cascada.
+        enterId = setTimeout(() => setEnterNonce((n) => n + 1), 150);
+      }
+      return () => {
+        if (enterId) clearTimeout(enterId);
+        // El blur puede llegar con la transición aún en marcha: se espera a
+        // que la pantalla entrante cubra del todo (fade de 220ms) antes de
+        // esconder, para que el reset sea siempre invisible.
+        pendingResetRef.current = setTimeout(() => setResetNonce((n) => n + 1), 260);
+      };
     }, []),
   );
-  const enterDistance = enterNonce > 1 ? 12 : 20;
 
   const [affinityModalVisible, setAffinityModalVisible] = useState(() => consumeAffinityModalPendingReopen());
   /** Sin animación fade al reabrir tras volver del chat (evita flash del home). */
@@ -522,7 +545,7 @@ export function HomeScreen({
             del onboarding auto-abierto. */}
         {/* Búsqueda activa (naranja) siempre por encima de la invitación, si coinciden. */}
         {matchmakingBannerState !== 'hidden' && (
-          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={0}>
             <OnboardingBanner
               variant={
                 matchmakingBannerState === 'matched'
@@ -536,7 +559,7 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {pairInvites && pairInvites.length > 0 && (
-          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={0}>
             <PairInviteBanner
               invites={pairInvites}
               onChanged={() => onPairInvitesChanged?.()}
@@ -545,7 +568,7 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {matchReceivedInvites && matchReceivedInvites.length > 0 && (
-          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={0}>
             <MatchInviteBanner
               invites={matchReceivedInvites}
               onChanged={() => onMatchInvitesChanged?.()}
@@ -554,12 +577,12 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {myPlayerProfile && !myPlayerProfile.onboardingCompleted && (
-          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset}>
             <OnboardingBanner onPress={() => onOpenProfileForOnboarding?.()} />
           </InicioEnterBlock>
         )}
         {session?.access_token ? (
-          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 1}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 1}>
             <ProximosPartidosSection
               partidos={misPartidos}
               reservations={misReservasPista}
@@ -569,7 +592,7 @@ export function HomeScreen({
             />
           </InicioEnterBlock>
         ) : null}
-        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 2}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 2}>
           <InicioWidgetsCarousel>
             <DailyLessonCard
               variant="carousel"
@@ -615,7 +638,7 @@ export function HomeScreen({
             />
           </InicioWidgetsCarousel>
         </InicioEnterBlock>
-        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 3}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 3}>
           <InicioQuickActions
             onNavigateToTab={onNavigateToTab}
             onCoursesPress={onCoursesPress}
@@ -625,7 +648,7 @@ export function HomeScreen({
             loading={listLoading}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 4}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 4}>
           <IAAfinidadCard
             locked={myPlayerProfile != null && !myPlayerProfile.onboardingCompleted}
             onPress={() => {
@@ -643,10 +666,10 @@ export function HomeScreen({
             }}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 5}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 5}>
           <MissionsHomeSection missions={homeMissionsFromPass} />
         </InicioEnterBlock>
-        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 6}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 6}>
           <EnDirectoSection
             partidos={partidos.filter((p) => p.matchPhase === 'live')}
             loading={matchesLoading}
