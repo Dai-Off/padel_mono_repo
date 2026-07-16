@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { refreshSession as refreshSessionApi } from '../api/auth';
+import { queryClient } from '../queries/client';
 
 const SESSION_KEY = '@padel_session';
 
@@ -198,6 +199,10 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
     try {
       setSessionState(null);
       await AsyncStorage.removeItem(SESSION_KEY);
+      // Vacía el caché de React Query (memoria + persister en el siguiente
+      // ciclo): el próximo usuario no debe ver datos del anterior. Las keys
+      // llevan userId como segunda barrera.
+      queryClient.clear();
     } finally {
       isLoggingOutRef.current = false;
     }

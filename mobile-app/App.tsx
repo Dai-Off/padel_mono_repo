@@ -1,5 +1,6 @@
 import { useContext, useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -18,6 +19,7 @@ import { SplashScreen } from './src/components/SplashScreen';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { STRIPE_PUBLISHABLE_KEY } from './src/config';
 import { I18nProvider } from './src/i18n';
+import { persistOptions, queryClient, setupQueryManagers } from './src/queries/client';
 
 function AppContent() {
   const ctx = useContext(AuthContext);
@@ -44,6 +46,7 @@ function AppContent() {
 
 export default function App() {
   useEffect(() => {
+    setupQueryManagers();
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     // Fondo de la ventana nativa: al hacer pop, react-native-screens deja ver
     // la ventana un frame mientras re-engancha la pantalla anterior; en blanco
@@ -60,19 +63,21 @@ export default function App() {
         <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} urlScheme={urlScheme}>
           <SafeAreaProvider>
             <I18nProvider>
-              <AuthProvider>
-                <MatchmakingProvider>
-                  <HomeDataProvider>
-                    <AppSignalsProvider>
-                      <ProfileDataProvider>
-                        <CartProvider>
-                          <AppContent />
-                        </CartProvider>
-                      </ProfileDataProvider>
-                    </AppSignalsProvider>
-                  </HomeDataProvider>
-                </MatchmakingProvider>
-              </AuthProvider>
+              <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
+                <AuthProvider>
+                  <MatchmakingProvider>
+                    <HomeDataProvider>
+                      <AppSignalsProvider>
+                        <ProfileDataProvider>
+                          <CartProvider>
+                            <AppContent />
+                          </CartProvider>
+                        </ProfileDataProvider>
+                      </AppSignalsProvider>
+                    </HomeDataProvider>
+                  </MatchmakingProvider>
+                </AuthProvider>
+              </PersistQueryClientProvider>
             </I18nProvider>
           </SafeAreaProvider>
         </StripeProvider>
