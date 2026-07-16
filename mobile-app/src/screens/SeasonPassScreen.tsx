@@ -864,12 +864,12 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     return Math.max(0, Math.min(trackAllLevels.length - 1, Math.round(target / TRACK_COL_W)));
   }, [trackAllLevels, level, windowWidth]);
 
-  // Re-centrado tras el montaje: solo mueve si los datos llegaron con el
-  // track ya montado (primera carga en frío) o si cambió el nivel. En las
-  // vueltas a la pestaña el FlatList ya monta posicionado (initialScrollIndex)
-  // y este scroll aterriza donde ya está — sin salto visible.
+  // Re-centrado tras el montaje: solo cuando los datos llegan con el track
+  // ya montado (primera carga en frío) o cambia el nivel. Las vueltas a la
+  // pestaña no pasan por aquí: el track queda montado (display:none) y
+  // conserva la posición de scroll donde la dejaste.
   useEffect(() => {
-    if (tab !== 'rewards' || trackAllLevels.length === 0) return;
+    if (trackAllLevels.length === 0) return;
     const id = setTimeout(
       () =>
         trackScrollRef.current?.scrollToOffset({
@@ -879,7 +879,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
       80,
     );
     return () => clearTimeout(id);
-  }, [tab, trackAllLevels.length, trackCenterIndex]);
+  }, [trackAllLevels.length, trackCenterIndex]);
 
   const openRewardDetail = useCallback(
     (lvl: number, reward: SeasonPassTrackRewardDto) => setRewardDetail({ level: lvl, reward }),
@@ -1058,15 +1058,29 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
       .filter((x): x is { icon: string; text: string } => x != null);
   }, [estado?.season?.elite_modal_bullets]);
 
-  const onTabChange = useCallback((t: PassTab) => {
-    contentOp.setValue(0);
-    setTab(t);
-    Animated.timing(contentOp, {
-      toValue: 1,
-      duration: 220,
-      useNativeDriver: true,
-    }).start();
-  }, [contentOp]);
+  const onTabChange = useCallback(
+    (next: PassTab) => {
+      if (next === tab) return;
+      // Fade-through: la pestaña actual se desvanece (rápido), el swap de
+      // layout —con su salto de altura— ocurre en invisible, y la nueva
+      // entra con fade. Antes el swap era instantáneo con opacidad a cero:
+      // frame en blanco + salto de altura a la vista.
+      Animated.timing(contentOp, {
+        toValue: 0,
+        duration: 90,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) return; // interrumpido por otro tap: manda el último
+        setTab(next);
+        Animated.timing(contentOp, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }).start();
+      });
+    },
+    [contentOp, tab],
+  );
 
   const purchaseEliteWithStripe = useCallback(async () => {
     const token = session?.access_token;
@@ -1327,8 +1341,9 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
             paddingTop: 8,
           }}
         >
-          {tab === 'rewards' ? (
-            <View>
+          {/* Ambas pestañas quedan montadas (la inactiva con display:none):
+              el swap no remonta el track ni pierde su posición de scroll. */}
+          <View style={tab === 'rewards' ? undefined : styles.tabPaneHidden}>
               {boostPct > 0 ? (
                 <Pressable
                   onPress={() => setShowBoostDetail(true)}
@@ -1401,8 +1416,10 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                   )}
                 </Pressable>
               ) : null}
-            </View>
-          ) : misionesQuery.isPending ? (
+          </View>
+
+          <View style={tab === 'missions' ? undefined : styles.tabPaneHidden}>
+          {misionesQuery.isPending ? (
             // /misiones aún evaluando: estructura de la pestaña con skeletons
             // de fila (patrón del perfil: cada sección se rellena al llegar).
             <MissionListSkeleton />
@@ -1486,6 +1503,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
               ) : null}
             </View>
           )}
+          </View>
         </Animated.View>
           </>
         ) : (
@@ -2024,6 +2042,10 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     backgroundColor: 'rgba(241,143,52,0.6)',
+  },
+  /** Pestaña inactiva del pase: montada pero sin layout (conserva estado). */
+  tabPaneHidden: {
+    display: 'none',
   },
   trackScroll: {
     paddingVertical: 10,
