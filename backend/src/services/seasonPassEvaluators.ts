@@ -351,10 +351,12 @@ export class SeasonPassEvalContext {
     return this.memo(`missionsDone:${missionPeriod}:${p.start_iso}`, async () => {
       // PostgREST no soporta count:exact/head junto a un filtro sobre recurso
       // embebido (mission.period), así que traemos las filas (pocas por jugador)
-      // y las contamos en memoria.
+      // y las contamos en memoria. El embed lleva la FK explícita (mission_id):
+      // hay dos relaciones hacia season_pass_mission_definitions (mission_id y
+      // rerolled_to) y sin desambiguar PostgREST rechaza la query.
       const { data, error } = await this.supabase
         .from('player_season_pass_missions')
-        .select('id, mission:season_pass_mission_definitions!inner(period)')
+        .select('id, mission:season_pass_mission_definitions!mission_id!inner(period)')
         .eq('player_id', this.playerId)
         .eq('mission.period', missionPeriod)
         .gte('completed_at', p.start_iso)
