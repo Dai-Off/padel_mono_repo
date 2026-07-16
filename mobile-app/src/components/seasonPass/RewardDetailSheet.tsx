@@ -219,16 +219,18 @@ export function RewardDetailSheet({
               área (con margen), así no deja bordes rectos. */}
           <View style={styles.heroArea}>
             {rarity ? (
-              <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
-                <Defs>
-                  <RadialGradient id="rarityHalo" cx="50%" cy="47%" rx="60%" ry="46%">
-                    <Stop offset="0" stopColor={rarity.color} stopOpacity={glowy ? 0.42 : 0.26} />
-                    <Stop offset="0.5" stopColor={rarity.color} stopOpacity={glowy ? 0.16 : 0.1} />
-                    <Stop offset="1" stopColor={rarity.color} stopOpacity="0" />
-                  </RadialGradient>
-                </Defs>
-                <Rect x="0" y="0" width="100%" height="100%" fill="url(#rarityHalo)" />
-              </Svg>
+              <View style={styles.haloWrap} pointerEvents="none">
+                <Svg width="84%" height={118}>
+                  <Defs>
+                    <RadialGradient id="rarityHalo" cx="50%" cy="50%" rx="50%" ry="50%">
+                      <Stop offset="0" stopColor={rarity.color} stopOpacity={glowy ? 0.4 : 0.24} />
+                      <Stop offset="0.6" stopColor={rarity.color} stopOpacity={glowy ? 0.14 : 0.08} />
+                      <Stop offset="1" stopColor={rarity.color} stopOpacity="0" />
+                    </RadialGradient>
+                  </Defs>
+                  <Rect x="0" y="0" width="100%" height="100%" fill="url(#rarityHalo)" />
+                </Svg>
+              </View>
             ) : null}
             <BigReward reward={reward} avatarUrl={playerAvatarUrl} initials={playerInitials} />
           </View>
@@ -322,6 +324,7 @@ export function RewardDetailSheet({
 const styles = StyleSheet.create({
   content: { alignItems: 'center', paddingBottom: 8 },
   heroArea: { height: 128, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', marginBottom: 4 },
+  haloWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   spCoin: {
     width: 92,
     height: 92,
