@@ -895,10 +895,10 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const boostPct = Math.round((estado?.boosts?.total_bonus ?? 0) * 100);
   const boostSourcesLabel = useMemo(() => {
     const labels: Record<string, string> = {
-      lesson_streak: t('hoestado.seasonPass.boostSourceStreak'),
-      pass_reward: t('hoestado.seasonPass.boostSourceBooster'),
-      catch_up: t('hoestado.seasonPass.boostSourceCatchUp'),
-      event: t('hoestado.seasonPass.boostSourceEvent'),
+      lesson_streak: t('home.seasonPass.boostSourceStreak'),
+      pass_reward: t('home.seasonPass.boostSourceBooster'),
+      catch_up: t('home.seasonPass.boostSourceCatchUp'),
+      event: t('home.seasonPass.boostSourceEvent'),
     };
     return (estado?.boosts?.breakdown ?? [])
       .map((b) => `${labels[b.source] ?? b.source} +${Math.round(b.bonus * 100)}%`)
@@ -1323,7 +1323,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
                   <View style={styles.boostBannerHeader}>
                     <Ionicons name="flame" size={16} color={ACCENT} />
                     <Text style={[styles.boostBannerTxt, { flex: 1 }]}>
-                      {t('hoestado.seasonPass.boostActive', { pct: boostPct })}
+                      {t('home.seasonPass.boostActive', { pct: boostPct })}
                     </Text>
                     <Ionicons name="chevron-forward" size={15} color="rgba(241,143,52,0.7)" />
                   </View>
@@ -1740,7 +1740,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
             <Text style={styles.eliteOkBody}>{t('alerts.seasonPass.eliteOkBody')}</Text>
             <Pressable onPress={() => setShowEliteSuccess(false)} style={({ pressed }) => pressed && styles.pressed}>
               <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.eliteOkCta}>
-                <Text style={styles.eliteOkCtaTxt}>{t('hoestado.seasonPass.celebrationCta')}</Text>
+                <Text style={styles.eliteOkCtaTxt}>{t('home.seasonPass.celebrationCta')}</Text>
               </LinearGradient>
             </Pressable>
           </View>
