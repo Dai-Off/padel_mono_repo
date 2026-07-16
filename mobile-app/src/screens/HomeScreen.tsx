@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CompetitiveLeagueHomeCard,
@@ -228,6 +229,19 @@ export function HomeScreen({
       setRetrying(false);
     }
   };
+  // Re-dispara la entrada escalonada de las secciones cada vez que el Home
+  // recupera el foco (volver de otra pantalla o de otro tab): con la
+  // navegación por tabs el Home ya no se remonta, así que sin esto la
+  // entrada solo se veía una vez por sesión. La primera vez usa el recorrido
+  // completo (20px); las vueltas, uno más sutil.
+  const [enterNonce, setEnterNonce] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setEnterNonce((n) => n + 1);
+    }, []),
+  );
+  const enterDistance = enterNonce > 1 ? 12 : 20;
+
   const [affinityModalVisible, setAffinityModalVisible] = useState(() => consumeAffinityModalPendingReopen());
   /** Sin animación fade al reabrir tras volver del chat (evita flash del home). */
   const [affinityInstantShow, setAffinityInstantShow] = useState(false);
@@ -508,7 +522,7 @@ export function HomeScreen({
             del onboarding auto-abierto. */}
         {/* Búsqueda activa (naranja) siempre por encima de la invitación, si coinciden. */}
         {matchmakingBannerState !== 'hidden' && (
-          <InicioEnterBlock enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={0}>
             <OnboardingBanner
               variant={
                 matchmakingBannerState === 'matched'
@@ -522,7 +536,7 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {pairInvites && pairInvites.length > 0 && (
-          <InicioEnterBlock enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={0}>
             <PairInviteBanner
               invites={pairInvites}
               onChanged={() => onPairInvitesChanged?.()}
@@ -531,7 +545,7 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {matchReceivedInvites && matchReceivedInvites.length > 0 && (
-          <InicioEnterBlock enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={0}>
             <MatchInviteBanner
               invites={matchReceivedInvites}
               onChanged={() => onMatchInvitesChanged?.()}
@@ -540,12 +554,12 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {myPlayerProfile && !myPlayerProfile.onboardingCompleted && (
-          <InicioEnterBlock enterIndex={homeEnterOffset}>
+          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset}>
             <OnboardingBanner onPress={() => onOpenProfileForOnboarding?.()} />
           </InicioEnterBlock>
         )}
         {session?.access_token ? (
-          <InicioEnterBlock enterIndex={homeEnterOffset + 1}>
+          <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 1}>
             <ProximosPartidosSection
               partidos={misPartidos}
               reservations={misReservasPista}
@@ -555,7 +569,7 @@ export function HomeScreen({
             />
           </InicioEnterBlock>
         ) : null}
-        <InicioEnterBlock enterIndex={homeEnterOffset + 2}>
+        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 2}>
           <InicioWidgetsCarousel>
             <DailyLessonCard
               variant="carousel"
@@ -601,7 +615,7 @@ export function HomeScreen({
             />
           </InicioWidgetsCarousel>
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={homeEnterOffset + 3}>
+        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 3}>
           <InicioQuickActions
             onNavigateToTab={onNavigateToTab}
             onCoursesPress={onCoursesPress}
@@ -611,7 +625,7 @@ export function HomeScreen({
             loading={listLoading}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={homeEnterOffset + 4}>
+        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 4}>
           <IAAfinidadCard
             locked={myPlayerProfile != null && !myPlayerProfile.onboardingCompleted}
             onPress={() => {
@@ -629,10 +643,10 @@ export function HomeScreen({
             }}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={homeEnterOffset + 5}>
+        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 5}>
           <MissionsHomeSection missions={homeMissionsFromPass} />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={homeEnterOffset + 6}>
+        <InicioEnterBlock enterKey={enterNonce} distance={enterDistance} enterIndex={homeEnterOffset + 6}>
           <EnDirectoSection
             partidos={partidos.filter((p) => p.matchPhase === 'live')}
             loading={matchesLoading}
