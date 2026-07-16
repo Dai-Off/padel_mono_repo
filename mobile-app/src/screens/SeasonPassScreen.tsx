@@ -973,7 +973,6 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
     [missions, mTab],
   );
 
-  const contentOp = useRef(new Animated.Value(1)).current;
 
   /**
    * Pantalla única de espera: hidratación de auth o fetch del pase con sesión,
@@ -1057,30 +1056,6 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
       })
       .filter((x): x is { icon: string; text: string } => x != null);
   }, [estado?.season?.elite_modal_bullets]);
-
-  const onTabChange = useCallback(
-    (next: PassTab) => {
-      if (next === tab) return;
-      // Fade-through: la pestaña actual se desvanece (rápido), el swap de
-      // layout —con su salto de altura— ocurre en invisible, y la nueva
-      // entra con fade. Antes el swap era instantáneo con opacidad a cero:
-      // frame en blanco + salto de altura a la vista.
-      Animated.timing(contentOp, {
-        toValue: 0,
-        duration: 90,
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (!finished) return; // interrumpido por otro tap: manda el último
-        setTab(next);
-        Animated.timing(contentOp, {
-          toValue: 1,
-          duration: 180,
-          useNativeDriver: true,
-        }).start();
-      });
-    },
-    [contentOp, tab],
-  );
 
   const purchaseEliteWithStripe = useCallback(async () => {
     const token = session?.access_token;
@@ -1313,7 +1288,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
             <View style={[styles.tabsSticky, { paddingTop: 10 }]}>
           <Animated.View style={[styles.tabsRow, { opacity: bodyIn }]}>
             <Pressable
-              onPress={() => onTabChange('rewards')}
+              onPress={() => setTab('rewards')}
               style={[styles.tabMain, tab === 'rewards' && styles.tabMainOn]}
             >
               <Text style={[styles.tabMainTxt, tab === 'rewards' && styles.tabMainTxtOn]}>
@@ -1321,7 +1296,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
               </Text>
             </Pressable>
             <Pressable
-              onPress={() => onTabChange('missions')}
+              onPress={() => setTab('missions')}
               style={[styles.tabMain, tab === 'missions' && styles.tabMainOn]}
             >
               <Text style={[styles.tabMainTxt, tab === 'missions' && styles.tabMainTxtOn]}>
@@ -1333,7 +1308,9 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
 
         <Animated.View
           style={{
-            opacity: Animated.multiply(contentOp, bodyIn),
+            // Swap de pestañas instantáneo (como las de periodo): ambas están
+            // montadas y el hero + tabs persisten como anclas — sin fade.
+            opacity: bodyIn,
             transform: [
               { translateY: bodyIn.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
             ],
