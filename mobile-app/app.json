@@ -13,6 +13,7 @@
     ],
     "plugins": [
       "expo-asset",
+      "@sentry/react-native/expo",
       [
         "@stripe/stripe-react-native",
         {
@@ -37,7 +38,8 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-localization"
+      "expo-localization",
+      "@sentry/react-native"
     ],
     "ios": {
       "supportsTablet": true,

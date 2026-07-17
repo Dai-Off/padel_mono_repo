@@ -1,15 +1,24 @@
+import './instrument'; // Sentry: debe cargar antes que la app (carga dotenv él mismo)
 import dotenv from 'dotenv';
 import express, { NextFunction, Request, Response } from 'express';
 import { createServer } from 'http';
 import cron from 'node-cron';
 import { WebSocketServer } from 'ws';
+import * as Sentry from '@sentry/node';
 import app from './app';
+import { sentryEnabled } from './instrument';
 import { initMessagesRealtime } from './lib/messagesRealtime';
 import { runAccountDeletionJob } from './lib/accountDeletionJob';
 
 dotenv.config();
 
 const port: number = Number(process.env.PORT) || 3000;
+
+// Captura en Sentry los errores que llegan al middleware de error de Express
+// (va después de las rutas y antes de nuestro handler, que responde al cliente).
+if (sentryEnabled) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err?.stack ?? err);

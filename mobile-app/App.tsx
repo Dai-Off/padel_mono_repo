@@ -19,7 +19,11 @@ import { SplashScreen } from './src/components/SplashScreen';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { STRIPE_PUBLISHABLE_KEY } from './src/config';
 import { I18nProvider } from './src/i18n';
+import { setupSentry, withSentry } from './src/observability/sentry';
 import { persistOptions, queryClient, setupQueryManagers } from './src/queries/client';
+
+// Antes de que React monte nada: los errores del propio arranque también cuentan.
+setupSentry();
 
 function AppContent() {
   const ctx = useContext(AuthContext);
@@ -44,7 +48,7 @@ function AppContent() {
   );
 }
 
-export default function App() {
+function App() {
   useEffect(() => {
     setupQueryManagers();
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
@@ -85,3 +89,5 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+export default withSentry(App);
