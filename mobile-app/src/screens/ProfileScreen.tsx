@@ -23,6 +23,8 @@ import { useProfileData } from '../contexts/ProfileDataContext';
 import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
 import { AnimatedTitle } from '../components/profile/AnimatedTitle';
 import { ProfileCustomizationModal } from '../components/profile/ProfileCustomizationModal';
+import { PlayerName } from '../components/profile/PlayerName';
+import { ProfileThemeBackground } from '../components/profile/ProfileThemeBackground';
 import { RARITY_CONFIG } from '../design/rarity';
 import { LigaChip } from '../components/profile/LigaChip';
 import type { Achievement } from '../design/achievements';
@@ -449,6 +451,10 @@ export function ProfileScreen({
               style={styles.coverImg}
             />
           )}
+          {/* Tema equipado: cubre el cover (foto o gradiente). Vuelve al elegir "Sin tema". */}
+          {customization?.theme ? (
+            <ProfileThemeBackground theme={customization.theme} scrim={false} />
+          ) : null}
           <LinearGradient
             colors={['rgba(241,143,52,0.25)', 'transparent', '#0F0F0F']}
             style={StyleSheet.absoluteFill}
@@ -492,7 +498,11 @@ export function ProfileScreen({
                     <AnimatedTitle titleId={customization.titleId} />
                   </View>
                 ) : null}
-                <Text style={styles.profileName}>{displayName}</Text>
+                <PlayerName
+                  name={displayName}
+                  nameColor={customization?.nameColor}
+                  style={styles.profileName}
+                />
                 {usernameLine ? (
                   <Text style={styles.usernameText}>{usernameLine}</Text>
                 ) : null}
@@ -685,6 +695,7 @@ export function ProfileScreen({
           onClose={() => setShowCustomize(false)}
           initials={initials}
           avatarUrl={profile?.avatarUrl}
+          displayName={displayName}
           current={customization}
           onSaved={(c) => setCustomization(c)}
         />

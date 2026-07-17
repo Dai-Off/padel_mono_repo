@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { PartidoOpenCard } from '../components/partido/PartidoOpenCard';
@@ -110,6 +111,20 @@ export function PartidosScreen({
   const [locationModalVisible, setLocationModalVisible] = useState(false);
   const [activeSheet, setActiveSheet] = useState<SheetKind>(null);
 
+  // Como tab del navigator la pantalla ya no remonta al visitarla; este nonce
+  // de foco replica el refetch por visita que daba el remontaje anterior.
+  const [focusNonce, setFocusNonce] = useState(0);
+  const isFirstFocusRef = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (isFirstFocusRef.current) {
+        isFirstFocusRef.current = false;
+        return;
+      }
+      setFocusNonce((n) => n + 1);
+    }, []),
+  );
+
   const {
     filters,
     applyFilters,
@@ -122,7 +137,7 @@ export function PartidosScreen({
     favoriteClubIds,
     previewCount,
     labels,
-  } = usePartidosList(session?.access_token, partidosRefreshNonce);
+  } = usePartidosList(session?.access_token, partidosRefreshNonce + focusNonce);
 
   return (
     <View style={styles.wrapper}>

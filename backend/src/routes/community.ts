@@ -4,6 +4,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { moderateImage } from '../services/communityModerationService';
 import { getEquippedFrames } from '../services/equippedFramesService';
+import { evaluateMissionsAndBuildDelta } from '../services/seasonPassEngine';
 
 const router = Router();
 
@@ -653,7 +654,12 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
     await attachFramesToCommunityPlayers(supabase, [ (comment as { player?: unknown }).player as { id?: string | null } | null ]);
-    return res.status(201).json({ ok: true, comment });
+
+    // Season pass instant channel (plan §6.7): community comment missions.
+    const tz = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
+    const seasonPassDelta = await evaluateMissionsAndBuildDelta(playerId, tz);
+
+    return res.status(201).json({ ok: true, comment, season_pass: seasonPassDelta });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

@@ -1,6 +1,7 @@
 import { API_URL } from '../config';
 import { withLangQuery } from './backendLang';
 import type { AppLocale } from '../i18n/constants';
+import type { SeasonPassDeltaDto } from './seasonPass';
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -65,15 +66,11 @@ export type SubmitLessonResponse = {
     correct_count: number;
     total_count: number;
     score: number;
-    xp_earned: number;
     completed_at: string;
   };
   streak: {
     current: number;
     longest: number;
-    multiplier: number;
-    xp_base: number;
-    xp_bonus: number;
   };
   shared_streaks: {
     id: string;
@@ -82,6 +79,8 @@ export type SubmitLessonResponse = {
     longest_streak: number;
     both_completed_today: boolean;
   }[];
+  /** Delta del pase (canal instantáneo §6.7): misiones completadas por esta lección. */
+  season_pass?: SeasonPassDeltaDto | null;
   results: QuestionResult[];
   error?: string;
 };

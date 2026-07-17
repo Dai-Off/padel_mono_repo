@@ -94,6 +94,26 @@ export interface HomeTranslationKeys {
     levelN: string;
     spToNext: string;
     spCap: string;
+    missionCompleted: string;
+    missionAlreadyDone: string;
+    missionsCompletedMany: string;
+    spGained: string;
+    celebrationCta: string;
+    levelUpBanner: string;
+    boostActive: string;
+    boostApplied: string;
+    boostSourceStreak: string;
+    boostSourceBooster: string;
+    boostSourceCatchUp: string;
+    boostSourceEvent: string;
+    boostDetailTitle: string;
+    boostDetailIntro: string;
+    boostSourceStreakDesc: string;
+    boostSourceBoosterDesc: string;
+    boostSourceCatchUpDesc: string;
+    boostSourceEventDesc: string;
+    boostExpiresIn: string;
+    boostHint: string;
   };
   competitiveLeague: {
     title: string;

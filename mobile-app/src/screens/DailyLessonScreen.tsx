@@ -23,6 +23,7 @@ import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
 import { IconGlow } from '../components/ui/IconGlow';
 import { LessonImpactRadar, type SkillValues } from '../components/learning/LessonImpactRadar';
+import { MissionCelebrationCard } from '../components/seasonPass/MissionCelebrationCard';
 import { useTranslation } from '../i18n';
 
 type Props = {
@@ -32,6 +33,8 @@ type Props = {
   // pantalla se bloquea y el botón "Empezar cuestionario" llama a este callback
   // para llevar al perfil con el modal de onboarding abierto.
   onOpenOnboarding?: () => void;
+  /** Abre el pase de temporada (cierra la lección). CTA de la card de resultados. */
+  onOpenSeasonPass?: () => void;
 };
 
 type Phase = 'intro' | 'questions' | 'review' | 'results';
@@ -81,14 +84,19 @@ const AREA_TO_SKILL: Record<QuestionArea, keyof SkillValues> = {
 // Skills por defecto si el jugador no tiene coachAssessment
 const DEFAULT_SKILLS: SkillValues = { technical: 25, physical: 25, mental: 25, tactical: 25 };
 
-// Umbrales de racha para siguiente bonus (sincronizados con getMultiplier del backend)
+// Umbrales de racha → boost global de SP (sincronizados con el boost engine
+// del backend: rachas 3/8/21/46 → +15/30/50/70%).
 const STREAK_THRESHOLDS = [3, 8, 21, 46] as const;
+const STREAK_BOOST_PCTS = [15, 30, 50, 70] as const;
 
-function getNextStreakMilestone(current: number): number | null {
-  for (const threshold of STREAK_THRESHOLDS) {
-    if (current < threshold) return threshold - current;
+/** Días que faltan para el siguiente escalón de boost y su %. null si ya al máximo. */
+function getNextBoostInfo(current: number): { days: number; pct: number } | null {
+  for (let i = 0; i < STREAK_THRESHOLDS.length; i += 1) {
+    if (current < STREAK_THRESHOLDS[i]) {
+      return { days: STREAK_THRESHOLDS[i] - current, pct: STREAK_BOOST_PCTS[i] };
+    }
   }
-  return null; // ya en el maximo
+  return null; // ya en el máximo
 }
 
 function getQuestionPreview(q: DailyLessonQuestion, t: (key: string, params?: Record<string, string | number>) => string): string {
@@ -104,7 +112,7 @@ function getQuestionPreview(q: DailyLessonQuestion, t: (key: string, params?: Re
   return t('learning.questionPreviewDefault');
 }
 
-export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Props) {
+export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding, onOpenSeasonPass }: Props) {
   const { t, locale } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -376,15 +384,13 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       const totalScore = correctCount * 100;
       setResults({
         ok: true,
-        session: { id: 'repeat', correct_count: correctCount, total_count: answersToSend.length, score: totalScore, xp_earned: 0, completed_at: new Date().toISOString() },
+        session: { id: 'repeat', correct_count: correctCount, total_count: answersToSend.length, score: totalScore, completed_at: new Date().toISOString() },
         streak: {
           current: streak.currentStreak,
           longest: streak.longestStreak,
-          multiplier: streak.multiplier,
-          xp_base: 0,
-          xp_bonus: 0,
         },
         shared_streaks: [],
+        season_pass: null,
         results: answersToSend.map((a, i) => ({ question_id: a.question_id, correct: !failedIndices.includes(i), correct_answer: null, points: failedIndices.includes(i) ? 0 : 100 })),
       });
       setPhase('results');
@@ -402,7 +408,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setPhase('results');
     }
     setSubmitting(false);
-  }, [session?.access_token, session?.user?.id, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier, t]);
+  }, [session?.access_token, session?.user?.id, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, t]);
 
   const startQuestionOrVideo = useCallback((index: number) => {
     const q = questions[index];
@@ -778,7 +784,6 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   // ---------------------------------------------------------------------------
   if (phase === 'intro') {
     const areas = [...new Set(questions.map((q) => q.area))];
-    const multiplierText = streak.multiplier > 0 ? `x${(1 + streak.multiplier).toFixed(1)} XP` : null;
     // Variante "ya completada": mientras carga usamos la señal cacheada de la
     // Home para no parpadear; cuando el fetch resuelve, manda el valor real.
     const showCompleted = loading ? isLessonCompletedToday(homeStreak.lastCompleted, TIMEZONE) : alreadyCompleted;
@@ -827,7 +832,6 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               <View style={styles.streakBadge}>
                 <Ionicons name="flame" size={16} color="#F97316" />
                 <Text style={styles.streakText}>{t('learning.dailyLessonStreakDays', { count: streak.currentStreak })}</Text>
-                {multiplierText && <Text style={styles.multiplierText}>{multiplierText}</Text>}
               </View>
             )}
 
@@ -1057,7 +1061,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       }
     });
 
-    const nextMilestone = getNextStreakMilestone(results.streak.current);
+    const nextBoost = getNextBoostInfo(results.streak.current);
 
     const toggleVote = (questionId: string, vote: 'up' | 'down') => {
       // Mutuamente excluyente: re-pulsar el mismo botón lo desmarca; pulsar
@@ -1090,10 +1094,6 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               <Text style={styles.metricValue}>{pct}%</Text>
               <Text style={styles.metricLabel}>{t('learning.dailyLessonScore')}</Text>
             </View>
-            <View style={[styles.metricItem, styles.metricXp]}>
-              <Text style={styles.metricValueXp}>+{results.session.xp_earned}</Text>
-              <Text style={styles.metricLabel}>{t('learning.dailyLessonSkillPoints')}</Text>
-            </View>
             <View style={[styles.metricItem, styles.metricCorrect]}>
               <Text style={styles.metricValueCorrect}>
                 {results.session.correct_count}/{results.session.total_count}
@@ -1102,9 +1102,55 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             </View>
           </View>
 
+          {/* Recompensa como misión del pase (plan §6.7): sustituye a la
+              antigua métrica de XP. Puede haber más de una (p. ej. la fija de
+              lección + una semanal/mensual de lecciones que cayó con esta).
+              Al repasar/reabrir una lección ya hecha hoy no hay grant nuevo
+              (season_pass = null): mostramos la lección en modo "ya completada"
+              para dejar claro que su progreso ya cuenta. */}
+          <View style={styles.missionCelebrations}>
+            {(results.season_pass?.completed_missions?.length ?? 0) > 0 ? (
+              <>
+                {results.season_pass!.completed_missions.map((m, i) => (
+                  <MissionCelebrationCard
+                    key={m.slug}
+                    icon={m.icon}
+                    title={m.title}
+                    spGranted={m.sp_granted}
+                    delay={i * 150}
+                  />
+                ))}
+                {results.season_pass!.level_up && (
+                  <View style={styles.levelUpBanner}>
+                    <Ionicons name="arrow-up-circle" size={18} color="#FBBF24" />
+                    <Text style={styles.levelUpText}>
+                      {t('home.seasonPass.levelUpBanner', { level: results.season_pass!.level_up.to })}
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <MissionCelebrationCard
+                icon="📚"
+                title={t('home.dailyLesson.title')}
+                spGranted={0}
+                alreadyDone
+              />
+            )}
+            {onOpenSeasonPass && (
+              <Pressable
+                onPress={onOpenSeasonPass}
+                style={({ pressed }) => [styles.seasonPassLinkBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Text style={styles.seasonPassLinkTxt}>{t('learning.dailyLessonViewInPass')}</Text>
+                <Ionicons name="arrow-forward" size={14} color="#F18F34" />
+              </Pressable>
+            )}
+          </View>
+
           <LessonImpactRadar baseSkills={baseSkills} deltas={deltas} />
 
-          {(results.streak.current > 0 || nextMilestone !== null) && (
+          {(results.streak.current > 0 || nextBoost !== null) && (
             <View style={styles.streakResultCard}>
               <View style={styles.streakResultTop}>
                 <Ionicons name="flame" size={20} color="#F97316" />
@@ -1112,19 +1158,24 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
                   <Text style={styles.streakResultValue}>{t('learning.dailyLessonStreakDaysLabel', { count: results.streak.current })}</Text>
                   <Text style={styles.streakResultLabel}>{t('learning.dailyLessonStreakCurrent')}</Text>
                 </View>
-                {results.streak.xp_bonus > 0 && (
-                  <View style={styles.bonusBadge}>
-                    <Text style={styles.bonusText}>{t('learning.dailyLessonXpBonus', { xp: results.streak.xp_bonus })}</Text>
+                {(results.season_pass?.boost_applied ?? 0) > 0 && (
+                  <View style={styles.boostBadge}>
+                    <Text style={styles.boostBadgeText}>
+                      {t('home.seasonPass.boostApplied', {
+                        pct: Math.round((results.season_pass?.boost_applied ?? 0) * 100),
+                      })}
+                    </Text>
                   </View>
                 )}
               </View>
-              {nextMilestone !== null && (
+              {nextBoost !== null && (
                 <View style={styles.nextBonusRow}>
                   <Ionicons name="trending-up-outline" size={12} color="#F18F34" />
                   <Text style={styles.nextBonusText}>
-                    {t('learning.dailyLessonNextBonus', {
-                      count: nextMilestone,
-                      daysLabel: nextMilestone === 1 ? t('learning.dailyLessonDayOne') : t('learning.dailyLessonDayMany'),
+                    {t('learning.dailyLessonNextBoost', {
+                      pct: nextBoost.pct,
+                      count: nextBoost.days,
+                      daysLabel: nextBoost.days === 1 ? t('learning.dailyLessonDayOne') : t('learning.dailyLessonDayMany'),
                     })}
                   </Text>
                 </View>
@@ -1452,7 +1503,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(249,115,22,0.1)', borderWidth: 1, borderColor: 'rgba(249,115,22,0.2)',
   },
   streakText: { color: '#FB923C', fontSize: 14, fontWeight: '700' },
-  multiplierText: { color: 'rgba(249,115,22,0.6)', fontSize: 12 },
   topicBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
   topicBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20, borderWidth: 1 },
   topicBadgeText: { fontSize: 11, fontWeight: '700' },
@@ -1577,10 +1627,36 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 12, gap: 8, width: '100%', marginBottom: 16,
   },
   metricItem: { flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  metricXp: { backgroundColor: 'rgba(241,143,52,0.06)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.12)' },
+  missionCelebrations: { alignSelf: 'stretch', gap: 10, marginBottom: 16 },
+  seasonPassLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(241,143,52,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.22)',
+  },
+  seasonPassLinkTxt: { color: '#F18F34', fontSize: 13, fontWeight: '700' },
+  boostBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(241,143,52,0.1)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.2)' },
+  boostBadgeText: { color: '#F18F34', fontSize: 11, fontWeight: '700' },
+  levelUpBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(251,191,36,0.08)',
+    borderColor: 'rgba(251,191,36,0.3)',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  levelUpText: { color: '#FBBF24', fontSize: 14, fontWeight: '800' },
   metricCorrect: { backgroundColor: 'rgba(16,185,129,0.06)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.12)' },
   metricValue: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },
-  metricValueXp: { color: '#F18F34', fontSize: 18, fontWeight: '900' },
   metricValueCorrect: { color: '#10B981', fontSize: 18, fontWeight: '900' },
   metricLabel: { color: '#6B7280', fontSize: 9, fontWeight: '600', letterSpacing: 1, marginTop: 4 },
   streakResultCard: {
@@ -1591,8 +1667,6 @@ const styles = StyleSheet.create({
   streakResultInfo: { flex: 1 },
   streakResultValue: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   streakResultLabel: { color: '#6B7280', fontSize: 11 },
-  bonusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(241,143,52,0.1)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.2)' },
-  bonusText: { color: '#F18F34', fontSize: 11, fontWeight: '700' },
   nextBonusRow: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)',

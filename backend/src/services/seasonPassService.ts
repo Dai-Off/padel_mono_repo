@@ -24,16 +24,21 @@ export function computeSeasonPass(sp: number, spPerLevel: number, maxLevel: numb
 }
 
 export async function getOrCreateSeasonPassRow(playerId: string): Promise<{ sp: number; has_elite: boolean }> {
+  const season = await getActiveSeasonRow();
+  if (!season) throw new Error('No hay temporada activa en season_pass_seasons (migración 050)');
+  const slug = season.slug;
   const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
     .from('player_season_pass')
     .select('sp, has_elite')
     .eq('player_id', playerId)
+    .eq('season_slug', slug)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (data) return { sp: Number(data.sp ?? 0), has_elite: Boolean(data.has_elite) };
   const { error: insErr } = await supabase.from('player_season_pass').insert({
     player_id: playerId,
+    season_slug: slug,
     sp: 0,
     has_elite: false,
   });
@@ -56,14 +61,22 @@ export async function addSeasonPassSp(playerId: string, delta: number): Promise<
   const { error } = await supabase
     .from('player_season_pass')
     .upsert(
-      { player_id: playerId, sp: next, has_elite: cur.has_elite, updated_at: new Date().toISOString() },
-      { onConflict: 'player_id' }
+      {
+        player_id: playerId,
+        season_slug: season.slug,
+        sp: next,
+        has_elite: cur.has_elite,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'player_id,season_slug' }
     );
   if (error) throw new Error(error.message);
   return { sp: next };
 }
 
 export async function setSeasonPassEliteFlag(playerId: string, value: boolean): Promise<void> {
+  const season = await getActiveSeasonRow();
+  if (!season) throw new Error('No hay temporada activa en season_pass_seasons (migración 050)');
   const supabase = getSupabaseServiceRoleClient();
   const cur = await getOrCreateSeasonPassRow(playerId);
   const { error } = await supabase
@@ -71,13 +84,23 @@ export async function setSeasonPassEliteFlag(playerId: string, value: boolean): 
     .upsert(
       {
         player_id: playerId,
+        season_slug: season.slug,
         sp: cur.sp,
         has_elite: value,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: 'player_id' }
+      { onConflict: 'player_id,season_slug' }
     );
   if (error) throw new Error(error.message);
+}
+
+/**
+ * Con el claim manual (bloque C) la compra de Elite ya NO auto-otorga lo
+ * retroactivo: los niveles elite alcanzados quedan `claimable` y el jugador los
+ * reclama en el pase. Se conserva como no-op (hook del flujo de compra).
+ */
+async function grantEliteRetroactiveSafe(_playerId: string): Promise<void> {
+  // no-op: las recompensas elite retroactivas se reclaman manualmente.
 }
 
 /** Tras pago Stripe confirmado (webhook o confirm-client): registro contable + activa Elite (idempotente por `paymentIntentId`). */
@@ -94,6 +117,7 @@ export async function finalizeSeasonPassElitePurchase(params: {
     .maybeSingle();
   if (dup) {
     await setSeasonPassEliteFlag(params.playerId, true);
+    await grantEliteRetroactiveSafe(params.playerId);
     return { ok: true };
   }
 
@@ -111,11 +135,13 @@ export async function finalizeSeasonPassElitePurchase(params: {
     const msg = String(txErr.message ?? '');
     if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('unique')) {
       await setSeasonPassEliteFlag(params.playerId, true);
+      await grantEliteRetroactiveSafe(params.playerId);
       return { ok: true };
     }
     return { ok: false, error: msg };
   }
 
   await setSeasonPassEliteFlag(params.playerId, true);
+  await grantEliteRetroactiveSafe(params.playerId);
   return { ok: true };
 }

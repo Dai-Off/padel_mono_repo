@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { RARITY_CONFIG } from '../../design/rarity';
+import { resolveUnlockableIcon } from '../../design/unlockableIcons';
 import { RarityBadge } from './RarityBadge';
 import type { Achievement } from '../../design/achievements';
 
@@ -32,7 +33,7 @@ export const AchievementCard: React.FC<AchievementCardProps> = ({
     return (
       <View style={[styles.compact, { backgroundColor: conf.bg, borderColor: conf.border }]}>
         <View style={[styles.iconBoxSm, { backgroundColor: conf.bg, borderColor: conf.border }]}>
-          <Ionicons name={achievement.icon as any} size={16} color={conf.color} />
+          <Ionicons name={resolveUnlockableIcon(achievement.icon)} size={16} color={conf.color} />
         </View>
         <View style={styles.flex}>
           <Text style={styles.titleSm} numberOfLines={1}>{achievement.title}</Text>
@@ -51,7 +52,7 @@ export const AchievementCard: React.FC<AchievementCardProps> = ({
       ]}
     >
       <View style={[styles.iconBox, { backgroundColor: conf.bg, borderColor: conf.border }]}>
-        <Ionicons name={achievement.icon as any} size={20} color={conf.color} />
+        <Ionicons name={resolveUnlockableIcon(achievement.icon)} size={20} color={conf.color} />
       </View>
 
       <View style={styles.flex}>

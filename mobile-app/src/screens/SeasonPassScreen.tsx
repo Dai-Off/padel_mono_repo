@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Easing,
+  FlatList,
+  InteractionManager,
   Modal,
   Pressable,
   RefreshControl,
@@ -21,17 +23,35 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ACCENT } from '../components/home/inicio/constants';
 import { androidReadableText } from '../components/home/inicio/textStyles';
 import { useAuth } from '../contexts/AuthContext';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { theme } from '../theme';
 import { useTranslation } from '../i18n';
 import { useStripe } from '../stripe';
 import { confirmPaymentFromClient, createIntentForSeasonPassElite } from '../api/payments';
 import {
-  fetchSeasonPassMe,
-  type SeasonPassMeOk,
+  type ClaimedRewardDto,
   type SeasonPassMissionDto,
+  type SeasonPassTrackRewardDto,
 } from '../api/seasonPass';
+import {
+  useClaimAllRewards,
+  useClaimReward,
+  useRerollMission,
+  useSeasonPassEstado,
+  useSeasonPassMisiones,
+} from '../queries/seasonPass';
+import { RARITY_CONFIG } from '../design/rarity';
+import { resolveUnlockableIcon } from '../design/unlockableIcons';
+import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
+import { AuthButton } from '../components/auth/AuthButton';
+import { PassHelpSheet } from '../components/seasonPass/PassHelpSheet';
+import { MissionListSkeleton, SeasonPassSkeleton } from '../components/seasonPass/SeasonPassSkeleton';
+import { RewardDetailSheet, type RewardDetailTarget } from '../components/seasonPass/RewardDetailSheet';
+import { RewardClaimedModal } from '../components/seasonPass/RewardClaimedModal';
+import { BoostDetailSheet } from '../components/seasonPass/BoostDetailSheet';
+import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
 
-type Props = { onBack: () => void };
+type Props = { onBack: () => void; onGoToProfile?: () => void };
 
 type PassTab = 'rewards' | 'missions';
 type MissionPeriod = 'daily' | 'weekly' | 'monthly';
@@ -40,6 +60,15 @@ const BG = '#0F0F0F';
 const BORDER = 'rgba(255,255,255,0.1)';
 const PAD = 20;
 const DEFAULT_SP_PER_LEVEL = 1000;
+const TRACK_COL_W = 88; // ancho de cada columna de nivel del track
+
+// Helpers del FlatList del track (fuera del componente: identidad estable).
+const trackKeyExtractor = (lvl: number) => String(lvl);
+const getTrackItemLayout = (_: unknown, index: number) => ({
+  length: TRACK_COL_W,
+  offset: TRACK_COL_W * index,
+  index,
+});
 
 function daysLeftFromEndsAt(endsAtIso: string | undefined): number {
   if (!endsAtIso) return 0;
@@ -48,9 +77,22 @@ function daysLeftFromEndsAt(endsAtIso: string | undefined): number {
   return Math.max(0, Math.ceil((end - Date.now()) / 86400000));
 }
 
-function formatEurFromCents(cents: number): string {
-  const v = Math.max(0, Math.round(cents)) / 100;
-  return `${v.toFixed(2).replace('.', ',')} €`;
+/**
+ * Tiempo restante hasta el fin del período, con granularidad según su tipo
+ * (crea urgencia): diarias en horas/minutos, semanales en días/horas,
+ * mensuales en días. Estático al render (no necesita segundos).
+ */
+function formatPeriodTimeLeft(endIso: string | null | undefined, period: MissionPeriod): string {
+  if (!endIso) return '';
+  const ms = new Date(endIso).getTime() - Date.now();
+  if (Number.isNaN(ms) || ms <= 0) return '';
+  const totalMin = Math.floor(ms / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (period === 'daily') return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  if (period === 'weekly') return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+  return days > 0 ? `${days}d` : `${hours}h`; // monthly
 }
 
 function HeroParticles() {
@@ -225,16 +267,203 @@ function ShimmerBar({ pct }: { pct: number }) {
   );
 }
 
-function LevelTrackColumn({
+/**
+ * Thumb de recompensa del track (42px): render procedural desde el descriptor
+ * `display` del backend — rareza (RARITY_CONFIG), preset de icono del catálogo,
+ * paleta de colores para marcos. Sin recompensa → hueco tenue.
+ */
+function RewardThumb({
+  reward,
+  size,
+  dimmed,
+  onPress,
+  avatarUrl,
+  initials,
+}: {
+  reward: SeasonPassTrackRewardDto | null;
+  size: number;
+  dimmed: boolean;
+  onPress?: () => void;
+  avatarUrl?: string | null;
+  initials?: string;
+}) {
+  const rarityKey = reward?.display.rarity ?? 'common';
+  const glowy = rarityKey === 'epic' || rarityKey === 'legendary';
+  if (!reward) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.06)',
+          backgroundColor: 'rgba(255,255,255,0.02)',
+        }}
+      />
+    );
+  }
+
+  const d = reward.display;
+  const rarity = RARITY_CONFIG[d.rarity ?? 'common'] ?? RARITY_CONFIG.common;
+  const claimed = reward.status === 'claimed';
+  const claimable = reward.status === 'claimable';
+  const opacity = dimmed ? 0.5 : 1;
+
+  let inner: ReactNode;
+  if (d.kind === 'frame') {
+    // Marco: forma real + animación sobre el avatar (igual que en el perfil).
+    const frameAttrs: FrameAttrs = {
+      rarity: d.rarity ?? 'common',
+      style: d.style ?? null,
+      animationType: d.animation_type ?? null,
+      colors: Array.isArray(d.colors) ? (d.colors as string[]) : null,
+    };
+    inner = (
+      <AvatarWithFrame
+        initials={initials ?? '?'}
+        avatarUrl={avatarUrl ?? null}
+        size={size - 8}
+        animate={false}
+        frame={frameAttrs}
+      />
+    );
+  } else if (d.kind === 'sp') {
+    // SP directo: solo el valor, sin icono (el rayo no aportaba nada).
+    inner = (
+      <View style={{ alignItems: 'center' }}>
+        <Text style={{ fontSize: 13, fontWeight: '900', color: ACCENT }} numberOfLines={1}>
+          {d.label.replace(' SP', '')}
+        </Text>
+        <Text style={{ fontSize: 8, fontWeight: '700', color: ACCENT }}>SP</Text>
+      </View>
+    );
+  } else if (d.kind === 'sp_boost') {
+    // Booster: cohete + %, el icono sí comunica "boost temporal".
+    inner = (
+      <View style={{ alignItems: 'center' }}>
+        <Text style={{ fontSize: 14 }}>🚀</Text>
+        <Text style={{ fontSize: 8, fontWeight: '800', color: ACCENT }} numberOfLines={1}>
+          {d.label.replace(' SP', '')}
+        </Text>
+      </View>
+    );
+  } else if (d.kind === 'reroll_token') {
+    // Token de reroll: dado + cantidad.
+    const n = d.label.replace(/[^0-9]/g, '') || '1';
+    inner = (
+      <View style={{ alignItems: 'center' }}>
+        <Ionicons name="dice" size={16} color={ACCENT} />
+        <Text style={{ fontSize: 8, fontWeight: '800', color: ACCENT }} numberOfLines={1}>
+          {`×${n}`}
+        </Text>
+      </View>
+    );
+  } else if (d.kind === 'name_color') {
+    // Color de nombre: "Aa" con el primer/último color de la paleta (sin shadow
+    // para evitar la caja oscura del textShadow en Android).
+    const cols = Array.isArray(d.colors) && d.colors.length ? (d.colors as string[]) : [rarity.color];
+    inner = (
+      <View style={{ flexDirection: 'row' }}>
+        <Text style={{ fontSize: 22, fontWeight: '900', color: cols[0] }}>A</Text>
+        <Text style={{ fontSize: 22, fontWeight: '900', color: cols[cols.length - 1] }}>a</Text>
+      </View>
+    );
+  } else if (d.kind === 'theme') {
+    // Tema: degradado estático de su paleta (barato; el fondo animado real se
+    // ve en el detalle). Intercala el acento (colors[2]) para que se distinga.
+    const cols = Array.isArray(d.colors) && d.colors.length ? (d.colors as string[]) : [rarity.color, rarity.border];
+    const grad = (cols.length >= 3 ? [cols[0], cols[2], cols[1]] : cols) as [string, string, ...string[]];
+    inner = (
+      <LinearGradient
+        colors={grad}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{ width: size - 14, height: size - 14, borderRadius: 8 }}
+      />
+    );
+  } else {
+    // trophy / badge / title: preset de icono del catálogo con color de rareza.
+    inner = <Ionicons name={resolveUnlockableIcon(d.icon)} size={18} color={rarity.color} />;
+  }
+
+  return (
+    <Pressable
+      style={({ pressed }) => [{ opacity: pressed ? opacity * 0.6 : opacity }]}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 14,
+          borderWidth: glowy ? 2 : 1,
+          borderColor: glowy ? rarity.color : rarity.border,
+          backgroundColor: rarity.bg,
+          alignItems: 'center',
+          justifyContent: 'center',
+          shadowColor: glowy ? rarity.glow : 'transparent',
+          shadowOpacity: glowy ? 0.9 : 0,
+          shadowRadius: glowy ? 10 : 0,
+          shadowOffset: { width: 0, height: 0 },
+          // Sin elevation: en Android proyectaba una caja negra rectangular (el
+          // fondo semitransparente impide el contorno redondeado). El resplandor
+          // iOS se mantiene; en Android la rareza la marca el borde de color.
+          elevation: 0,
+        }}
+      >
+        {inner}
+      </View>
+      {claimed ? (
+        <View style={styles.rewardGrantedBadge}>
+          <Ionicons name="checkmark" size={9} color="#0B1120" />
+        </View>
+      ) : claimable ? (
+        <View style={styles.rewardClaimableBadge}>
+          <Ionicons name="gift" size={9} color="#0B1120" />
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+/** Etiqueta corta bajo el thumb: nombre para cosméticos; vacío para SP/booster
+ *  (el thumb ya muestra el valor). */
+function rewardShortLabel(reward: SeasonPassTrackRewardDto | null): string {
+  if (!reward) return '';
+  const k = reward.display.kind;
+  return k === 'title' || k === 'frame' || k === 'badge' || k === 'trophy' || k === 'theme'
+    ? reward.display.label
+    : '';
+}
+
+/**
+ * Columna de nivel del track. Memoizada: el FlatList virtualizado solo crea
+ * las visibles, y el memo evita re-renderizar las montadas en cada cambio de
+ * estado de la pantalla (claiming, refreshing, cambio de pestaña de misión…).
+ */
+const LevelTrackColumn = memo(function LevelTrackColumn({
   level,
   isUnlocked,
   isCurrent,
   hasElite,
+  freeReward,
+  eliteReward,
+  onPressReward,
+  avatarUrl,
+  initials,
 }: {
   level: number;
   isUnlocked: boolean;
   isCurrent: boolean;
   hasElite: boolean;
+  freeReward: SeasonPassTrackRewardDto | null;
+  eliteReward: SeasonPassTrackRewardDto | null;
+  /** Identidad estable (useCallback en la pantalla) para que el memo funcione. */
+  onPressReward: (level: number, reward: SeasonPassTrackRewardDto) => void;
+  avatarUrl?: string | null;
+  initials?: string;
 }) {
   const scaleNode = useRef(new Animated.Value(1)).current;
   const ringScale = useRef(new Animated.Value(1)).current;
@@ -284,30 +513,31 @@ function LevelTrackColumn({
     outputRange: ['0deg', '360deg'],
   });
 
-  const thumbSize = 42;
-  const w = 74;
+  const thumbSize = 52;
+  const w = TRACK_COL_W;
 
   return (
     <View style={{ width: w, alignItems: 'center' }}>
-      <View style={{ height: thumbSize + 20, justifyContent: 'center' }}>
-        <View style={{ opacity: hasElite && isUnlocked ? 1 : hasElite ? 0.28 : 0.2 }}>
-          <LinearGradient
-            colors={['rgba(168,85,247,0.35)', 'rgba(17,17,17,0.95)']}
-            style={{
-              width: thumbSize,
-              height: thumbSize,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: 'rgba(250,204,21,0.35)',
-            }}
+      <View style={{ height: thumbSize + 30, alignItems: 'center' }}>
+        <View style={{ width: thumbSize, height: thumbSize }}>
+          <RewardThumb
+            reward={eliteReward}
+            size={thumbSize}
+            dimmed={!hasElite || !isUnlocked}
+            onPress={eliteReward ? () => onPressReward(level, eliteReward) : undefined}
+            avatarUrl={avatarUrl}
+            initials={initials}
           />
+          {!hasElite && eliteReward && (
+            <View style={styles.eliteLockOverlay} pointerEvents="none">
+              <Ionicons name="ribbon" size={14} color="#facc15" />
+              <Ionicons name="lock-closed" size={12} color="#fde68a" />
+            </View>
+          )}
         </View>
-        {!hasElite && (
-          <View style={styles.eliteLockOverlay}>
-            <Ionicons name="ribbon" size={14} color="#facc15" />
-            <Ionicons name="lock-closed" size={12} color="#fde68a" />
-          </View>
-        )}
+        {rewardShortLabel(eliteReward) ? (
+          <Text style={styles.thumbLabel} numberOfLines={1}>{rewardShortLabel(eliteReward)}</Text>
+        ) : null}
       </View>
 
       <View style={{ height: thumbSize, width: '100%', justifyContent: 'center', alignItems: 'center' }}>
@@ -377,29 +607,34 @@ function LevelTrackColumn({
         </Animated.View>
       </View>
 
-      <View style={{ height: thumbSize + 20, justifyContent: 'center' }}>
-        <View style={{ opacity: isUnlocked ? 1 : 0.28 }}>
-          <LinearGradient
-            colors={['rgba(55,65,81,0.9)', 'rgba(17,24,39,0.95)']}
-            style={{
-              width: thumbSize,
-              height: thumbSize,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.12)',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name="diamond-outline" size={20} color="#9ca3af" />
-          </LinearGradient>
+      <View style={{ height: thumbSize + 30, alignItems: 'center' }}>
+        <View style={{ width: thumbSize, height: thumbSize }}>
+          <RewardThumb
+            reward={freeReward}
+            size={thumbSize}
+            dimmed={!isUnlocked}
+            onPress={freeReward ? () => onPressReward(level, freeReward) : undefined}
+            avatarUrl={avatarUrl}
+            initials={initials}
+          />
         </View>
+        {rewardShortLabel(freeReward) ? (
+          <Text style={styles.thumbLabel} numberOfLines={1}>{rewardShortLabel(freeReward)}</Text>
+        ) : null}
       </View>
     </View>
   );
-}
+});
 
-function MissionRow({ m }: { m: SeasonPassMissionDto }) {
+function MissionRow({
+  m,
+  canReroll = false,
+  onReroll,
+}: {
+  m: SeasonPassMissionDto;
+  canReroll?: boolean;
+  onReroll?: () => void;
+}) {
   const { t } = useTranslation();
   const pct = Math.min(m.target > 0 ? m.current / m.target : 0, 1);
   const w = useRef(new Animated.Value(0)).current;
@@ -416,32 +651,42 @@ function MissionRow({ m }: { m: SeasonPassMissionDto }) {
     outputRange: ['0%', '100%'],
   });
 
+  const spColor = m.done ? '#34d399' : ACCENT;
   return (
-    <View
-      style={[
-        styles.missionCard,
-        m.done ? styles.missionCardDone : null,
-      ]}
-    >
+    <View style={[styles.missionCard, m.done ? styles.missionCardDone : null]}>
       <View style={styles.missionRow}>
         <View style={[styles.missionIconBox, m.done && styles.missionIconBoxDone]}>
-          <Text style={{ fontSize: 20 }}>{m.icon}</Text>
+          <Text style={{ fontSize: 17 }}>{m.icon}</Text>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={styles.missionTitleRow}>
-            <Text style={styles.missionTitle} numberOfLines={2}>
+            <Text style={styles.missionTitle} numberOfLines={1}>
               {m.title}
             </Text>
-            {m.done ? <Ionicons name="checkmark-circle" size={16} color="#34d399" /> : null}
+            <View style={styles.missionSpBadge}>
+              <Text style={[styles.missionMetaSp, { color: spColor }]}>
+                {m.sp_reward.toLocaleString('es-ES')} SP
+              </Text>
+            </View>
+            {!m.done && canReroll && onReroll ? (
+              <Pressable
+                onPress={onReroll}
+                hitSlop={8}
+                style={({ pressed }) => [styles.rerollBtn, pressed && styles.pressed]}
+                accessibilityLabel={t('alerts.seasonPass.rerollTitle')}
+              >
+                <Ionicons name="refresh" size={13} color="rgba(255,255,255,0.6)" />
+              </Pressable>
+            ) : null}
           </View>
-          <Text style={styles.missionDesc}>{m.description}</Text>
-          {m.reward_hint ? (
-            <Text style={[styles.missionDesc, { fontSize: 10, opacity: 0.85, marginTop: -4 }]}>
-              {m.reward_hint}
-            </Text>
-          ) : null}
-          {!m.done ? (
-            <>
+          <Text style={styles.missionDesc} numberOfLines={1}>{m.description}</Text>
+          {m.done ? (
+            <View style={styles.missionDoneRow}>
+              <Ionicons name="checkmark-circle" size={13} color="#34d399" />
+              <Text style={styles.missionDoneText}>{t('alerts.seasonPass.missionCompleted')}</Text>
+            </View>
+          ) : (
+            <View style={styles.missionProgressRow}>
               <View style={styles.missionBarBg}>
                 <Animated.View style={{ width, height: '100%', borderRadius: 999, overflow: 'hidden' }}>
                   <LinearGradient
@@ -452,98 +697,230 @@ function MissionRow({ m }: { m: SeasonPassMissionDto }) {
                   />
                 </Animated.View>
               </View>
-              <View style={styles.missionMeta}>
-                <Text style={styles.missionMetaLeft}>
-                  {m.current}/{m.target}
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Ionicons name="flash" size={12} color={ACCENT} />
-                  <Text style={styles.missionMetaSp}>+{m.sp_reward.toLocaleString('es-ES')} SP</Text>
-                </View>
-              </View>
-            </>
-          ) : (
-            <View style={styles.missionMeta}>
-              <Text style={styles.missionDoneText}>{t('alerts.seasonPass.missionCompleted')}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="flash" size={12} color="#34d399" />
-                <Text style={[styles.missionMetaSp, { color: '#34d399' }]}>
-                  +{m.sp_reward.toLocaleString('es-ES')} SP
-                </Text>
-              </View>
+              <Text style={styles.missionMetaLeft}>
+                {m.current}/{m.target}
+              </Text>
             </View>
           )}
         </View>
       </View>
-      {!m.done && m.expires_label ? (
-        <View style={styles.missionExpire}>
-          <Ionicons name="time-outline" size={12} color="#4b5563" />
-          <Text style={styles.missionExpireText}>{t('alerts.seasonPass.missionCloses', { label: m.expires_label })}</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
 
-export function SeasonPassScreen({ onBack }: Props) {
+export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const { session, isLoading: authLoading } = useAuth();
+  const { profile } = useHomeData();
+  const playerInitials =
+    `${profile?.firstName?.[0] ?? ''}${profile?.lastName?.[0] ?? ''}`.toUpperCase() || 'W';
   const { t } = useTranslation();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [tab, setTab] = useState<PassTab>('rewards');
   const [mTab, setMTab] = useState<MissionPeriod>('daily');
   const [showElite, setShowElite] = useState(false);
+  const [showEliteSuccess, setShowEliteSuccess] = useState(false);
+  const [showHowTo, setShowHowTo] = useState(false);
+  const [showBoostDetail, setShowBoostDetail] = useState(false);
   const [elitePaying, setElitePaying] = useState(false);
-  const [me, setMe] = useState<SeasonPassMeOk | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [rewardDetail, setRewardDetail] = useState<RewardDetailTarget | null>(null);
+  const [claimAllRewards, setClaimAllRewards] = useState<ClaimedRewardDto[] | null>(null);
+  const [celebrateReward, setCelebrateReward] = useState<SeasonPassTrackRewardDto | null>(null);
+  const trackScrollRef = useRef<FlatList<number>>(null);
+
+  // Patrón del perfil: /estado (rápido) es lo único que bloquea hero+track;
+  // /misiones (evaluación lenta) llega por su cuenta y rellena su sección.
+  const estadoQuery = useSeasonPassEstado();
+  const misionesQuery = useSeasonPassMisiones();
+  const { refetch: refetchEstado } = estadoQuery;
+  const { refetch: refetchMisiones } = misionesQuery;
+  const estado = estadoQuery.data ?? null;
+  const misiones = misionesQuery.data ?? null;
+  // Solo el pull-to-refresh mueve el RefreshControl: los refetch en background
+  // (tras claims, por foco…) no deben mostrar ese spinner.
   const [refreshing, setRefreshing] = useState(false);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const loadErr = !session?.access_token
+    ? t('alerts.seasonPass.loginRequiredLoad')
+    : estadoQuery.isError
+      ? t('alerts.seasonPass.loadFail')
+      : null;
 
-  const load = useCallback(async () => {
-    const token = session?.access_token;
-    if (!token) {
-      setMe(null);
-      setLoadErr(t('alerts.seasonPass.loginRequiredLoad'));
-      setLoading(false);
-      return;
-    }
-    setLoadErr(null);
-    const tz = 'Europe/Madrid';
-    const data = await fetchSeasonPassMe(token, tz);
-    if (!data) {
-      setLoadErr(t('alerts.seasonPass.loadFail'));
-      setMe(null);
-    } else {
-      setMe(data);
-    }
-    setLoading(false);
-  }, [session?.access_token, t]);
+  const claimMutation = useClaimReward();
+  const claimAllMutation = useClaimAllRewards();
+  const rerollMutation = useRerollMission();
+  const claiming = claimMutation.isPending || claimAllMutation.isPending;
 
-  useEffect(() => {
-    setLoading(true);
-    void load();
-  }, [load]);
+  // Reclama una recompensa concreta del track (claim manual).
+  const handleClaim = useCallback(
+    async (reward: SeasonPassTrackRewardDto) => {
+      if (claiming) return;
+      try {
+        await claimMutation.mutateAsync(reward.id);
+        // Cierra el detalle y celebra con el reward del track: el caché ya
+        // quedó marcado como claimed y el /me reconcilia en background.
+        setRewardDetail(null);
+        setCelebrateReward({ ...reward, status: 'claimed' });
+      } catch {
+        // Paridad con el comportamiento anterior: el claim fallido no avisa.
+      }
+    },
+    [claiming, claimMutation]
+  );
+
+  // Reclama de una vez todas las recompensas disponibles.
+  const handleClaimAll = useCallback(async () => {
+    if (claiming) return;
+    try {
+      const res = await claimAllMutation.mutateAsync();
+      if (res.count > 0) {
+        setClaimAllRewards(res.rewards);
+      }
+    } catch {
+      // Paridad: silencioso.
+    }
+  }, [claiming, claimAllMutation]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    void load().finally(() => setRefreshing(false));
-  }, [load]);
+    void Promise.all([refetchEstado(), refetchMisiones()]).finally(() => setRefreshing(false));
+  }, [refetchEstado, refetchMisiones]);
 
-  const spPer = me?.sp_per_level ?? DEFAULT_SP_PER_LEVEL;
-  const levelMax = me?.level_max ?? 100;
-  const level = me?.level ?? 1;
-  const sp = me?.sp ?? 0;
-  const into = me?.into_level ?? 0;
-  const pct = me?.pct ?? 0;
-  const spToNext = me?.sp_to_next ?? spPer;
-  const eliteActive = me?.has_elite ?? false;
-  const left = daysLeftFromEndsAt(me?.season.ends_at);
-  const trackLevels = me?.track_levels ?? [];
-  const spHowRows = me?.sp_how ?? [];
+  // Confirmación de reroll: modal propio con el estilo dark de la app (el
+  // Alert nativo desentona). rerollTarget != null = modal abierto.
+  const [rerollTarget, setRerollTarget] = useState<SeasonPassMissionDto | null>(null);
+  const [rerolling, setRerolling] = useState(false);
+  const [rerollErr, setRerollErr] = useState<string | null>(null);
+  // Fade propio y rápido: el animationType="fade" del Modal nativo dura ~300ms
+  // fijos del sistema y se siente lento.
+  const rerollFade = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (rerollTarget !== null) {
+      rerollFade.setValue(0);
+      Animated.timing(rerollFade, { toValue: 1, duration: 140, useNativeDriver: true }).start();
+    }
+  }, [rerollTarget, rerollFade]);
+
+  const handleReroll = useCallback(
+    (m: SeasonPassMissionDto) => {
+      if (!m.assignment_id || rerolling) return;
+      setRerollErr(null);
+      setRerollTarget(m);
+    },
+    [rerolling],
+  );
+
+  const confirmReroll = useCallback(() => {
+    const target = rerollTarget;
+    if (!target?.assignment_id || rerolling) return;
+    setRerolling(true);
+    setRerollErr(null);
+    rerollMutation
+      .mutateAsync(target.assignment_id)
+      .then(async () => {
+        // El modal se cierra ya; los botones de reroll siguen deshabilitados
+        // (rerolling) hasta que el refetch trae la misión nueva.
+        setRerollTarget(null);
+        await refetchMisiones();
+      })
+      .catch(() => {
+        setRerollErr(t('alerts.seasonPass.rerollFail'));
+      })
+      .finally(() => setRerolling(false));
+  }, [rerollTarget, rerolling, rerollMutation, refetchMisiones, t]);
+
+  const spPer = estado?.sp_per_level ?? DEFAULT_SP_PER_LEVEL;
+  const levelMax = estado?.level_max ?? 50;
+  const level = estado?.level ?? 1;
+  const sp = estado?.sp ?? 0;
+  const into = estado?.into_level ?? 0;
+  const pct = estado?.pct ?? 0;
+  const spToNext = estado?.sp_to_next ?? spPer;
+  const eliteActive = estado?.has_elite ?? false;
+  const left = daysLeftFromEndsAt(estado?.season.ends_at);
+
+  const trackRewardsByLevel = useMemo(() => {
+    const map = new Map<number, SeasonPassTrackRewardDto[]>();
+    for (const entry of estado?.track_rewards ?? []) {
+      map.set(entry.level, entry.rewards);
+    }
+    return map;
+  }, [estado?.track_rewards]);
+
+  // Track completo 1..max: si el backend manda track_rewards (100 niveles) los
+  // usamos; si no, caemos al radio (track_levels) por compatibilidad.
+  const trackAllLevels = useMemo(() => {
+    const fromRewards = (estado?.track_rewards ?? []).map((e) => e.level);
+    if (fromRewards.length > 0) return fromRewards;
+    return estado?.track_levels ?? [];
+  }, [estado?.track_rewards, estado?.track_levels]);
+
+  // Índice del track que deja el nivel actual centrado (cuantizado a columna
+  // entera para que initialScrollIndex y el re-centrado coincidan exactos).
+  const trackCenterIndex = useMemo(() => {
+    if (trackAllLevels.length === 0) return 0;
+    const idx = Math.max(0, trackAllLevels.indexOf(level));
+    const target = idx * TRACK_COL_W - windowWidth / 2 + TRACK_COL_W / 2;
+    return Math.max(0, Math.min(trackAllLevels.length - 1, Math.round(target / TRACK_COL_W)));
+  }, [trackAllLevels, level, windowWidth]);
+
+  // Re-centrado tras el montaje: solo cuando los datos llegan con el track
+  // ya montado (primera carga en frío) o cambia el nivel. Las vueltas a la
+  // pestaña no pasan por aquí: el track queda montado (display:none) y
+  // conserva la posición de scroll donde la dejaste.
+  useEffect(() => {
+    if (trackAllLevels.length === 0) return;
+    const id = setTimeout(
+      () =>
+        trackScrollRef.current?.scrollToOffset({
+          offset: trackCenterIndex * TRACK_COL_W,
+          animated: false,
+        }),
+      80,
+    );
+    return () => clearTimeout(id);
+  }, [trackAllLevels.length, trackCenterIndex]);
+
+  const openRewardDetail = useCallback(
+    (lvl: number, reward: SeasonPassTrackRewardDto) => setRewardDetail({ level: lvl, reward }),
+    [],
+  );
+
+  const renderTrackColumn = useCallback(
+    ({ item: lvl }: { item: number }) => {
+      const levelRewards = trackRewardsByLevel.get(lvl) ?? [];
+      return (
+        <LevelTrackColumn
+          level={lvl}
+          isUnlocked={level >= lvl}
+          isCurrent={level === lvl}
+          hasElite={eliteActive}
+          freeReward={levelRewards.find((r) => r.tier === 'free') ?? null}
+          eliteReward={levelRewards.find((r) => r.tier === 'elite') ?? null}
+          onPressReward={openRewardDetail}
+          avatarUrl={profile?.avatarUrl ?? null}
+          initials={playerInitials}
+        />
+      );
+    },
+    [trackRewardsByLevel, level, eliteActive, openRewardDetail, profile?.avatarUrl, playerInitials],
+  );
+
+  const boostPct = Math.round((estado?.boosts?.total_bonus ?? 0) * 100);
+  const boostSourcesLabel = useMemo(() => {
+    const labels: Record<string, string> = {
+      lesson_streak: t('home.seasonPass.boostSourceStreak'),
+      pass_reward: t('home.seasonPass.boostSourceBooster'),
+      catch_up: t('home.seasonPass.boostSourceCatchUp'),
+      event: t('home.seasonPass.boostSourceEvent'),
+    };
+    return (estado?.boosts?.breakdown ?? [])
+      .map((b) => `${labels[b.source] ?? b.source} +${Math.round(b.bonus * 100)}%`)
+      .join(' · ');
+  }, [estado?.boosts?.breakdown, t]);
 
   const missionsByPeriod = useMemo(() => {
-    const list = me?.missions ?? [];
+    const list = misiones?.missions ?? [];
     const g: Record<MissionPeriod, SeasonPassMissionDto[]> = { daily: [], weekly: [], monthly: [] };
     for (const m of list) {
       if (m.period === 'daily' || m.period === 'weekly' || m.period === 'monthly') {
@@ -551,10 +928,10 @@ export function SeasonPassScreen({ onBack }: Props) {
       }
     }
     return g;
-  }, [me?.missions]);
+  }, [misiones?.missions]);
 
   const periodTabs = useMemo(() => {
-    const raw = me?.mission_period_tabs;
+    const raw = misiones?.mission_period_tabs;
     const out: { period: MissionPeriod; label: string }[] = [];
     const seen = new Set<string>();
     if (Array.isArray(raw)) {
@@ -579,7 +956,7 @@ export function SeasonPassScreen({ onBack }: Props) {
       }
     });
     return out;
-  }, [me?.mission_period_tabs, missionsByPeriod]);
+  }, [misiones?.mission_period_tabs, missionsByPeriod]);
 
   useEffect(() => {
     if (!periodTabs.length) return;
@@ -590,24 +967,84 @@ export function SeasonPassScreen({ onBack }: Props) {
 
   const missions = missionsByPeriod[mTab];
 
-  const contentOp = useRef(new Animated.Value(1)).current;
+  // Countdown del período activo: todas sus misiones comparten period_end_iso.
+  const periodCountdown = useMemo(
+    () => formatPeriodTimeLeft(missions[0]?.period_end_iso, mTab),
+    [missions, mTab],
+  );
+
 
   /**
    * Pantalla única de espera: hidratación de auth o fetch del pase con sesión,
    * sin pintar chips/tabs con placeholders (evita cortes y renders por partes).
    */
   const awaitingPassPayload =
-    authLoading || (Boolean(loading && session?.access_token) && me === null);
-  const passReady = me !== null;
+    authLoading || (Boolean(estadoQuery.isPending && session?.access_token) && estado === null);
+  const passReady = estado !== null;
 
-  const pendingSP = useMemo(
-    () => missions.filter((x) => !x.done).reduce((a, x) => a + x.sp_reward, 0),
+  // Partículas y pulso del hero: decorativos y caros de montar. Se difieren
+  // hasta que la transición de navegación y el primer pintado terminan, para
+  // que el tap → pantalla sea lo más ligero posible.
+  const [decorReady, setDecorReady] = useState(false);
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => setDecorReady(true));
+    return () => task.cancel();
+  }, []);
+
+  // Skeleton como overlay con crossfade: en vez de desmontarse de golpe al
+  // llegar el payload (dejaba un frame oscuro antes del fade del contenido),
+  // vive encima del contenido y se desvanece mientras este entra por debajo.
+  const [skeletonVisible, setSkeletonVisible] = useState(awaitingPassPayload);
+  const skeletonOp = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (awaitingPassPayload || !skeletonVisible) return;
+    Animated.timing(skeletonOp, {
+      toValue: 0,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setSkeletonVisible(false);
+    });
+  }, [awaitingPassPayload, skeletonVisible, skeletonOp]);
+
+  // Entrada escalonada del contenido (hero primero, tabs+cuerpo 80ms detrás),
+  // con ease-out para que frene suave en vez de cortarse en seco.
+  const heroIn = useRef(new Animated.Value(0)).current;
+  const bodyIn = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!passReady) return;
+    Animated.stagger(80, [
+      Animated.timing(heroIn, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(bodyIn, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [passReady, heroIn, bodyIn]);
+  const heroInStyle = {
+    opacity: heroIn,
+    transform: [
+      { translateY: heroIn.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+    ],
+  };
+
+  const obtainedSP = useMemo(
+    () => missions.filter((x) => x.done).reduce((a, x) => a + x.sp_reward, 0),
     [missions]
   );
+  const totalSP = useMemo(() => missions.reduce((a, x) => a + x.sp_reward, 0), [missions]);
   const doneCount = useMemo(() => missions.filter((x) => x.done).length, [missions]);
 
   const eliteBullets = useMemo(() => {
-    const raw = me?.season?.elite_modal_bullets;
+    const raw = estado?.season?.elite_modal_bullets;
     if (!Array.isArray(raw)) return [];
     return raw
       .map((x) => {
@@ -618,17 +1055,7 @@ export function SeasonPassScreen({ onBack }: Props) {
         return text ? { icon, text } : null;
       })
       .filter((x): x is { icon: string; text: string } => x != null);
-  }, [me?.season?.elite_modal_bullets]);
-
-  const onTabChange = useCallback((t: PassTab) => {
-    contentOp.setValue(0);
-    setTab(t);
-    Animated.timing(contentOp, {
-      toValue: 1,
-      duration: 220,
-      useNativeDriver: true,
-    }).start();
-  }, [contentOp]);
+  }, [estado?.season?.elite_modal_bullets]);
 
   const purchaseEliteWithStripe = useCallback(async () => {
     const token = session?.access_token;
@@ -669,18 +1096,19 @@ export function SeasonPassScreen({ onBack }: Props) {
         return;
       }
 
-      await load();
+      await refetchEstado();
       setShowElite(false);
-      const paid = formatEurFromCents(intentRes.amountCents ?? 999);
-      Alert.alert(t('alerts.ready.title'), t('alerts.seasonPass.activated', { plan: paid }));
+      setShowEliteSuccess(true);
     } catch (e) {
       Alert.alert(t('alerts.error.title'), e instanceof Error ? e.message : t('common.paymentProcessError'));
     } finally {
       setElitePaying(false);
     }
-  }, [session?.access_token, initPaymentSheet, presentPaymentSheet, load, t]);
+  }, [session?.access_token, initPaymentSheet, presentPaymentSheet, refetchEstado, t]);
 
-  const scrollBottom = theme.scrollBottomPadding + insets.bottom + 28;
+  // El pase es full-screen y oculta la tab bar (MainApp), así que no necesita
+  // el scrollBottomPadding pensado para dejarle sitio: solo safe area + aire.
+  const scrollBottom = insets.bottom + 24;
 
   return (
     /** `ScreenLayout` ya aplica `paddingTop: insets.top` al contenedor; no duplicar aquí. */
@@ -713,7 +1141,6 @@ export function SeasonPassScreen({ onBack }: Props) {
               end={{ x: 0.5, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
-            <RadialPulse />
             <Pressable
               onPress={onBack}
               hitSlop={14}
@@ -721,10 +1148,6 @@ export function SeasonPassScreen({ onBack }: Props) {
             >
               <Ionicons name="arrow-back" size={18} color="#fff" />
             </Pressable>
-            <View style={[styles.heroInner, styles.passLoadingInner]}>
-              <ActivityIndicator color={ACCENT} size="large" />
-              <Text style={styles.passLoadingHint}>{t('alerts.seasonPass.loading')}</Text>
-            </View>
           </View>
         ) : passReady ? (
           <>
@@ -736,8 +1159,12 @@ export function SeasonPassScreen({ onBack }: Props) {
                 end={{ x: 0.5, y: 1 }}
                 style={StyleSheet.absoluteFill}
               />
-              <RadialPulse />
-              <HeroParticles />
+              {decorReady ? (
+                <>
+                  <RadialPulse />
+                  <HeroParticles />
+                </>
+              ) : null}
 
               <Pressable
                 onPress={onBack}
@@ -747,7 +1174,16 @@ export function SeasonPassScreen({ onBack }: Props) {
                 <Ionicons name="arrow-back" size={18} color="#fff" />
               </Pressable>
 
-              <View style={styles.heroInner}>
+              <Pressable
+                onPress={() => setShowHowTo(true)}
+                hitSlop={14}
+                style={({ pressed }) => [styles.helpFab, { top: 8 }, pressed && styles.pressed]}
+                accessibilityLabel={t('alerts.seasonPass.passHelpTitle')}
+              >
+                <Ionicons name="help" size={18} color="#fff" />
+              </Pressable>
+
+              <Animated.View style={[styles.heroInner, heroInStyle]}>
                 <View style={{ alignItems: 'center', marginBottom: 10 }}>
                   <View>
                     <LinearGradient
@@ -756,7 +1192,7 @@ export function SeasonPassScreen({ onBack }: Props) {
                     >
                       <Ionicons name="flame" size={14} color={ACCENT} />
                       <Text style={styles.seasonChipText}>
-                        {me.season.hero_chip_label?.trim() || me.season.slug || '—'}
+                        {estado.season.hero_chip_label?.trim() || estado.season.slug || '—'}
                       </Text>
                       <Ionicons name="flame" size={14} color={ACCENT} />
                     </LinearGradient>
@@ -764,10 +1200,10 @@ export function SeasonPassScreen({ onBack }: Props) {
                 </View>
 
                 <View>
-                  <Text style={styles.heroTitle}>{me.season.title ?? '—'}</Text>
+                  <Text style={styles.heroTitle}>{estado.season.title ?? '—'}</Text>
                   <Text style={styles.heroSub}>
-                    {me.season.subtitle ?? ''}
-                    {me.season.subtitle ? ' · ' : ''}
+                    {estado.season.subtitle ?? ''}
+                    {estado.season.subtitle ? ' · ' : ''}
                     <Text style={styles.heroSubAccent}>{t('alerts.seasonPass.daysRemaining', { count: left })}</Text>
                   </Text>
                 </View>
@@ -783,14 +1219,31 @@ export function SeasonPassScreen({ onBack }: Props) {
                         </View>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.levelCardHint}>{t('alerts.seasonPass.totalSp')}</Text>
-                        <Text style={styles.spHuge}>{sp.toLocaleString('es-ES')}</Text>
+                        {level >= levelMax ? (
+                          <>
+                            <Text style={styles.levelCardHint}>{t('alerts.seasonPass.totalSp')}</Text>
+                            <Text style={styles.spHuge}>{sp.toLocaleString('es-ES')}</Text>
+                            <Text style={styles.spTotalInline}>{t('alerts.seasonPass.seasonMax')}</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.levelCardHint}>
+                              {t('alerts.seasonPass.forNextLevel', { level: level + 1 })}
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+                              <Text style={styles.spHuge}>{spToNext.toLocaleString('es-ES')}</Text>
+                              <Text style={styles.spHugeUnit}>SP</Text>
+                            </View>
+                            <Text style={styles.spTotalInline}>
+                              {t('alerts.seasonPass.totalSpInline', { sp: sp.toLocaleString('es-ES') })}
+                            </Text>
+                          </>
+                        )}
                       </View>
                     </View>
 
                     <View style={styles.barLabels}>
                       <Text style={styles.barTiny}>{t('alerts.seasonPass.levelShort', { level })}</Text>
-                      <Text style={styles.barTiny}>{t('alerts.seasonPass.spRemaining', { sp: spToNext.toLocaleString('es-ES') })}</Text>
                       <Text style={styles.barTiny}>{t('alerts.seasonPass.levelShort', { level: Math.min(levelMax, level + 1) })}</Text>
                     </View>
                     <ShimmerBar pct={pct} />
@@ -814,31 +1267,28 @@ export function SeasonPassScreen({ onBack }: Props) {
                           <View style={{ flex: 1 }}>
                             <Text style={styles.eliteTitle}>{t('alerts.seasonPass.elitePass')}</Text>
                             <Text style={styles.eliteSub}>
-                              {me.season.elite_card_subtitle?.trim() || '—'}
+                              {estado.season.elite_card_subtitle?.trim() || '—'}
                             </Text>
                           </View>
                           <Ionicons name="chevron-forward" size={16} color="#ca8a04" />
                         </LinearGradient>
                       </Pressable>
                     ) : (
-                      <LinearGradient
-                        colors={['#FFD700', '#FFA500']}
-                        style={styles.eliteActiveBar}
-                      >
-                        <Ionicons name="ribbon" size={16} color="#000" />
+                      <View style={styles.eliteActiveChip}>
+                        <Ionicons name="checkmark-circle" size={15} color={ACCENT} />
                         <Text style={styles.eliteActiveText}>{t('alerts.seasonPass.eliteActive')}</Text>
-                      </LinearGradient>
+                      </View>
                     )}
                   </View>
                 </View>
-              </View>
+              </Animated.View>
             </View>
 
             {/* —— TABS (X7: activo naranja sólido) —— */}
             <View style={[styles.tabsSticky, { paddingTop: 10 }]}>
-          <View style={styles.tabsRow}>
+          <Animated.View style={[styles.tabsRow, { opacity: bodyIn }]}>
             <Pressable
-              onPress={() => onTabChange('rewards')}
+              onPress={() => setTab('rewards')}
               style={[styles.tabMain, tab === 'rewards' && styles.tabMainOn]}
             >
               <Text style={[styles.tabMainTxt, tab === 'rewards' && styles.tabMainTxtOn]}>
@@ -846,19 +1296,51 @@ export function SeasonPassScreen({ onBack }: Props) {
               </Text>
             </Pressable>
             <Pressable
-              onPress={() => onTabChange('missions')}
+              onPress={() => setTab('missions')}
               style={[styles.tabMain, tab === 'missions' && styles.tabMainOn]}
             >
               <Text style={[styles.tabMainTxt, tab === 'missions' && styles.tabMainTxtOn]}>
                 {t('alerts.seasonPass.tabMissions')}
               </Text>
             </Pressable>
-          </View>
+          </Animated.View>
         </View>
 
-        <Animated.View style={{ opacity: contentOp, paddingHorizontal: PAD, paddingTop: 8 }}>
-          {tab === 'rewards' ? (
-            <View>
+        <Animated.View
+          style={{
+            // Swap de pestañas instantáneo (como las de periodo): ambas están
+            // montadas y el hero + tabs persisten como anclas — sin fade.
+            opacity: bodyIn,
+            transform: [
+              { translateY: bodyIn.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
+            ],
+            paddingHorizontal: PAD,
+            paddingTop: 8,
+          }}
+        >
+          {/* Ambas pestañas quedan montadas (la inactiva con display:none):
+              el swap no remonta el track ni pierde su posición de scroll. */}
+          <View style={tab === 'rewards' ? undefined : styles.tabPaneHidden}>
+              {boostPct > 0 ? (
+                <Pressable
+                  onPress={() => setShowBoostDetail(true)}
+                  style={({ pressed }) => [styles.boostBanner, pressed && styles.pressed]}
+                >
+                  <View style={styles.boostBannerHeader}>
+                    <Ionicons name="flame" size={16} color={ACCENT} />
+                    <Text style={[styles.boostBannerTxt, { flex: 1 }]}>
+                      {t('home.seasonPass.boostActive', { pct: boostPct })}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={15} color="rgba(241,143,52,0.7)" />
+                  </View>
+                  {boostSourcesLabel ? (
+                    <Text style={styles.boostBannerSources} numberOfLines={2}>
+                      {boostSourcesLabel}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              ) : null}
+
               <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
                   <Ionicons name="ribbon" size={12} color="#facc15" />
@@ -870,43 +1352,65 @@ export function SeasonPassScreen({ onBack }: Props) {
                 </View>
               </View>
 
-              <ScrollView
+              {/* Virtualizado: solo se crean las columnas visibles (+colchón);
+                  el resto se materializa al hacer scroll. Los datos de los 50
+                  niveles ya están en memoria — esto solo dosifica el pintado. */}
+              <FlatList
+                ref={trackScrollRef}
                 horizontal
+                data={trackAllLevels}
+                keyExtractor={trackKeyExtractor}
+                renderItem={renderTrackColumn}
+                getItemLayout={getTrackItemLayout}
+                initialScrollIndex={trackCenterIndex}
+                initialNumToRender={7}
+                maxToRenderPerBatch={8}
+                windowSize={5}
+                removeClippedSubviews
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.trackScroll}
-              >
-                {trackLevels.map((lvl) => (
-                  <LevelTrackColumn
-                    key={lvl}
-                    level={lvl}
-                    isUnlocked={level >= lvl}
-                    isCurrent={level === lvl}
-                    hasElite={eliteActive}
-                  />
-                ))}
-              </ScrollView>
+              />
 
-              {spHowRows.length > 0 ? (
-              <View style={styles.spBox}>
-                <View style={styles.spBoxHead}>
-                  <Ionicons name="flash" size={16} color={ACCENT} />
-                  <Text style={styles.spBoxTitle}>{t('alerts.seasonPass.howEarnSp')}</Text>
-                </View>
-                {spHowRows.map((row, idx) => (
-                  <View
-                    key={`${row.label}-${idx}`}
-                    style={[styles.spBoxRow, idx === spHowRows.length - 1 && styles.spBoxRowLast]}
-                  >
-                    <Text style={styles.spBoxLeft}>
-                      <Text>{row.icon} </Text>
-                      <Text style={styles.spBoxGray}>{row.label}</Text>
-                    </Text>
-                    <Text style={styles.spBoxOrange}>{row.sp_hint}</Text>
-                  </View>
-                ))}
-              </View>
+              {(estado?.claimable_count ?? 0) > 0 ? (
+                <Pressable
+                  onPress={handleClaimAll}
+                  disabled={claiming}
+                  style={({ pressed }) => [
+                    styles.claimAllBtn,
+                    claiming && { opacity: 0.7 },
+                    pressed && !claiming && styles.pressed,
+                  ]}
+                >
+                  {claiming ? (
+                    <ActivityIndicator color="#0B1120" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="gift" size={16} color="#0B1120" />
+                      <Text style={styles.claimAllBtnTxt}>
+                        {t('alerts.seasonPass.claimAll', { count: estado?.claimable_count ?? 0 })}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
               ) : null}
-            </View>
+          </View>
+
+          <View style={tab === 'missions' ? undefined : styles.tabPaneHidden}>
+          {misionesQuery.isPending ? (
+            // /misiones aún evaluando: estructura de la pestaña con skeletons
+            // de fila (patrón del perfil: cada sección se rellena al llegar).
+            <MissionListSkeleton />
+          ) : misionesQuery.isError ? (
+            <Pressable onPress={() => void refetchMisiones()} style={{ paddingVertical: 28 }}>
+              <Text style={[styles.missionDesc, { textAlign: 'center' }]}>
+                {t('alerts.seasonPass.loadFail')}
+              </Text>
+              <Text
+                style={[styles.missionDesc, { textAlign: 'center', color: ACCENT, marginTop: 6 }]}
+              >
+                {t('common.retry')}
+              </Text>
+            </Pressable>
           ) : (
             <View>
               {periodTabs.length > 0 ? (
@@ -928,27 +1432,55 @@ export function SeasonPassScreen({ onBack }: Props) {
               )}
               <View style={styles.missionStats}>
                 <View style={styles.missionStatBox}>
-                  <Text style={styles.missionStatHint}>{t('alerts.seasonPass.spAvailable')}</Text>
-                  <Text style={styles.missionStatVal}>+{pendingSP.toLocaleString('es-ES')}</Text>
-                </View>
-                <View style={styles.missionStatBox}>
                   <Text style={styles.missionStatHint}>{t('alerts.seasonPass.completed')}</Text>
                   <Text style={styles.missionStatVal}>
                     {doneCount}
                     <Text style={styles.missionStatSlash}>/{missions.length}</Text>
                   </Text>
                 </View>
+                <View style={styles.missionStatBox}>
+                  <Text style={styles.missionStatHint}>{t('alerts.seasonPass.spObtained')}</Text>
+                  <Text style={styles.missionStatVal}>
+                    {obtainedSP.toLocaleString('es-ES')}
+                    <Text style={styles.missionStatSlash}>/{totalSP.toLocaleString('es-ES')}</Text>
+                  </Text>
+                </View>
               </View>
-              {missions.map((m) => (
-                <MissionRow key={m.id} m={m} />
-              ))}
+              {missions.map((m) => {
+                const quotaAvailable =
+                  m.period === 'daily'
+                    ? misiones?.reroll?.daily_available === true
+                    : m.period === 'weekly'
+                      ? misiones?.reroll?.weekly_available === true
+                      : false;
+                const tokensLeft = misiones?.reroll?.tokens ?? 0;
+                const canReroll =
+                  (m.rerollable ?? false) && (quotaAvailable || tokensLeft > 0) && !rerolling;
+                return (
+                  <MissionRow
+                    key={m.id}
+                    m={m}
+                    canReroll={canReroll}
+                    onReroll={() => handleReroll(m)}
+                  />
+                );
+              })}
               {missions.length === 0 && periodTabs.length > 0 ? (
                 <Text style={[styles.missionDesc, { textAlign: 'center', paddingVertical: 16 }]}>
                   {t('alerts.seasonPass.noMissionsInTab')}
                 </Text>
               ) : null}
+              {periodCountdown ? (
+                <View style={styles.periodCountdown}>
+                  <Ionicons name="time-outline" size={13} color={ACCENT} />
+                  <Text style={styles.periodCountdownTxt}>
+                    {t('alerts.seasonPass.periodEndsIn', { time: periodCountdown })}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           )}
+          </View>
         </Animated.View>
           </>
         ) : (
@@ -983,59 +1515,244 @@ export function SeasonPassScreen({ onBack }: Props) {
         )}
       </ScrollView>
 
-      <Modal visible={showElite} transparent animationType="fade" onRequestClose={() => setShowElite(false)}>
-        <View style={{ flex: 1 }}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowElite(false)}>
+      {skeletonVisible ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { opacity: skeletonOp }]}
+        >
+          <LinearGradient
+            colors={['#1f0900', '#2d1200', BG]}
+            locations={[0, 0.55, 1]}
+            start={{ x: 0.1, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+          {/* Réplica visual del back FAB: el real (táctil) queda debajo. */}
+          <View style={[styles.backFab, { top: 8 }]}>
+            <Ionicons name="arrow-back" size={18} color="#fff" />
+          </View>
+          <SeasonPassSkeleton />
+        </Animated.View>
+      ) : null}
+
+      <Modal
+        visible={rerollTarget !== null}
+        transparent
+        animationType="none"
+        onRequestClose={() => (!rerolling ? setRerollTarget(null) : undefined)}
+      >
+        <Animated.View style={{ flex: 1, opacity: rerollFade }}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => (!rerolling ? setRerollTarget(null) : undefined)}
+          >
             <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
           </Pressable>
-          <View style={styles.modalSheetWrap} pointerEvents="box-none">
-          <Pressable style={[styles.modalSheet, { paddingBottom: 24 + insets.bottom }]} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalGrab} />
-            <LinearGradient
-              colors={['rgba(255,215,0,0.12)', 'transparent']}
-              style={StyleSheet.absoluteFill}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 0.45 }}
-            />
-            <View style={styles.modalCrown}>
-              <Text style={{ fontSize: 36 }}>👑</Text>
-            </View>
-            <Text style={styles.modalTitle}>{t('alerts.seasonPass.elitePass')}</Text>
-            <Text style={styles.modalSub}>
-              {[me?.season.slug, me?.season.title].filter(Boolean).join(' · ') || t('alerts.seasonPass.elitePass')}
-            </Text>
-            <View style={{ gap: 12, marginBottom: 20 }}>
-              {eliteBullets.length > 0 ? (
-                eliteBullets.map((b) => (
-                  <View key={b.text} style={styles.modalBullet}>
-                    <Text style={{ fontSize: 18 }}>{b.icon}</Text>
-                    <Text style={styles.modalBulletTxt}>{b.text}</Text>
-                  </View>
-                ))
-              ) : (
-                <Text style={styles.modalBulletTxt}>{t('alerts.seasonPass.modalBenefitsDefault')}</Text>
-              )}
-            </View>
-            <Pressable
-              onPress={() => void purchaseEliteWithStripe()}
-              disabled={elitePaying}
-              style={({ pressed }) => [pressed && !elitePaying && styles.pressed]}
-            >
-              <LinearGradient
-                colors={['#FFD700', '#FFA500', '#FF6B00']}
-                style={[styles.modalCta, elitePaying && { opacity: 0.85 }]}
+          <View style={styles.rerollModalWrap} pointerEvents="box-none">
+            <View style={styles.rerollModalCard}>
+              <View style={styles.rerollModalIcon}>
+                <Ionicons name="refresh" size={22} color={ACCENT} />
+              </View>
+              <Text style={styles.rerollModalTitle}>{t('alerts.seasonPass.rerollTitle')}</Text>
+              <Text style={styles.rerollModalMsg}>
+                {t('alerts.seasonPass.rerollMsg', { title: rerollTarget?.title ?? '' })}
+              </Text>
+              <Text style={styles.rerollModalQuota}>
+                {(() => {
+                  const freeAvailable =
+                    rerollTarget?.period === 'weekly'
+                      ? misiones?.reroll?.weekly_available === true
+                      : misiones?.reroll?.daily_available === true;
+                  if (rerollTarget && !freeAvailable) {
+                    return t('alerts.seasonPass.rerollTokenMsg', {
+                      count: misiones?.reroll?.tokens ?? 0,
+                    });
+                  }
+                  return rerollTarget?.period === 'weekly'
+                    ? t('alerts.seasonPass.rerollQuotaWeekly')
+                    : t('alerts.seasonPass.rerollQuotaDaily');
+                })()}
+              </Text>
+              {rerollErr ? <Text style={styles.rerollModalErr}>{rerollErr}</Text> : null}
+              <Pressable
+                onPress={confirmReroll}
+                disabled={rerolling}
+                style={({ pressed }) => [
+                  styles.rerollModalCta,
+                  rerolling && { opacity: 0.7 },
+                  pressed && !rerolling && styles.pressed,
+                ]}
               >
-                {elitePaying ? (
-                  <ActivityIndicator color="#000" />
+                {rerolling ? (
+                  <ActivityIndicator color="#0B1120" size="small" />
                 ) : (
-                  <Text style={styles.modalCtaTxt}>{t('alerts.seasonPass.getEliteCta')}</Text>
+                  <Text style={styles.rerollModalCtaTxt}>
+                    {t('alerts.seasonPass.rerollConfirm')}
+                  </Text>
                 )}
-              </LinearGradient>
-            </Pressable>
-            <Pressable onPress={() => setShowElite(false)} style={{ marginTop: 12, paddingVertical: 8 }}>
+              </Pressable>
+              <Pressable
+                onPress={() => setRerollTarget(null)}
+                disabled={rerolling}
+                style={{ marginTop: 10, paddingVertical: 6 }}
+              >
+                <Text style={styles.rerollModalCancelTxt}>
+                  {t('alerts.seasonPass.rerollCancel')}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </Animated.View>
+      </Modal>
+
+      <FilterBottomSheet
+        visible={showElite}
+        title={t('alerts.seasonPass.elitePass')}
+        onClose={() => setShowElite(false)}
+        footer={
+          <View style={styles.eliteSheetFooter}>
+            <AuthButton
+              loading={elitePaying}
+              icon="ribbon"
+              onPress={() => void purchaseEliteWithStripe()}
+            >
+              {t('alerts.seasonPass.getEliteCta')}
+            </AuthButton>
+            <Pressable onPress={() => setShowElite(false)} style={{ paddingVertical: 8 }}>
               <Text style={styles.modalDismiss}>{t('alerts.seasonPass.continueFree')}</Text>
             </Pressable>
-          </Pressable>
+          </View>
+        }
+      >
+        <View style={styles.modalCrown}>
+          <Text style={{ fontSize: 36 }}>👑</Text>
+        </View>
+        <Text style={styles.modalSub}>
+          {[estado?.season.slug, estado?.season.title].filter(Boolean).join(' · ') || t('alerts.seasonPass.elitePass')}
+        </Text>
+        <View style={{ gap: 12, marginBottom: 4 }}>
+          {eliteBullets.length > 0 ? (
+            eliteBullets.map((b) => (
+              <View key={b.text} style={styles.modalBullet}>
+                <Text style={{ fontSize: 18 }}>{b.icon}</Text>
+                <Text style={styles.modalBulletTxt}>{b.text}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.modalBulletTxt}>{t('alerts.seasonPass.modalBenefitsDefault')}</Text>
+          )}
+        </View>
+      </FilterBottomSheet>
+
+      <PassHelpSheet
+        visible={showHowTo}
+        onClose={() => setShowHowTo(false)}
+        period={estado?.season.subtitle ?? ''}
+        daysLeft={left}
+        spPerLevel={spPer}
+        levelMax={levelMax}
+      />
+
+      <BoostDetailSheet
+        visible={showBoostDetail}
+        onClose={() => setShowBoostDetail(false)}
+        totalPct={boostPct}
+        breakdown={estado?.boosts?.breakdown ?? []}
+      />
+
+      <RewardDetailSheet
+        target={rewardDetail}
+        onClose={() => setRewardDetail(null)}
+        hasElite={eliteActive}
+        currentLevel={level}
+        playerAvatarUrl={profile?.avatarUrl ?? null}
+        playerInitials={playerInitials}
+        onClaim={handleClaim}
+        claiming={claiming}
+        onGoToProfile={onGoToProfile}
+        onGetElite={() => {
+          setRewardDetail(null);
+          setShowElite(true);
+        }}
+      />
+
+      <RewardClaimedModal
+        reward={celebrateReward}
+        avatarUrl={profile?.avatarUrl ?? null}
+        initials={playerInitials}
+        onGoToProfile={onGoToProfile}
+        onClose={() => setCelebrateReward(null)}
+      />
+
+      <Modal
+        visible={claimAllRewards !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setClaimAllRewards(null)}
+      >
+        <View style={styles.claimSummaryBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setClaimAllRewards(null)} />
+          <View style={styles.claimSummaryCard}>
+            <View style={styles.claimSummaryIcon}>
+              <Ionicons name="gift" size={26} color={ACCENT} />
+            </View>
+            <Text style={styles.claimSummaryMsg}>
+              {t('alerts.seasonPass.claimAllDone', { count: claimAllRewards?.length ?? 0 })}
+            </Text>
+            <ScrollView style={styles.claimSummaryList} contentContainerStyle={styles.claimSummaryGrid}>
+              {(claimAllRewards ?? []).map((r) => {
+                const reward: SeasonPassTrackRewardDto = {
+                  id: r.reward_id,
+                  tier: r.tier,
+                  reward_type: r.reward_type as SeasonPassTrackRewardDto['reward_type'],
+                  display: r.display,
+                  status: 'claimed',
+                };
+                return (
+                  <View key={r.reward_id} style={styles.claimSummaryItem}>
+                    <RewardThumb
+                      reward={reward}
+                      size={52}
+                      dimmed={false}
+                      onPress={() => setRewardDetail({ level: r.level, reward })}
+                      avatarUrl={profile?.avatarUrl ?? null}
+                      initials={playerInitials}
+                    />
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <Pressable onPress={() => setClaimAllRewards(null)} style={styles.claimSummaryCta}>
+              <Text style={styles.claimSummaryCtaTxt}>{t('alerts.seasonPass.claimAllDoneCta')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showEliteSuccess}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEliteSuccess(false)}
+      >
+        <View style={styles.eliteOkBackdrop}>
+          <View style={styles.eliteOkCard}>
+            <LinearGradient
+              colors={['rgba(241,143,52,0.16)', 'transparent']}
+              style={StyleSheet.absoluteFill}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 0.6 }}
+            />
+            <View style={styles.eliteOkCrown}>
+              <Text style={{ fontSize: 40 }}>👑</Text>
+            </View>
+            <Text style={styles.eliteOkTitle}>{t('alerts.seasonPass.eliteOkTitle')}</Text>
+            <Text style={styles.eliteOkBody}>{t('alerts.seasonPass.eliteOkBody')}</Text>
+            <Pressable onPress={() => setShowEliteSuccess(false)} style={({ pressed }) => pressed && styles.pressed}>
+              <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.eliteOkCta}>
+                <Text style={styles.eliteOkCtaTxt}>{t('home.seasonPass.celebrationCta')}</Text>
+              </LinearGradient>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -1084,6 +1801,19 @@ const styles = StyleSheet.create({
   backFab: {
     position: 'absolute',
     left: 16,
+    zIndex: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helpFab: {
+    position: 'absolute',
+    right: 16,
     zIndex: 20,
     width: 36,
     height: 36,
@@ -1147,7 +1877,7 @@ const styles = StyleSheet.create({
   },
   levelCardHint: androidReadableText({
     fontSize: 10,
-    color: '#6b7280',
+    color: '#9ca3af',
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 6,
@@ -1160,7 +1890,7 @@ const styles = StyleSheet.create({
   }),
   levelSlash: androidReadableText({
     fontSize: 15,
-    color: '#4b5563',
+    color: '#9ca3af',
     fontWeight: '700',
   }),
   spHuge: androidReadableText({
@@ -1168,12 +1898,22 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: ACCENT,
   }),
+  spHugeUnit: androidReadableText({
+    fontSize: 12,
+    fontWeight: '800',
+    color: ACCENT,
+  }),
+  spTotalInline: androidReadableText({
+    fontSize: 10,
+    color: '#9ca3af',
+    marginTop: 4,
+  }),
   barLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-  barTiny: androidReadableText({ fontSize: 10, color: '#6b7280' }),
+  barTiny: androidReadableText({ fontSize: 10, color: '#9ca3af' }),
   barTrackHero: {
     height: 10,
     borderRadius: 999,
@@ -1194,7 +1934,7 @@ const styles = StyleSheet.create({
   },
   barFoot: androidReadableText({
     fontSize: 10,
-    color: '#4b5563',
+    color: '#9ca3af',
     textAlign: 'right',
     marginTop: 6,
     marginBottom: 12,
@@ -1222,18 +1962,22 @@ const styles = StyleSheet.create({
     color: '#ca8a04',
     marginTop: 2,
   }),
-  eliteActiveBar: {
+  eliteActiveChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    borderRadius: 16,
+    alignSelf: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.35)',
   },
   eliteActiveText: androidReadableText({
     fontSize: 12,
-    fontWeight: '900',
-    color: '#000',
+    fontWeight: '800',
+    color: ACCENT,
   }),
   tabsSticky: {
     backgroundColor: BG,
@@ -1275,6 +2019,10 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     backgroundColor: 'rgba(241,143,52,0.6)',
+  },
+  /** Pestaña inactiva del pase: montada pero sin layout (conserva estado). */
+  tabPaneHidden: {
+    display: 'none',
   },
   trackScroll: {
     paddingVertical: 10,
@@ -1319,8 +2067,185 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 14,
+  },
+  thumbLabel: {
+    fontSize: 8,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 4,
+    width: TRACK_COL_W - 6,
+  },
+  rewardGrantedBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#34d399',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rewardClaimableBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: ACCENT,
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+  claimAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: ACCENT,
+    marginTop: 16,
+  },
+  claimAllBtnTxt: { color: '#0B1120', fontSize: 14, fontWeight: '800' },
+  claimSummaryBackdrop: {
+    flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  claimSummaryCard: {
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: '82%',
+    backgroundColor: '#17110d',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.3)',
+    alignItems: 'center',
+    padding: 24,
+  },
+  claimSummaryIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(241,143,52,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  claimSummaryMsg: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 14 },
+  claimSummaryList: { alignSelf: 'stretch', maxHeight: 260, marginBottom: 16 },
+  claimSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 14, paddingVertical: 8, paddingHorizontal: 8 },
+  claimSummaryItem: { width: 52, height: 52 },
+  claimSummaryCta: {
+    alignSelf: 'stretch',
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+  },
+  claimSummaryCtaTxt: { color: '#0B1120', fontSize: 15, fontWeight: '800' },
+  boostBanner: {
+    flexDirection: 'column',
+    gap: 3,
+    backgroundColor: 'rgba(241,143,52,0.08)',
+    borderColor: 'rgba(241,143,52,0.25)',
+    borderWidth: 1,
     borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 10,
+  },
+  boostBannerHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  boostBannerTxt: { color: ACCENT, fontSize: 13, fontWeight: '800' },
+  boostBannerSources: { color: 'rgba(255,255,255,0.5)', fontSize: 9.5, lineHeight: 13 },
+  rerollBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  rerollModalWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 28,
+  },
+  rerollModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#141414',
+    borderColor: BORDER,
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 22,
+    alignItems: 'center',
+  },
+  rerollModalIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  rerollModalTitle: androidReadableText({
+    color: '#F9FAFB',
+    fontSize: 17,
+    fontWeight: '800',
+    textAlign: 'center',
+  }),
+  rerollModalMsg: androidReadableText({
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 19,
+  }),
+  rerollModalQuota: androidReadableText({
+    color: ACCENT,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 8,
+  }),
+  rerollModalErr: androidReadableText({
+    color: '#f87171',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
+  }),
+  rerollModalCta: {
+    marginTop: 16,
+    alignSelf: 'stretch',
+    backgroundColor: ACCENT,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  rerollModalCtaTxt: { color: '#0B1120', fontSize: 15, fontWeight: '800' },
+  rerollModalCancelTxt: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   milestoneCard: {
     marginTop: 8,
@@ -1363,30 +2288,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginTop: 2,
   }),
-  spBox: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    padding: 14,
-    marginBottom: 8,
-  },
-  spBoxHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  spBoxTitle: androidReadableText({ fontSize: 13, fontWeight: '800', color: '#fff' }),
-  spBoxRow: {
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  spBoxLeft: androidReadableText({ fontSize: 12, marginBottom: 4 }),
-  spBoxGray: { color: '#9ca3af' },
-  spBoxOrange: androidReadableText({
-    fontSize: 12,
-    fontWeight: '700',
-    color: ACCENT,
-    lineHeight: 17,
-  }),
-  spBoxRowLast: { borderBottomWidth: 0 },
   missionTabs: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   missionTab: {
     flex: 1,
@@ -1417,22 +2318,22 @@ const styles = StyleSheet.create({
   missionStatVal: androidReadableText({ fontSize: 20, fontWeight: '900', color: ACCENT }),
   missionStatSlash: androidReadableText({ fontSize: 13, color: '#6b7280', fontWeight: '700' }),
   missionCard: {
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 14,
+    padding: 11,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     backgroundColor: 'rgba(255,255,255,0.05)',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   missionCardDone: {
     backgroundColor: 'rgba(16,185,129,0.08)',
     borderColor: 'rgba(16,185,129,0.25)',
   },
-  missionRow: { flexDirection: 'row', gap: 10 },
+  missionRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   missionIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1440,56 +2341,74 @@ const styles = StyleSheet.create({
   missionIconBoxDone: { backgroundColor: 'rgba(16,185,129,0.2)' },
   missionTitleRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: 8,
-    marginBottom: 4,
+    marginBottom: 3,
   },
   missionTitle: androidReadableText({ fontSize: 13, fontWeight: '800', color: '#fff', flex: 1 }),
-  missionDesc: androidReadableText({ fontSize: 11, color: '#9ca3af', marginBottom: 8 }),
+  missionSpBadge: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  missionDesc: androidReadableText({ fontSize: 11, color: '#9ca3af', marginBottom: 7 }),
+  missionProgressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   missionBarBg: {
+    flex: 1,
     height: 6,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.1)',
     overflow: 'hidden',
-    marginBottom: 6,
   },
-  missionMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  missionMetaLeft: androidReadableText({ fontSize: 10, color: '#6b7280' }),
-  missionMetaSp: androidReadableText({ fontSize: 11, fontWeight: '900', color: ACCENT }),
+  missionMetaLeft: androidReadableText({ fontSize: 10, color: '#9ca3af', fontWeight: '700' }),
+  missionMetaSp: androidReadableText({ fontSize: 12, fontWeight: '900', color: ACCENT }),
+  missionDoneRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   missionDoneText: androidReadableText({ fontSize: 11, fontWeight: '800', color: '#34d399' }),
-  missionExpire: {
+  periodCountdown: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'flex-start',
+    gap: 5,
+    marginTop: 4,
   },
-  missionExpireText: androidReadableText({ fontSize: 10, color: '#4b5563' }),
+  periodCountdownTxt: androidReadableText({ fontSize: 12, fontWeight: '700', color: ACCENT }),
   pressed: { opacity: 0.9 },
-  modalSheetWrap: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  eliteSheetFooter: {
+    paddingHorizontal: 16,
   },
-  modalSheet: {
-    backgroundColor: '#1a1000',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderTopWidth: 1,
-    borderColor: 'rgba(234,179,8,0.2)',
-    paddingHorizontal: 20,
-    paddingTop: 8,
+  eliteOkBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 28,
+  },
+  eliteOkCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#141414',
+    borderColor: 'rgba(241,143,52,0.25)',
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 24,
+    alignItems: 'center',
     overflow: 'hidden',
   },
-  modalGrab: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignSelf: 'center',
-    marginBottom: 16,
+  eliteOkCrown: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
   },
+  eliteOkTitle: androidReadableText({ color: '#fff', fontSize: 19, fontWeight: '900', textAlign: 'center' }),
+  eliteOkBody: androidReadableText({
+    color: '#9ca3af',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 20,
+  }),
+  eliteOkCta: { paddingVertical: 13, paddingHorizontal: 40, borderRadius: 14, alignItems: 'center' },
+  eliteOkCtaTxt: androidReadableText({ color: '#fff', fontSize: 15, fontWeight: '800' }),
   modalCrown: {
     alignSelf: 'center',
     width: 64,
@@ -1500,12 +2419,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
-  modalTitle: androidReadableText({
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#fff',
-    textAlign: 'center',
-  }),
   modalSub: androidReadableText({
     fontSize: 11,
     color: '#facc15',
@@ -1514,12 +2427,6 @@ const styles = StyleSheet.create({
   }),
   modalBullet: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   modalBulletTxt: androidReadableText({ flex: 1, fontSize: 13, color: '#d1d5db' }),
-  modalCta: {
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  modalCtaTxt: androidReadableText({ fontSize: 16, fontWeight: '900', color: '#000' }),
   modalDismiss: androidReadableText({
     textAlign: 'center',
     fontSize: 11,

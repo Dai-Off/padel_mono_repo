@@ -8,14 +8,8 @@ import {
 import { getTodayRange } from './learningTimezone';
 import { resolveLocale } from '../lib/locale';
 import { localizeQuestionContent, ContentI18n } from '../lib/learningQuestionI18n';
-import {
-  computeSeasonPassLessonSpDelta,
-  getMultiplier,
-  updateIndividualStreak,
-  updateSharedStreaks,
-} from './learningStreaks';
-import { addSeasonPassSp } from '../services/seasonPassService';
-import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
+import { updateIndividualStreak, updateSharedStreaks } from './learningStreaks';
+import { evaluateMissionsAndBuildDelta } from '../services/seasonPassEngine';
 import { recomputeRadarForPlayers } from '../services/coachAssessmentService';
 import { evaluateAndGrant } from '../services/unlockablesEngine';
 
@@ -364,9 +358,6 @@ router.get('/daily-lesson/today-results', requireAuth, async (req: Request, res:
       streak: {
         current,
         longest,
-        multiplier: getMultiplier(current),
-        xp_base: 0,
-        xp_bonus: 0,
       },
       shared_streaks: [],
     });
@@ -585,8 +576,6 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
       });
     }
 
-    const baseXp = Math.round(totalScore / 10);
-
     // 1. Write the per-question log
     const { error: logErr } = await supabase.from('learning_question_log').insert(logRows);
     if (logErr) return res.status(500).json({ ok: false, error: logErr.message });
@@ -597,15 +586,15 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
     // Cambia la señal daily_lesson_streak -> otorgar logros por evento (no on-read).
     void evaluateAndGrant(supabase, player.id);
 
-    // 2. Update individual streak (post-update value drives the multiplier)
+    // 2. Update individual streak
     const streak = await updateIndividualStreak(player.id, tz);
-    const multiplier = getMultiplier(streak.current_streak);
-    const xpFinal = Math.round(baseXp * (1 + multiplier));
 
     // 3. Actualizar rachas compartidas
     const sharedStreaks = await updateSharedStreaks(player.id);
 
-    // 4. Insert the session row with the boosted XP
+    // 4. Insert the session row. Learning XP is retired as a user-facing
+    // concept (season pass SP is the single progression currency); the
+    // NOT NULL column stays at 0 and old rows keep their historic values.
     const { data: sessionData, error: sessionErr } = await supabase
       .from('learning_sessions')
       .insert({
@@ -613,29 +602,18 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
         correct_count: correctCount,
         total_count: LESSON_SIZE,
         score: totalScore,
-        xp_earned: xpFinal,
+        xp_earned: 0,
         timezone: tz,
       })
-      .select('id, correct_count, total_count, score, xp_earned, completed_at')
+      .select('id, correct_count, total_count, score, completed_at')
       .single();
 
     if (sessionErr) return res.status(500).json({ ok: false, error: sessionErr.message });
 
-    let season_pass_sp_total: number | null = null;
-    let season_pass_grant_error: string | null = null;
-    try {
-      const activeSeason = await getActiveSeasonRow();
-      if (!activeSeason) {
-        season_pass_grant_error = 'sin_temporada_activa';
-      } else {
-        const spGain = computeSeasonPassLessonSpDelta(activeSeason.lesson_sp_base, streak.current_streak);
-        const r = await addSeasonPassSp(player.id, spGain);
-        season_pass_sp_total = r.sp;
-      }
-    } catch (e) {
-      season_pass_grant_error = (e as Error).message;
-      console.warn('[season-pass] No se pudo sumar SP al pase:', season_pass_grant_error);
-    }
+    // 5. Instant celebration channel (plan §6.7): the mission engine grants
+    // the SP (daily lesson is a fixed mission) and returns the delta so the
+    // results screen celebrates in-place. Never fails the lesson.
+    const seasonPassDelta = await evaluateMissionsAndBuildDelta(player.id, tz);
 
     return res.json({
       ok: true,
@@ -643,9 +621,6 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
       streak: {
         current: streak.current_streak,
         longest: streak.longest_streak,
-        multiplier,
-        xp_base: baseXp,
-        xp_bonus: xpFinal - baseXp,
       },
       shared_streaks: sharedStreaks.map((s) => ({
         id: s.id,
@@ -654,8 +629,7 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
         longest_streak: s.longest_streak,
         both_completed_today: s.player1_completed_today && s.player2_completed_today,
       })),
-      season_pass_sp_total,
-      season_pass_grant_error,
+      season_pass: seasonPassDelta,
       results,
     });
   } catch (err) {

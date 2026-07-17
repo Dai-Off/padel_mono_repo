@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { FEEDBACK_WINDOW_HOURS } from '../lib/levelingConstants';
+import { evaluateMissionsAndBuildDelta } from '../services/seasonPassEngine';
 import { refreshCachedPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 
 const router = Router();
@@ -180,7 +181,11 @@ router.post('/:id/feedback', async (req: Request, res: Response) => {
     void refreshCachedPeerFeedbackInsightForPlayer(supabase, ratedId);
   }
 
-  return res.json({ ok: true });
+  // Season pass instant channel (plan §6.7): rating missions.
+  const tz = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
+  const seasonPassDelta = await evaluateMissionsAndBuildDelta(playerId!, tz);
+
+  return res.json({ ok: true, season_pass: seasonPassDelta });
 });
 
 export default router;

@@ -14,6 +14,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { RARITY_CONFIG } from '../../design/rarity';
+import { resolveUnlockableIcon } from '../../design/unlockableIcons';
 import type { PendingUnlock } from '../../api/unlockables';
 
 const KIND_LABEL: Record<PendingUnlock['kind'], string> = {
@@ -109,7 +110,7 @@ export const UnlockModal: React.FC<UnlockModalProps> = ({ unlock, onClose, onGoT
               <Sparkle key={i} angle={a} color={conf.color} burst={burst} />
             ))}
             <Animated.View style={[styles.iconBox, { backgroundColor: conf.bg, borderColor: conf.border }, popStyle]}>
-              <Ionicons name={(unlock.icon ?? 'trophy-outline') as keyof typeof Ionicons.glyphMap} size={44} color={conf.color} />
+              <Ionicons name={resolveUnlockableIcon(unlock.icon, 'trophy-outline')} size={44} color={conf.color} />
             </Animated.View>
           </View>
 

@@ -2,7 +2,22 @@ import { API_URL } from '../config';
 import type { AchievementRarity } from '../design/rarity';
 import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
-export type UnlockableKind = 'trophy' | 'badge' | 'course' | 'title' | 'frame';
+export type UnlockableKind = 'trophy' | 'badge' | 'course' | 'title' | 'frame' | 'name_color' | 'theme';
+
+/** Color de nombre resuelto: paleta (1 = sólido, 2+ = gradiente) + rareza (glow). */
+export interface NameColorAttrs {
+  id: string;
+  rarity: AchievementRarity;
+  colors: string[] | null;
+}
+
+/** Tema de perfil resuelto: paleta [top, bottom, accent] + motor de animación. */
+export interface ThemeAttrs {
+  id: string;
+  rarity: AchievementRarity;
+  colors: string[] | null;
+  animationType: string | null;
+}
 
 /** Ítem del catálogo (título/marco/logro) con el estado de desbloqueo del jugador. */
 export interface CatalogItem {
@@ -26,7 +41,36 @@ export interface CatalogItem {
 export interface ProfileCustomization {
   titleId: string | null;
   frameId: string | null;
+  nameColorId: string | null;
+  themeId: string | null;
   pinnedBadgeIds: string[];
+  /** Color de nombre resuelto (solo lectura, para pintar el nombre propio). */
+  nameColor?: NameColorAttrs | null;
+  /** Tema resuelto (solo lectura, para pintar el fondo del perfil propio). */
+  theme?: ThemeAttrs | null;
+}
+
+export function asNameColor(raw: unknown): NameColorAttrs | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as { id?: string; rarity?: string; colors?: unknown };
+  if (!r.id) return null;
+  return {
+    id: r.id,
+    rarity: asRarity(String(r.rarity ?? 'common')),
+    colors: Array.isArray(r.colors) ? (r.colors as string[]) : null,
+  };
+}
+
+export function asTheme(raw: unknown): ThemeAttrs | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as { id?: string; rarity?: string; colors?: unknown; animationType?: unknown };
+  if (!r.id) return null;
+  return {
+    id: r.id,
+    rarity: asRarity(String(r.rarity ?? 'common')),
+    colors: Array.isArray(r.colors) ? (r.colors as string[]) : null,
+    animationType: typeof r.animationType === 'string' ? r.animationType : null,
+  };
 }
 
 function asRarity(raw: string): AchievementRarity {
@@ -82,11 +126,18 @@ export async function fetchCustomization(
     const res = await fetch(`${API_URL}/players/me/profile-customization`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const json = (await res.json()) as { ok?: boolean; customization?: ProfileCustomization };
+    const json = (await res.json()) as {
+      ok?: boolean;
+      customization?: ProfileCustomization & { nameColor?: unknown; theme?: unknown };
+    };
     if (!res.ok || !json.ok || !json.customization) return null;
     return {
       titleId: json.customization.titleId ?? null,
       frameId: json.customization.frameId ?? null,
+      nameColorId: json.customization.nameColorId ?? null,
+      nameColor: asNameColor(json.customization.nameColor),
+      themeId: json.customization.themeId ?? null,
+      theme: asTheme(json.customization.theme),
       pinnedBadgeIds: json.customization.pinnedBadgeIds ?? [],
     };
   } catch {
@@ -103,10 +154,12 @@ export interface PublicPinnedBadge {
   rarity: AchievementRarity;
 }
 
-/** Personalización equipada de otro jugador, ya resuelta (marco + título + fijadas). */
+/** Personalización equipada de otro jugador, ya resuelta (marco + título + color + tema + fijadas). */
 export interface PublicProfileCustomization {
   titleId: string | null;
   frame: FrameAttrs | null;
+  nameColor: NameColorAttrs | null;
+  theme: ThemeAttrs | null;
   pinnedBadges: PublicPinnedBadge[];
 }
 
@@ -122,6 +175,8 @@ export async function fetchPlayerPublicCustomization(
       customization?: {
         titleId: string | null;
         frame: { rarity: string; style: string | null; animationType: string | null; colors: string[] | null } | null;
+        nameColor?: unknown;
+        theme?: unknown;
         pinnedBadges: { id: string; type: string; title: string; icon: string; rarity: string }[];
       };
     };
@@ -132,6 +187,8 @@ export async function fetchPlayerPublicCustomization(
       frame: c.frame
         ? { rarity: asRarity(c.frame.rarity), style: c.frame.style, animationType: c.frame.animationType, colors: c.frame.colors ?? null }
         : null,
+      nameColor: asNameColor(c.nameColor),
+      theme: asTheme(c.theme),
       pinnedBadges: (c.pinnedBadges ?? []).map((b) => ({
         id: b.id,
         type: b.type === 'trophy' ? 'trophy' : 'badge',
@@ -155,11 +212,23 @@ export async function saveCustomization(
     const res = await fetch(`${API_URL}/players/me/profile-customization`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(customization),
+      body: JSON.stringify({
+        titleId: customization.titleId,
+        frameId: customization.frameId,
+        nameColorId: customization.nameColorId,
+        themeId: customization.themeId,
+        pinnedBadgeIds: customization.pinnedBadgeIds,
+      }),
     });
     const json = (await res.json()) as { ok?: boolean; customization?: ProfileCustomization; error?: string };
     if (!res.ok || !json.ok || !json.customization) return null;
-    return json.customization;
+    return {
+      titleId: json.customization.titleId ?? null,
+      frameId: json.customization.frameId ?? null,
+      nameColorId: json.customization.nameColorId ?? null,
+      themeId: json.customization.themeId ?? null,
+      pinnedBadgeIds: json.customization.pinnedBadgeIds ?? [],
+    };
   } catch {
     return null;
   }

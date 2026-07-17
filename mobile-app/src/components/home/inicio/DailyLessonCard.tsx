@@ -29,12 +29,10 @@ import { zhHK } from '../../../i18n/zh-HK';
 const WEEK_DAY_COUNT = 7;
 const TIMEZONE = CLUB_IANA_TIMEZONE;
 
-// Tiers de bonus alineados con backend (learningStreaks.getMultiplier):
-//   racha 0-2  → sin bonus (countdown a x1.5)
-//   racha 3-7  → x1.5  (multiplier 0.5 → factor 1.5)
-//   racha 8-20 → x2    (multiplier 1.0 → factor 2.0)
-//   racha 21-45→ x2.5  (multiplier 1.5 → factor 2.5)
-//   racha 46+  → x3    (multiplier 2.0 → factor 3.0)
+// Tiers del boost global de SP por racha (season pass, decidido 2026-07-07):
+//   racha 0-2  → sin boost (countdown al primer tier)
+//   racha 3-7  → +15% SP · 8-20 → +30% · 21-45 → +50% · 46+ → +70%
+// El boost aplica a TODO el SP del pase (boost engine, fase 3 del plan).
 const BONUS_TIER_KEYS = [
   { minStreak: 3, labelKey: 'home.dailyLesson.bonus15', color: '#FB923C' },
   { minStreak: 8, labelKey: 'home.dailyLesson.bonus2', color: '#FDBA74' },
@@ -134,11 +132,6 @@ function getBonusInfo(
   return { text: t(fallback.labelKey), color: fallback.color };
 }
 
-function getMultiplierLabel(multiplier: number): string | null {
-  if (multiplier <= 0) return null;
-  return `x${(1 + multiplier).toFixed(1)} XP`;
-}
-
 function getDayStatus(
   dayIndex: number,
   todayIndex: number,
@@ -197,7 +190,7 @@ export function DailyLessonCard({
   // Racha desde el HomeDataContext (compartida, cacheada). HomeScreen ya
   // fuerza refresh tras completar la lección, así que el dato viene
   // actualizado cuando esta card re-renderiza.
-  const { currentStreak, multiplier, lastCompleted } = streak;
+  const { currentStreak, lastCompleted } = streak;
   const loading = streakLoading;
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const color1 = `rgb(${theme.orb1Color})`;
@@ -222,7 +215,6 @@ export function DailyLessonCard({
   const todayIndex = mondayFirstWeekdayIndexInZone(TIMEZONE, now);
   const completedToday = isLessonCompletedToday(lastCompleted, TIMEZONE);
 
-  const multiplierLabel = getMultiplierLabel(multiplier);
   const bonusFromStreak = getBonusInfo(currentStreak, t);
 
   /** Fondo: pulso tipo Motion (~5s easeInOut 0↔1). */
@@ -555,9 +547,6 @@ export function DailyLessonCard({
               <View style={styles.titleCol}>
                 <Text style={styles.title}>{t('home.dailyLesson.title')}</Text>
                 <Text style={styles.subtitle}>{t('home.dailyLesson.subtitle')}</Text>
-                {!isCarousel && multiplierLabel ? (
-                  <Text style={styles.subtitleXp}>{multiplierLabel}</Text>
-                ) : null}
               </View>
             </View>
 

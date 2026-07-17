@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CompetitiveLeagueHomeCard,
@@ -39,6 +40,9 @@ import { MatchInviteBanner } from '../components/partido/MatchInviteBanner';
 import type { ReceivedMatchInvite } from '../api/matchInvites';
 import { updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
 import { type SeasonPassMissionDto } from '../api/seasonPass';
+import { useQueryClient } from '@tanstack/react-query';
+import { seasonPassKeys } from '../queries/keys';
+import { useSeasonPassEstado, useSeasonPassMisiones } from '../queries/seasonPass';
 import {
   isSeasonPassSpCapped,
   seasonPassHomeNextLine,
@@ -195,25 +199,72 @@ export function HomeScreen({
     courtReservationsLoading,
     publicTournamentsCount,
     tournamentsLoading,
-    seasonPassMe,
-    seasonPassLoading,
-    refreshSeasonPass,
     stats,
     statsLoading,
     refreshStreak,
     hasInitialError,
     refreshAll,
   } = useHomeData();
+  // Season pass: queries compartidas con la pantalla del pase. La card usa
+  // /estado (rápido); las misiones del Home, /misiones (evaluación lenta).
+  // isLoading = primera carga en vuelo, como el antiguo seasonPassLoading.
+  const estadoQuery = useSeasonPassEstado();
+  const misionesQuery = useSeasonPassMisiones();
+  const { refetch: refetchPassEstado } = estadoQuery;
+  const { refetch: refetchPassMisiones } = misionesQuery;
+  const seasonPassEstado = estadoQuery.data ?? null;
+  const seasonPassLoading = estadoQuery.isLoading;
+  const queryClient = useQueryClient();
   // Feedback visual mientras "Reintentar" del banner de error está en vuelo.
   const [retrying, setRetrying] = useState(false);
   const handleRetry = async () => {
     setRetrying(true);
     try {
-      await refreshAll();
+      await Promise.all([
+        refreshAll(),
+        session?.access_token ? refetchPassEstado() : Promise.resolve(),
+        session?.access_token ? refetchPassMisiones() : Promise.resolve(),
+      ]);
     } finally {
       setRetrying(false);
     }
   };
+  // Entrada escalonada "tipo remount" sin remontar. Solo se re-arma en
+  // CAMBIOS DE TAB: el swap es instantáneo, así que esconder en el blur es
+  // garantizado invisible y la vuelta entra en cascada sobre lienzo limpio.
+  // Al volver de pantallas apiladas (pase, detalles…) NO hay replay — el
+  // contenido sigue en su sitio, como hacen las apps grandes: cualquier
+  // reset ahí compite con la transición (timers = carreras perdidas) y
+  // acababa viéndose como un parpadeo.
+  const [enterNonce, setEnterNonce] = useState(0);
+  const [resetNonce, setResetNonce] = useState(0);
+  const isFirstFocusRef = useRef(true);
+  const tabNavigation = useNavigation();
+  const tabRoute = useRoute();
+  useFocusEffect(
+    useCallback(() => {
+      if (isFirstFocusRef.current) {
+        // Primera carga: los bloques ya animan al montar; re-disparar aquí
+        // haría tartamudear la entrada inicial.
+        isFirstFocusRef.current = false;
+      } else {
+        // Si el blur anterior no escondió nada (vuelta de una pantalla
+        // apilada), animar visible→visible no produce ningún cambio.
+        setEnterNonce((n) => n + 1);
+      }
+      return () => {
+        // ¿Este blur es un cambio de tab o una pantalla apilada encima?
+        // Si el tab activo ya no es este, el Home quedó oculto en este mismo
+        // frame: esconder aquí es seguro e invisible.
+        const state = tabNavigation.getState?.();
+        const activeTab = state?.routes?.[state.index ?? 0]?.name;
+        if (activeTab !== tabRoute.name) {
+          setResetNonce((n) => n + 1);
+        }
+      };
+    }, [tabNavigation, tabRoute.name]),
+  );
+
   const [affinityModalVisible, setAffinityModalVisible] = useState(() => consumeAffinityModalPendingReopen());
   /** Sin animación fade al reabrir tras volver del chat (evita flash del home). */
   const [affinityInstantShow, setAffinityInstantShow] = useState(false);
@@ -305,10 +356,13 @@ export function HomeScreen({
   // a través de su TTL en HomeDataContext.
   useEffect(() => {
     if (streakRefreshKey > 0) {
-      void refreshSeasonPass({ force: true });
+      const userId = session?.user?.id;
+      if (userId) {
+        void queryClient.invalidateQueries({ queryKey: seasonPassKeys.all(userId) });
+      }
       void refreshStreak({ force: true });
     }
-  }, [streakRefreshKey, refreshSeasonPass, refreshStreak]);
+  }, [streakRefreshKey, queryClient, session?.user?.id, refreshStreak]);
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
@@ -411,27 +465,27 @@ export function HomeScreen({
   );
 
   const homeMissionsFromPass = useMemo(() => {
-    const list = seasonPassMe?.missions ?? [];
+    const list = misionesQuery.data?.missions ?? [];
     return list.filter((m) => m.period === 'daily').slice(0, 8).map((m) => mapSeasonMissionToHome(m, t));
-  }, [seasonPassMe?.missions, t]);
+  }, [misionesQuery.data?.missions, t]);
 
   const seasonPassCardProps =
-    seasonPassMe != null
+    seasonPassEstado != null
       ? {
           loading: false as const,
-          seasonLabel: seasonSlugToLabel(seasonPassMe.season.slug, t),
-          seasonTitle: seasonPassMe.season.title,
-          levelCurrent: String(seasonPassMe.level),
-          levelMax: String(levelMaxResolved(seasonPassMe)),
-          progressPercent: Math.min(100, Math.max(0, seasonPassMe.pct * 100)),
-          spCurrent: `${seasonPassMe.into_level.toLocaleString(numberLocale)} SP`,
-          spToNext: isSeasonPassSpCapped(seasonPassMe)
+          seasonLabel: seasonSlugToLabel(seasonPassEstado.season.slug, t),
+          seasonTitle: seasonPassEstado.season.title,
+          levelCurrent: String(seasonPassEstado.level),
+          levelMax: String(levelMaxResolved(seasonPassEstado)),
+          progressPercent: Math.min(100, Math.max(0, seasonPassEstado.pct * 100)),
+          spCurrent: `${seasonPassEstado.into_level.toLocaleString(numberLocale)} SP`,
+          spToNext: isSeasonPassSpCapped(seasonPassEstado)
             ? t('home.seasonPass.spCap')
             : t('home.seasonPass.spToNext', {
-                sp: seasonPassMe.sp_to_next.toLocaleString(numberLocale),
-                level: seasonPassNextLevel(seasonPassMe),
+                sp: seasonPassEstado.sp_to_next.toLocaleString(numberLocale),
+                level: seasonPassNextLevel(seasonPassEstado),
               }),
-          nextRewardName: seasonPassHomeNextLine(seasonPassMe, t),
+          nextRewardName: seasonPassHomeNextLine(seasonPassEstado, t),
         }
       : {
           loading: Boolean(session?.access_token && seasonPassLoading),
@@ -491,7 +545,7 @@ export function HomeScreen({
             del onboarding auto-abierto. */}
         {/* Búsqueda activa (naranja) siempre por encima de la invitación, si coinciden. */}
         {matchmakingBannerState !== 'hidden' && (
-          <InicioEnterBlock enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={0}>
             <OnboardingBanner
               variant={
                 matchmakingBannerState === 'matched'
@@ -505,7 +559,7 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {pairInvites && pairInvites.length > 0 && (
-          <InicioEnterBlock enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={0}>
             <PairInviteBanner
               invites={pairInvites}
               onChanged={() => onPairInvitesChanged?.()}
@@ -514,7 +568,7 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {matchReceivedInvites && matchReceivedInvites.length > 0 && (
-          <InicioEnterBlock enterIndex={0}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={0}>
             <MatchInviteBanner
               invites={matchReceivedInvites}
               onChanged={() => onMatchInvitesChanged?.()}
@@ -523,12 +577,12 @@ export function HomeScreen({
           </InicioEnterBlock>
         )}
         {myPlayerProfile && !myPlayerProfile.onboardingCompleted && (
-          <InicioEnterBlock enterIndex={homeEnterOffset}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset}>
             <OnboardingBanner onPress={() => onOpenProfileForOnboarding?.()} />
           </InicioEnterBlock>
         )}
         {session?.access_token ? (
-          <InicioEnterBlock enterIndex={homeEnterOffset + 1}>
+          <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 1}>
             <ProximosPartidosSection
               partidos={misPartidos}
               reservations={misReservasPista}
@@ -538,7 +592,7 @@ export function HomeScreen({
             />
           </InicioEnterBlock>
         ) : null}
-        <InicioEnterBlock enterIndex={homeEnterOffset + 2}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 2}>
           <InicioWidgetsCarousel>
             <DailyLessonCard
               variant="carousel"
@@ -584,7 +638,7 @@ export function HomeScreen({
             />
           </InicioWidgetsCarousel>
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={homeEnterOffset + 3}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 3}>
           <InicioQuickActions
             onNavigateToTab={onNavigateToTab}
             onCoursesPress={onCoursesPress}
@@ -594,7 +648,7 @@ export function HomeScreen({
             loading={listLoading}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={homeEnterOffset + 4}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 4}>
           <IAAfinidadCard
             locked={myPlayerProfile != null && !myPlayerProfile.onboardingCompleted}
             onPress={() => {
@@ -612,10 +666,10 @@ export function HomeScreen({
             }}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={homeEnterOffset + 5}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 5}>
           <MissionsHomeSection missions={homeMissionsFromPass} />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={homeEnterOffset + 6}>
+        <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 6}>
           <EnDirectoSection
             partidos={partidos.filter((p) => p.matchPhase === 'live')}
             loading={matchesLoading}
