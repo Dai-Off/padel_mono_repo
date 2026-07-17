@@ -9,9 +9,11 @@ const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
  * migrar de cuenta (personal → organización de empresa) es cambiar el valor,
  * cero código.
  *
- * En Expo Go corre en modo solo-JS (errores JS + breadcrumbs); los crashes
- * nativos y la subida de source maps llegan con las builds (EAS), donde el
- * config plugin de app.json ya queda preparado.
+ * En Expo Go corre en modo solo-JS (errores JS + breadcrumbs). Los crashes
+ * nativos y la subida de source maps llegan con las builds (EAS): al
+ * montarlas, añadir el config plugin "@sentry/react-native/expo" en app.json
+ * con organization/project (de la cuenta de empresa) — sin builds, el plugin
+ * solo produce un warning en cada arranque y por eso no está.
  */
 export function setupSentry() {
   if (!dsn) return;

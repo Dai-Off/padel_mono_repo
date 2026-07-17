@@ -13,7 +13,6 @@
     ],
     "plugins": [
       "expo-asset",
-      "@sentry/react-native/expo",
       [
         "@stripe/stripe-react-native",
         {
