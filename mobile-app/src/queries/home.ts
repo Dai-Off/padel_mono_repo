@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchHomeStats, type HomeStats } from '../api/home';
+import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import { CLUB_IANA_TIMEZONE } from '../lib/clubTimeZone';
 import { homeKeys } from './keys';
@@ -42,6 +43,20 @@ export function useHomeStats() {
   return useQuery({
     queryKey: homeKeys.stats(userId ?? 'anon'),
     queryFn: () => fetchHomeStats(token!).catch(() => STATS_FALLBACK),
+    enabled: Boolean(token && userId),
+  });
+}
+
+/** Count de torneos públicos (lo único que usa el Home). */
+export function usePublicTournamentsCount() {
+  const { token, userId } = useHomeSession();
+  return useQuery({
+    queryKey: homeKeys.tournamentsCount(userId ?? 'anon'),
+    queryFn: async () => {
+      const r = await fetchPublicTournaments(token!);
+      if (!r.ok) throw new Error('public-tournaments failed');
+      return r.tournaments.length;
+    },
     enabled: Boolean(token && userId),
   });
 }

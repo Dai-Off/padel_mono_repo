@@ -39,6 +39,8 @@ export const homeKeys = {
   all: (userId: string) => ['home', userId] as const,
   /** Contadores de quick actions (pistas libres, jugadores buscando…). */
   stats: (userId: string) => ['home', userId, 'stats'] as const,
+  /** Count de torneos públicos. */
+  tournamentsCount: (userId: string) => ['home', userId, 'tournaments-count'] as const,
   /** Racha de la lección diaria (current/longest/multiplier). */
   streak: (userId: string) => ['home', userId, 'streak'] as const,
 };

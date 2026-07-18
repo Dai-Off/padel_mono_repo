@@ -54,6 +54,10 @@ query — hasta migrar sus ~25 consumidores a los hooks; sin estado duplicado).
 raíz `home` volátil fuera de PERSIST_ROOTS; fachada en el contexto igual que
 el perfil base).
 
+**Torneos (count): HECHO** (`usePublicTournamentsCount` en `queries/home.ts`,
+misma fachada). Quedan reservas y matches — en pausa hasta que aterrice el WIP
+en curso sobre el dominio de partidos, para no colisionar.
+
 - Orden: profile → stats/streak → tournaments/reservations → **matches al
   final** (es el dominio con upserts optimistas de `misPartidos`,
   merge server/local y generaciones anti-stale; mapear eso a

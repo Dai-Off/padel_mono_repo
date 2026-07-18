@@ -14,9 +14,14 @@ import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { useMyProfile } from '../queries/profile';
-import { DEFAULT_STREAK, useDailyStreak, useHomeStats, type StreakState } from '../queries/home';
+import {
+  DEFAULT_STREAK,
+  useDailyStreak,
+  useHomeStats,
+  usePublicTournamentsCount,
+  type StreakState,
+} from '../queries/home';
 import { homeKeys, profileKeys } from '../queries/keys';
-import { fetchPublicTournaments } from '../api/tournaments';
 import { type HomeStats } from '../api/home';
 import { fetchMyCourtReservations, type CourtReservation } from '../api/bookings';
 import {
@@ -147,9 +152,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const pendingLocalMisPartidoIdsRef = useRef(new Map<string, number>());
   const misPartidosRef = useRef<PartidoItem[]>([]);
 
-  const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
-  const [tournamentsLoading, setTournamentsLoading] = useState(false);
-  const tournamentsLoadedAt = useRef(0);
+  // Torneos (count): fuente de verdad en React Query, fachada como el resto.
+  const tournamentsQuery = usePublicTournamentsCount();
+  const publicTournamentsCount: number | null = tournamentsQuery.data ?? null;
+  const tournamentsLoading = tournamentsQuery.isLoading;
 
   // Stats + racha: fuente de verdad en React Query (queries/home.ts); el
   // contexto las expone como fachada mientras migran sus consumidores.
@@ -475,24 +481,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
   const refreshTournaments = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      if (!force && tournamentsLoadedAt.current > 0) return;
-      const isFirst = tournamentsLoadedAt.current === 0;
-      if (isFirst) setTournamentsLoading(true);
-      try {
-        const r = await fetchPublicTournaments(token);
-        if (r.ok) {
-          setPublicTournamentsCount(r.tournaments.length);
-        } else if (isFirst) {
-          setHasInitialError(true);
-        }
-        tournamentsLoadedAt.current = Date.now();
-      } catch {
-        if (isFirst) setHasInitialError(true);
-      } finally {
-        if (isFirst) setTournamentsLoading(false);
-      }
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: homeKeys.tournamentsCount(userId) });
     },
-    [token],
+    [queryClient, userId],
   );
 
   // Fachadas sobre las queries: sin force la query gestiona su frescura;
@@ -553,13 +545,12 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     refreshMatchesGen.current = 0;
     matchesLoadedAt.current = 0;
     courtReservationsLoadedAt.current = 0;
-    tournamentsLoadedAt.current = 0;
     setHasInitialError(false);
-    // Perfil base, stats y racha los limpia queryClient.clear() del logout.
+    // Los dominios en queries (perfil, stats, racha, torneos) los limpia el
+    // queryClient.clear() del logout.
     setPartidos([]);
     setMisPartidos([]);
     setMisReservasPista([]);
-    setPublicTournamentsCount(null);
   }, [userId]);
 
   // -----------------------------------------------------------------
@@ -573,7 +564,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     if (switchedUser) {
       bootstrappedUserIds.delete(lastSessionUserIdRef.current!);
       matchesLoadedAt.current = 0;
-      tournamentsLoadedAt.current = 0;
     }
 
     lastSessionUserIdRef.current = userId;
@@ -582,24 +572,20 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     bootstrappedUserIds.add(userId);
     matchesLoadedAt.current = 0;
     courtReservationsLoadedAt.current = 0;
-    tournamentsLoadedAt.current = 0;
     setHasInitialError(false);
-    // Perfil base, stats y racha se cargan solos (queries montadas arriba).
+    // Los dominios en queries se cargan solos (montados arriba).
     void refreshMatches({ force: true });
     void refreshCourtReservations({ force: true });
-    void refreshTournaments({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   const refreshFnsRef = useRef({
     refreshMatches,
     refreshCourtReservations,
-    refreshTournaments,
   });
   refreshFnsRef.current = {
     refreshMatches,
     refreshCourtReservations,
-    refreshTournaments,
   };
 
   // -----------------------------------------------------------------
@@ -616,18 +602,19 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         if (Date.now() - lastAt < BACKGROUND_REFRESH_COOLDOWN_MS) return;
         lastBackgroundRefreshAtByUser.set(uid, Date.now());
         const fns = refreshFnsRef.current;
-        // Perfil base, stats y racha los revalida el focusManager de RQ.
+        // Los dominios en queries los revalida el focusManager de RQ.
         void fns.refreshMatches({ force: true });
         void fns.refreshCourtReservations({ force: true });
-        void fns.refreshTournaments({ force: true });
       }
     });
     return () => sub.remove();
   }, [token]);
 
-  // La parte del perfil del banner de error inicial se deriva de la query:
+  // La parte de los dominios en queries del banner de error inicial se deriva:
   // isError sin datos = primera carga fallida; se limpia sola al llegar datos.
+  // (stats y racha no marcan error a propósito: fallback a ceros / silencioso.)
   const profileInitialError = profileQuery.isError && profileQuery.data == null;
+  const tournamentsInitialError = tournamentsQuery.isError && tournamentsQuery.data == null;
 
   const value = useMemo<HomeDataValue>(
     () => ({
@@ -653,7 +640,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       streak,
       streakLoading,
       refreshStreak,
-      hasInitialError: hasInitialError || profileInitialError,
+      hasInitialError: hasInitialError || profileInitialError || tournamentsInitialError,
       refreshAll,
     }),
     [
@@ -661,6 +648,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       profileLoading,
       refreshProfile,
       profileInitialError,
+      tournamentsInitialError,
       partidos,
       misPartidos,
       matchesLoading,
