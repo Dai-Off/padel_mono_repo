@@ -5,7 +5,12 @@ import { assertMatchEligibleForScore } from '../lib/incompleteMatchCancel';
 import { matchAffectsElo } from '../lib/openMatchRules';
 import { applyFriendlyPlayCounts, runLevelingPipeline, type ScoreSet } from '../services/levelingService';
 import { runFraudCheck } from '../services/fraudService';
-import { FEEDBACK_WINDOW_HOURS, MAX_DISPUTE_ROUNDS } from '../lib/levelingConstants';
+import {
+  FEEDBACK_WINDOW_HOURS,
+  MAX_DISPUTE_ROUNDS,
+  SCORE_DISPUTE_GRACE_HOURS,
+  SCORE_REPORT_WINDOW_HOURS,
+} from '../lib/levelingConstants';
 
 const router = Router();
 
@@ -185,6 +190,43 @@ router.post('/:id/score', async (req: Request, res: Response) => {
 
   const eligible = await assertMatchEligibleForScore(supabase, matchId);
   if (!eligible.ok) return res.status(eligible.status).json({ ok: false, error: eligible.error });
+
+  // Ventana de reporte cerrada: solo se admite contrapropuesta de una disputa
+  // activa (hubo propuesta previa y el último movimiento está dentro de la gracia).
+  const { data: bkRow, error: eBk } = await supabase
+    .from('matches')
+    .select('updated_at, bookings(end_at)')
+    .eq('id', matchId)
+    .maybeSingle();
+  if (eBk) return res.status(500).json({ ok: false, error: eBk.message });
+  const bk = Array.isArray(bkRow?.bookings) ? bkRow?.bookings[0] : bkRow?.bookings;
+  const endMs = bk?.end_at ? new Date(bk.end_at as string).getTime() : NaN;
+  if (Number.isFinite(endMs) && Date.now() > endMs + SCORE_REPORT_WINDOW_HOURS * 3600 * 1000) {
+    const { data: prevSub, error: eSub } = await supabase
+      .from('score_submissions')
+      .select('id')
+      .eq('match_id', matchId)
+      .limit(1)
+      .maybeSingle();
+    if (eSub) return res.status(500).json({ ok: false, error: eSub.message });
+
+    const lastMoveMs = bkRow?.updated_at ? new Date(bkRow.updated_at as string).getTime() : NaN;
+    const inDisputeGrace =
+      prevSub != null &&
+      Number.isFinite(lastMoveMs) &&
+      Date.now() < lastMoveMs + SCORE_DISPUTE_GRACE_HOURS * 3600 * 1000;
+
+    if (!inDisputeGrace) {
+      await supabase
+        .from('matches')
+        .update({ score_status: 'no_result', updated_at: new Date().toISOString() })
+        .eq('id', matchId)
+        .eq('score_status', 'pending');
+      return res
+        .status(409)
+        .json({ ok: false, error: 'La ventana para registrar el resultado ha expirado.' });
+    }
+  }
 
   const { data: mp, error: e1 } = await supabase
     .from('match_players')
