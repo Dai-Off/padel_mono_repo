@@ -9,9 +9,12 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
+import { useMyProfile } from '../queries/profile';
+import { profileKeys } from '../queries/keys';
 import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchMyCourtReservations, type CourtReservation } from '../api/bookings';
@@ -129,9 +132,13 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const token = session?.access_token ?? null;
   const userId = session?.user?.id ?? null;
 
-  const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const profileLoadedAt = useRef(0);
+  // Perfil base: la fuente de verdad es la query (persistida en PERSIST_ROOTS).
+  // El contexto lo expone como fachada mientras sus consumidores migran a
+  // useMyProfile() — sin estado duplicado aquí.
+  const queryClient = useQueryClient();
+  const profileQuery = useMyProfile();
+  const profile: MyPlayerProfile | null = profileQuery.data ?? null;
+  const profileLoading = profileQuery.isLoading;
 
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
   const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
@@ -179,29 +186,14 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   // Refrescos (uno por entidad). `force: true` siempre re-fetch.
   // -----------------------------------------------------------------
 
+  // Fachada sobre la query: sin force la query gestiona su frescura (staleTime
+  // + focusManager); con force invalida y espera el refetch.
   const refreshProfile = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      if (!token) {
-        setProfile(null);
-        return;
-      }
-      if (!force && profileLoadedAt.current > 0) return;
-      // Solo mostramos loading si no había nada cacheado.
-      const isFirst = profileLoadedAt.current === 0;
-      if (isFirst) setProfileLoading(true);
-      try {
-        const p = await fetchMyPlayerProfile(token);
-        if (p?.id) cachePlayerAvatar(p.id, p.avatarUrl);
-        setProfile(p);
-        profileLoadedAt.current = Date.now();
-        if (p == null && isFirst) setHasInitialError(true);
-      } catch {
-        if (isFirst) setHasInitialError(true);
-      } finally {
-        if (isFirst) setProfileLoading(false);
-      }
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: profileKeys.base(userId) });
     },
-    [token],
+    [queryClient, userId],
   );
 
   /** Solo datos de GET /matches/mine — nunca el listado público de /matches. */
@@ -486,22 +478,13 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
       await refreshMatches({ force: true, scope: 'mine' });
 
-      if (freshProfile) {
-        setProfile((prev) => {
-          if (
-            prev?.id === freshProfile.id &&
-            prev.avatarUrl === freshProfile.avatarUrl &&
-            prev.firstName === freshProfile.firstName &&
-            prev.lastName === freshProfile.lastName
-          ) {
-            return prev;
-          }
-          return freshProfile;
-        });
-        profileLoadedAt.current = Date.now();
+      if (freshProfile && userId) {
+        // Siembra el caché de la query base con el perfil recién traído
+        // (lo marca fresco: evita otro fetch inmediato).
+        queryClient.setQueryData(profileKeys.base(userId), freshProfile);
       }
     },
-    [token, profile?.id, profile?.firstName, profile?.lastName, profile?.avatarUrl, upsertMisPartido, removeMisPartido, refreshMatches],
+    [token, userId, queryClient, profile?.id, profile?.firstName, profile?.lastName, profile?.avatarUrl, upsertMisPartido, removeMisPartido, refreshMatches],
   );
 
   const refreshTournaments = useCallback(
@@ -610,14 +593,13 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     }
     lastSessionUserIdRef.current = null;
     refreshMatchesGen.current = 0;
-    profileLoadedAt.current = 0;
     matchesLoadedAt.current = 0;
     courtReservationsLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
     statsLoadedAt.current = 0;
     streakLoadedAt.current = 0;
     setHasInitialError(false);
-    setProfile(null);
+    // El perfil base lo limpia queryClient.clear() en el logout (AuthContext).
     setPartidos([]);
     setMisPartidos([]);
     setMisReservasPista([]);
@@ -636,7 +618,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       lastSessionUserIdRef.current != null && lastSessionUserIdRef.current !== userId;
     if (switchedUser) {
       bootstrappedUserIds.delete(lastSessionUserIdRef.current!);
-      profileLoadedAt.current = 0;
       matchesLoadedAt.current = 0;
       tournamentsLoadedAt.current = 0;
       statsLoadedAt.current = 0;
@@ -647,14 +628,13 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     if (bootstrappedUserIds.has(userId)) return;
 
     bootstrappedUserIds.add(userId);
-    profileLoadedAt.current = 0;
     matchesLoadedAt.current = 0;
     courtReservationsLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
     statsLoadedAt.current = 0;
     streakLoadedAt.current = 0;
     setHasInitialError(false);
-    void refreshProfile({ force: true });
+    // El perfil base se carga solo (query montada arriba).
     void refreshMatches({ force: true });
     void refreshCourtReservations({ force: true });
     void refreshTournaments({ force: true });
@@ -664,7 +644,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   }, [userId]);
 
   const refreshFnsRef = useRef({
-    refreshProfile,
     refreshMatches,
     refreshCourtReservations,
     refreshTournaments,
@@ -672,7 +651,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     refreshStreak,
   });
   refreshFnsRef.current = {
-    refreshProfile,
     refreshMatches,
     refreshCourtReservations,
     refreshTournaments,
@@ -694,7 +672,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         if (Date.now() - lastAt < BACKGROUND_REFRESH_COOLDOWN_MS) return;
         lastBackgroundRefreshAtByUser.set(uid, Date.now());
         const fns = refreshFnsRef.current;
-        void fns.refreshProfile({ force: true });
+        // El perfil base lo revalida el focusManager de React Query.
         void fns.refreshMatches({ force: true });
         void fns.refreshCourtReservations({ force: true });
         void fns.refreshTournaments({ force: true });
@@ -704,6 +682,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     });
     return () => sub.remove();
   }, [token]);
+
+  // La parte del perfil del banner de error inicial se deriva de la query:
+  // isError sin datos = primera carga fallida; se limpia sola al llegar datos.
+  const profileInitialError = profileQuery.isError && profileQuery.data == null;
 
   const value = useMemo<HomeDataValue>(
     () => ({
@@ -729,13 +711,14 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       streak,
       streakLoading,
       refreshStreak,
-      hasInitialError,
+      hasInitialError: hasInitialError || profileInitialError,
       refreshAll,
     }),
     [
       profile,
       profileLoading,
       refreshProfile,
+      profileInitialError,
       partidos,
       misPartidos,
       matchesLoading,

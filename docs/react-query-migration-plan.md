@@ -46,6 +46,10 @@ Pantalla clave ya optimizada a mano; criterio duro: **no empeorar el warm feel**
 
 ### 2. HomeDataContext (Home) — por dominios, matches al final
 
+**Perfil base: HECHO** (`useMyProfile` en `queries/profile.ts`; el contexto lo
+expone como fachada — `profile`/`profileLoading`/`refreshProfile` leen de la
+query — hasta migrar sus ~25 consumidores a los hooks; sin estado duplicado).
+
 - Orden: profile → stats/streak → tournaments/reservations → **matches al
   final** (es el dominio con upserts optimistas de `misPartidos`,
   merge server/local y generaciones anti-stale; mapear eso a

@@ -1,8 +1,9 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
 import { useTranslation } from '../i18n';
+import { fetchMyPlayerProfile } from '../api/players';
+import { cachePlayerAvatar } from '../lib/partidoPlayerUtils';
 import { fetchProfileBundle, type ProfileBundle } from '../api/profileBundle';
 import { fetchMyCoachAssessment, fetchMyCoachStats } from '../api/coachAssessment';
 import { fetchMyPeerFeedbackInsight } from '../api/peerFeedbackInsight';
@@ -21,13 +22,35 @@ import { profileKeys } from './keys';
  * - 'profile' está en PERSIST_ROOTS: warm start desde disco en arranque frío.
  */
 
+/**
+ * Perfil base (MyPlayerProfile). No depende de HomeDataContext: es la fuente de
+ * verdad también para el provider del Home (que la expone como fachada mientras
+ * migran sus consumidores).
+ */
+export function useMyProfile() {
+  const { session } = useAuth();
+  const token = session?.access_token;
+  const userId = session?.user?.id;
+  return useQuery({
+    queryKey: profileKeys.base(userId ?? 'anon'),
+    queryFn: async () => {
+      const p = await fetchMyPlayerProfile(token!);
+      if (!p) throw new Error('my-profile failed');
+      // El caché de avatares alimenta el enriquecido de las cards de partido.
+      if (p.id) cachePlayerAvatar(p.id, p.avatarUrl);
+      return p;
+    },
+    enabled: Boolean(token && userId),
+  });
+}
+
 function useProfileSession() {
   const { session } = useAuth();
-  const { profile } = useHomeData();
+  const { data: myProfile } = useMyProfile();
   return {
     token: session?.access_token,
     userId: session?.user?.id,
-    playerId: profile?.id,
+    playerId: myProfile?.id,
   };
 }
 

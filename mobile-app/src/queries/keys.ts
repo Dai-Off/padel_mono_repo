@@ -16,6 +16,8 @@ export const seasonPassKeys = {
 
 export const profileKeys = {
   all: (userId: string) => ['profile', userId] as const,
+  /** Perfil base (MyPlayerProfile): identidad, avatar, ELO, preferencias. */
+  base: (userId: string) => ['profile', userId, 'base'] as const,
   /** Personalización + marcos + logros en 1 round-trip. Lo único que gatea el hero. */
   bundle: (userId: string) => ['profile', userId, 'bundle'] as const,
   /** Radar del Coach. Por locale: los textos llegan traducidos del backend. */
