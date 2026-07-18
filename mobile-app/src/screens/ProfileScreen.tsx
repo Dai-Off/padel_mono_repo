@@ -19,7 +19,17 @@ import { useTranslation } from '../i18n';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { formatPlayerLabel } from '../lib/username';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { useProfileData } from '../contexts/ProfileDataContext';
+import {
+  useCoachRadar,
+  useCoachStats,
+  useLevelHistory,
+  usePeerInsight,
+  usePlayerStats,
+  useProfileBundle,
+  useProfileDataActions,
+  useProfileSocial,
+} from '../queries/profile';
+import { type LevelHistoryLimit } from '../api/profileStats';
 import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
 import { AnimatedTitle } from '../components/profile/AnimatedTitle';
 import { ProfileCustomizationModal } from '../components/profile/ProfileCustomizationModal';
@@ -112,30 +122,36 @@ export function ProfileScreen({
   // Cache global del perfil (HomeData): siembra el perfil base para reentrada
   // instantánea e invalida al resto de pantallas tras editar/onboarding.
   const { profile: homeProfile, refreshProfile: refreshGlobalProfile } = useHomeData();
-  // Datos del perfil (warm start): sobreviven al cambiar de pestaña. loadedAt
-  // guards + SWR + invalidación por force viven en el ProfileDataProvider.
-  const {
-    customization,
-    framesCatalog,
-    allAchievements,
-    assessment,
-    peerInsight,
-    coachStats,
-    levelHistory,
-    levelLimit,
-    setLevelLimit,
-    playerStats: stats,
-    frequentClubs,
-    frequentPartners,
-    bundleReady: customizationReady,
-    assessmentLoaded,
-    levelLoading,
-    socialLoading,
-    ensureLoaded,
-    refresh: refreshProfileData,
-    reloadCoach,
-    setCustomization,
-  } = useProfileData();
+  // Datos del perfil vía React Query (warm start): caché compartido y persistido
+  // (PERSIST_ROOTS), revalidación por staleTime y focusManager. El límite del
+  // gráfico de evolución es estado de cliente: al cambiarlo cambia la query key.
+  const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
+  const bundleQuery = useProfileBundle();
+  const radarQuery = useCoachRadar();
+  const coachStatsQuery = useCoachStats();
+  const peerQuery = usePeerInsight();
+  const levelQuery = useLevelHistory(levelLimit);
+  const statsQuery = usePlayerStats();
+  const socialQuery = useProfileSocial();
+  const { refresh: refreshProfileData, reloadCoach, setCustomization } = useProfileDataActions();
+
+  const customization = bundleQuery.data?.customization ?? null;
+  const framesCatalog = bundleQuery.data?.frames ?? [];
+  const allAchievements = bundleQuery.data?.achievements ?? [];
+  const assessment = radarQuery.data ?? null;
+  const peerInsight = peerQuery.data ?? null;
+  const coachStats = coachStatsQuery.data ?? null;
+  const levelHistory = levelQuery.data ?? null;
+  const stats = statsQuery.data ?? null;
+  const frequentClubs = socialQuery.data?.clubs ?? [];
+  const frequentPartners = socialQuery.data?.partners ?? [];
+
+  // isPending = sin dato aún (ni caché hidratado ni error): solo la 1ª carga
+  // real muestra skeleton; las revalidaciones son silenciosas (dato en caché).
+  const customizationReady = !bundleQuery.isPending;
+  const assessmentLoaded = !radarQuery.isPending;
+  const levelLoading = levelQuery.isPending;
+  const socialLoading = socialQuery.isPending;
   // Perfil base local: sembrado del cache global para que reentrar sea
   // instantáneo; loadProfile revalida en segundo plano.
   const [profile, setProfile] = useState<MyPlayerProfile | null>(homeProfile ?? null);
@@ -209,13 +225,9 @@ export function ProfileScreen({
       return;
     }
     void loadProfile(token);
-    // Bootstrap perezoso del cache de datos del perfil (1ª apertura). En
-    // reentradas sirve lo cacheado al instante (no re-fetch salvo force).
-    // ensureLoaded se auto-protege (guard interno) y corre en cada mount, por eso
-    // se omite de las deps (evita re-ejecutar loadProfile al cambiar su identidad).
-    ensureLoaded();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.access_token, loadProfile]);
+    // Los datos del perfil (bundle, radar, etc.) los cargan las queries al
+    // montar; en reentradas sirven caché y revalidan solas si están stale.
+  }, [session?.access_token, loadProfile, t]);
 
   // Reflejar los cambios del cache global (HomeData) en el perfil local: al editar
   // preferencias / perfil se hace refreshGlobalProfile, y así el hero y la card de
@@ -294,7 +306,7 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    refreshProfileData({ force: true });
+    refreshProfileData();
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).

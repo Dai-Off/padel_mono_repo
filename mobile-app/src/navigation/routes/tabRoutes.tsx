@@ -281,7 +281,6 @@ export function PerfilTab() {
   const navigation = useNavigation<RootNav>();
   const { toggle: toggleSidebar } = useSidebarActions();
   const {
-    profileRefreshKey,
     vitrinaScrollNonce,
     autoOpenOnboarding,
     setAutoOpenOnboarding,
@@ -311,7 +310,6 @@ export function PerfilTab() {
   return (
     <TabScreenShell>
       <ProfileScreen
-        key={profileRefreshKey}
         onBack={() => {
           goToMainTab('inicio');
           setAutoOpenOnboarding(false);

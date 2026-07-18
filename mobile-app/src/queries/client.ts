@@ -17,7 +17,7 @@ const PERSIST_MAX_AGE_MS = 24 * HOUR_MS;
  * sesión anterior es correcto. Lo volátil (matchmaking, invitaciones…)
  * vive solo en memoria.
  */
-const PERSIST_ROOTS = new Set<unknown>(['season-pass']);
+const PERSIST_ROOTS = new Set<unknown>(['season-pass', 'profile']);
 
 export const queryClient = new QueryClient({
   defaultOptions: {

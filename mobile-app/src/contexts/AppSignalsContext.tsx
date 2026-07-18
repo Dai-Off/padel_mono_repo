@@ -21,7 +21,9 @@ export type PostOnboardingReturn =
   | 'cursos';
 
 type AppSignalsValue = {
-  /** Remonta ProfileScreen (key) tras guardar perfil o fijar username. */
+  /** Señal tras guardar perfil o fijar username. Ya no remonta ProfileScreen
+   * (los datos van por React Query + invalidaciones); la consume
+   * UsernameSetupHost para re-comprobar si falta username. */
   profileRefreshKey: number;
   bumpProfileRefresh: () => void;
   /** Pide a ProfileScreen scroll a la Vitrina de Logros. */

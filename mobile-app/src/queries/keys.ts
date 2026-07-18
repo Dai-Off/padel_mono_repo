@@ -13,3 +13,21 @@ export const seasonPassKeys = {
   /** Evaluación de misiones + celebraciones (lento). Llega por su cuenta. */
   misiones: (userId: string) => ['season-pass', userId, 'misiones'] as const,
 };
+
+export const profileKeys = {
+  all: (userId: string) => ['profile', userId] as const,
+  /** Personalización + marcos + logros en 1 round-trip. Lo único que gatea el hero. */
+  bundle: (userId: string) => ['profile', userId, 'bundle'] as const,
+  /** Radar del Coach. Por locale: los textos llegan traducidos del backend. */
+  radar: (userId: string, locale: string) => ['profile', userId, 'radar', locale] as const,
+  /** Contadores en vivo del Coach (rellenan la card aparte del radar). */
+  coachStats: (userId: string) => ['profile', userId, 'coach-stats'] as const,
+  /** Insight del feedback de compañeros. Por locale. */
+  peer: (userId: string, locale: string) => ['profile', userId, 'peer', locale] as const,
+  /** Evolución del ELO. Por límite seleccionado (5/10/all). */
+  level: (userId: string, limit: string) => ['profile', userId, 'level', limit] as const,
+  /** Estadísticas agregadas (rachas, winrate, fiabilidad). */
+  stats: (userId: string) => ['profile', userId, 'stats'] as const,
+  /** Clubs y compañeros frecuentes. */
+  social: (userId: string) => ['profile', userId, 'social'] as const,
+};

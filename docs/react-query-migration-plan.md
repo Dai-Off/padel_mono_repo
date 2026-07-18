@@ -1,7 +1,7 @@
 # Plan incremental de migración a React Query (mobile-app)
 
-Estado: infraestructura + piloto (season pass) hechos. Este documento prioriza
-la migración del resto de dominios de estado de servidor.
+Estado: infraestructura + piloto (season pass) + perfil propio (punto 1) hechos.
+Este documento prioriza la migración del resto de dominios de estado de servidor.
 
 ## Qué hay ya
 
@@ -21,7 +21,11 @@ la migración del resto de dominios de estado de servidor.
 
 ## Orden propuesto
 
-### 1. ProfileDataContext (perfil propio) — el mayor beneficio
+### 1. ProfileDataContext (perfil propio) — HECHO
+
+Migrado en `src/queries/profile.ts` (una query por dataset + acciones), contexto
+retirado, remount por `key` sustituido por invalidaciones y raíz `profile` en
+`PERSIST_ROOTS`. Lo de abajo queda como registro del criterio aplicado.
 
 Pantalla clave ya optimizada a mano; criterio duro: **no empeorar el warm feel**.
 

@@ -13,7 +13,6 @@ import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
 import { MatchmakingProvider } from './src/contexts/MatchmakingContext';
 import { HomeDataProvider } from './src/contexts/HomeDataContext';
 import { AppSignalsProvider } from './src/contexts/AppSignalsContext';
-import { ProfileDataProvider } from './src/contexts/ProfileDataContext';
 import { CartProvider } from './src/contexts/CartContext';
 import { SplashScreen } from './src/components/SplashScreen';
 import { RootNavigator } from './src/navigation/RootNavigator';
@@ -72,11 +71,9 @@ function App() {
                   <MatchmakingProvider>
                     <HomeDataProvider>
                       <AppSignalsProvider>
-                        <ProfileDataProvider>
-                          <CartProvider>
-                            <AppContent />
-                          </CartProvider>
-                        </ProfileDataProvider>
+                        <CartProvider>
+                          <AppContent />
+                        </CartProvider>
                       </AppSignalsProvider>
                     </HomeDataProvider>
                   </MatchmakingProvider>

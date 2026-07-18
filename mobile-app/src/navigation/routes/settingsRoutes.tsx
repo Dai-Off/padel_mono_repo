@@ -11,6 +11,7 @@ import { EditProfileScreen } from '../../screens/EditProfileScreen';
 import { ChangePasswordScreen } from '../../screens/ChangePasswordScreen';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAppSignals } from '../../contexts/AppSignalsContext';
+import { useProfileDataActions } from '../../queries/profile';
 import { RouteShell } from '../RouteShell';
 import type { RootStackParamList } from '../types';
 
@@ -124,11 +125,14 @@ export function EditProfileRoute({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'EditProfile'>) {
   const { bumpProfileRefresh, bumpPartidosRefresh } = useAppSignals();
+  // Invalida las queries del perfil (antes esto lo forzaba el remount por key).
+  const { refresh: refreshProfileData } = useProfileDataActions();
   return (
     <RouteShell>
       <EditProfileScreen
         onBack={() => navigation.goBack()}
         onSaved={() => {
+          refreshProfileData();
           bumpProfileRefresh();
           bumpPartidosRefresh();
         }}
