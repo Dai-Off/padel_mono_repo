@@ -33,3 +33,12 @@ export const profileKeys = {
   /** Clubs y compañeros frecuentes. */
   social: (userId: string) => ['profile', userId, 'social'] as const,
 };
+
+/** Dashboard del Home. Volátil: la raíz 'home' NO se persiste. */
+export const homeKeys = {
+  all: (userId: string) => ['home', userId] as const,
+  /** Contadores de quick actions (pistas libres, jugadores buscando…). */
+  stats: (userId: string) => ['home', userId, 'stats'] as const,
+  /** Racha de la lección diaria (current/longest/multiplier). */
+  streak: (userId: string) => ['home', userId, 'streak'] as const,
+};

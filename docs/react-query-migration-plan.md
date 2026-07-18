@@ -50,6 +50,10 @@ Pantalla clave ya optimizada a mano; criterio duro: **no empeorar el warm feel**
 expone como fachada — `profile`/`profileLoading`/`refreshProfile` leen de la
 query — hasta migrar sus ~25 consumidores a los hooks; sin estado duplicado).
 
+**Stats + racha: HECHO** (`queries/home.ts`: `useHomeStats`/`useDailyStreak`,
+raíz `home` volátil fuera de PERSIST_ROOTS; fachada en el contexto igual que
+el perfil base).
+
 - Orden: profile → stats/streak → tournaments/reservations → **matches al
   final** (es el dominio con upserts optimistas de `misPartidos`,
   merge server/local y generaciones anti-stale; mapear eso a

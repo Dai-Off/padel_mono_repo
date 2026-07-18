@@ -14,11 +14,11 @@ import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { useMyProfile } from '../queries/profile';
-import { profileKeys } from '../queries/keys';
+import { DEFAULT_STREAK, useDailyStreak, useHomeStats, type StreakState } from '../queries/home';
+import { homeKeys, profileKeys } from '../queries/keys';
 import { fetchPublicTournaments } from '../api/tournaments';
-import { fetchHomeStats, type HomeStats } from '../api/home';
+import { type HomeStats } from '../api/home';
 import { fetchMyCourtReservations, type CourtReservation } from '../api/bookings';
-import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import {
   getMatchBooking,
   getMatchListPhase,
@@ -41,22 +41,11 @@ import { findMisPartidoIdsToRemove } from '../lib/pruneMisPartidos';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
-import { CLUB_IANA_TIMEZONE } from '../lib/clubTimeZone';
-
-const TIMEZONE = CLUB_IANA_TIMEZONE;
-
 /** Evita re-bootstrap si el provider se remonta por un parpadeo de sesión. */
 const bootstrappedUserIds = new Set<string>();
 /** Cooldown entre refrescos completos al volver del background. */
 const lastBackgroundRefreshAtByUser = new Map<string, number>();
 const BACKGROUND_REFRESH_COOLDOWN_MS = 30_000;
-
-type StreakState = {
-  currentStreak: number;
-  longestStreak: number;
-  multiplier: number;
-  lastCompleted: string | null;
-};
 
 type HomeDataValue = {
   // Profile
@@ -162,18 +151,15 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const [tournamentsLoading, setTournamentsLoading] = useState(false);
   const tournamentsLoadedAt = useRef(0);
 
-  const [stats, setStats] = useState<HomeStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const statsLoadedAt = useRef(0);
+  // Stats + racha: fuente de verdad en React Query (queries/home.ts); el
+  // contexto las expone como fachada mientras migran sus consumidores.
+  const statsQuery = useHomeStats();
+  const stats: HomeStats | null = statsQuery.data ?? null;
+  const statsLoading = statsQuery.isLoading;
 
-  const [streak, setStreak] = useState<StreakState>({
-    currentStreak: 0,
-    longestStreak: 0,
-    multiplier: 0,
-    lastCompleted: null,
-  });
-  const [streakLoading, setStreakLoading] = useState(false);
-  const streakLoadedAt = useRef(0);
+  const streakQuery = useDailyStreak();
+  const streak: StreakState = streakQuery.data ?? DEFAULT_STREAK;
+  const streakLoading = streakQuery.isLoading;
 
   /**
    * Indica si la PRIMERA carga de cualquiera de los datasets falló y aún no
@@ -509,50 +495,22 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
+  // Fachadas sobre las queries: sin force la query gestiona su frescura;
+  // con force invalidan y esperan el refetch.
   const refreshStats = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      if (!force && statsLoadedAt.current > 0) return;
-      const isFirst = statsLoadedAt.current === 0;
-      if (isFirst) setStatsLoading(true);
-      try {
-        const data = await fetchHomeStats(token);
-        setStats(data);
-      } catch {
-        // Fallback consistente con el comportamiento del antiguo useHomeStats.
-        setStats({ courtsFree: 0, playersLooking: 0, classesToday: 0, tournaments: 0 });
-      }
-      statsLoadedAt.current = Date.now();
-      if (isFirst) setStatsLoading(false);
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: homeKeys.stats(userId) });
     },
-    [token],
+    [queryClient, userId],
   );
 
   const refreshStreak = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      if (!token) return;
-      if (!force && streakLoadedAt.current > 0) return;
-      const isFirst = streakLoadedAt.current === 0;
-      if (isFirst) setStreakLoading(true);
-      try {
-        const res = await fetchStreak(token, TIMEZONE);
-        if ('ok' in res && res.ok === false) {
-          // 401/500: dejamos los valores previos (o defaults) y no rompemos.
-        } else {
-          const data = res as StreakInfo;
-          setStreak({
-            currentStreak: data.current_streak,
-            longestStreak: data.longest_streak,
-            multiplier: data.multiplier,
-            lastCompleted: data.last_lesson_completed_at,
-          });
-        }
-      } catch {
-        // Silencioso. Mantiene valores previos.
-      }
-      streakLoadedAt.current = Date.now();
-      if (isFirst) setStreakLoading(false);
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: homeKeys.streak(userId) });
     },
-    [token],
+    [queryClient, userId],
   );
 
   /**
@@ -596,16 +554,12 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     matchesLoadedAt.current = 0;
     courtReservationsLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
-    statsLoadedAt.current = 0;
-    streakLoadedAt.current = 0;
     setHasInitialError(false);
-    // El perfil base lo limpia queryClient.clear() en el logout (AuthContext).
+    // Perfil base, stats y racha los limpia queryClient.clear() del logout.
     setPartidos([]);
     setMisPartidos([]);
     setMisReservasPista([]);
     setPublicTournamentsCount(null);
-    setStats(null);
-    setStreak({ currentStreak: 0, longestStreak: 0, multiplier: 0, lastCompleted: null });
   }, [userId]);
 
   // -----------------------------------------------------------------
@@ -620,8 +574,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       bootstrappedUserIds.delete(lastSessionUserIdRef.current!);
       matchesLoadedAt.current = 0;
       tournamentsLoadedAt.current = 0;
-      statsLoadedAt.current = 0;
-      streakLoadedAt.current = 0;
     }
 
     lastSessionUserIdRef.current = userId;
@@ -631,15 +583,11 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     matchesLoadedAt.current = 0;
     courtReservationsLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
-    statsLoadedAt.current = 0;
-    streakLoadedAt.current = 0;
     setHasInitialError(false);
-    // El perfil base se carga solo (query montada arriba).
+    // Perfil base, stats y racha se cargan solos (queries montadas arriba).
     void refreshMatches({ force: true });
     void refreshCourtReservations({ force: true });
     void refreshTournaments({ force: true });
-    void refreshStats({ force: true });
-    void refreshStreak({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
@@ -647,15 +595,11 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     refreshMatches,
     refreshCourtReservations,
     refreshTournaments,
-    refreshStats,
-    refreshStreak,
   });
   refreshFnsRef.current = {
     refreshMatches,
     refreshCourtReservations,
     refreshTournaments,
-    refreshStats,
-    refreshStreak,
   };
 
   // -----------------------------------------------------------------
@@ -672,12 +616,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         if (Date.now() - lastAt < BACKGROUND_REFRESH_COOLDOWN_MS) return;
         lastBackgroundRefreshAtByUser.set(uid, Date.now());
         const fns = refreshFnsRef.current;
-        // El perfil base lo revalida el focusManager de React Query.
+        // Perfil base, stats y racha los revalida el focusManager de RQ.
         void fns.refreshMatches({ force: true });
         void fns.refreshCourtReservations({ force: true });
         void fns.refreshTournaments({ force: true });
-        void fns.refreshStats({ force: true });
-        void fns.refreshStreak({ force: true });
       }
     });
     return () => sub.remove();
