@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchPublicTournaments } from '../api/tournaments';
+import { fetchMyCourtReservations } from '../api/bookings';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import { CLUB_IANA_TIMEZONE } from '../lib/clubTimeZone';
 import { homeKeys } from './keys';
@@ -56,6 +57,20 @@ export function usePublicTournamentsCount() {
       const r = await fetchPublicTournaments(token!);
       if (!r.ok) throw new Error('public-tournaments failed');
       return r.tournaments.length;
+    },
+    enabled: Boolean(token && userId),
+  });
+}
+
+/** Reservas de pista privada del jugador (standard, flujo aparte de partidos). */
+export function useMyCourtReservations() {
+  const { token, userId } = useHomeSession();
+  return useQuery({
+    queryKey: homeKeys.courtReservations(userId ?? 'anon'),
+    queryFn: async () => {
+      const res = await fetchMyCourtReservations(token!, { phase: 'all', limit: 50 });
+      if (!res.ok) throw new Error('court-reservations failed');
+      return res.reservations;
     },
     enabled: Boolean(token && userId),
   });

@@ -41,6 +41,8 @@ export const homeKeys = {
   stats: (userId: string) => ['home', userId, 'stats'] as const,
   /** Count de torneos públicos. */
   tournamentsCount: (userId: string) => ['home', userId, 'tournaments-count'] as const,
+  /** Reservas de pista privada del jugador (flujo aparte de partidos). */
+  courtReservations: (userId: string) => ['home', userId, 'court-reservations'] as const,
   /** Racha de la lección diaria (current/longest/multiplier). */
   streak: (userId: string) => ['home', userId, 'streak'] as const,
 };

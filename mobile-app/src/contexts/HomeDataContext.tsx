@@ -18,12 +18,13 @@ import {
   DEFAULT_STREAK,
   useDailyStreak,
   useHomeStats,
+  useMyCourtReservations,
   usePublicTournamentsCount,
   type StreakState,
 } from '../queries/home';
 import { homeKeys, profileKeys } from '../queries/keys';
 import { type HomeStats } from '../api/home';
-import { fetchMyCourtReservations, type CourtReservation } from '../api/bookings';
+import { type CourtReservation } from '../api/bookings';
 import {
   getMatchBooking,
   getMatchListPhase,
@@ -51,6 +52,9 @@ const bootstrappedUserIds = new Set<string>();
 /** Cooldown entre refrescos completos al volver del background. */
 const lastBackgroundRefreshAtByUser = new Map<string, number>();
 const BACKGROUND_REFRESH_COOLDOWN_MS = 30_000;
+
+/** Identidad estable para el estado vacío (evita re-renders por `?? []`). */
+const EMPTY_RESERVATIONS: CourtReservation[] = [];
 
 type HomeDataValue = {
   // Profile
@@ -136,9 +140,11 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
   const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
-  const [misReservasPista, setMisReservasPista] = useState<CourtReservation[]>([]);
-  const [courtReservationsLoading, setCourtReservationsLoading] = useState(false);
-  const courtReservationsLoadedAt = useRef(0);
+
+  // Reservas de pista: fuente de verdad en React Query, fachada como el resto.
+  const courtReservationsQuery = useMyCourtReservations();
+  const misReservasPista: CourtReservation[] = courtReservationsQuery.data ?? EMPTY_RESERVATIONS;
+  const courtReservationsLoading = courtReservationsQuery.isLoading;
   useEffect(() => {
     misPartidosRef.current = misPartidos;
   }, [misPartidos]);
@@ -393,29 +399,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
   const refreshCourtReservations = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      if (!token) {
-        setMisReservasPista([]);
-        courtReservationsLoadedAt.current = 0;
-        return;
-      }
-      if (!force && courtReservationsLoadedAt.current > 0) return;
-      const isFirst = courtReservationsLoadedAt.current === 0;
-      if (isFirst) setCourtReservationsLoading(true);
-      try {
-        const res = await fetchMyCourtReservations(token, { phase: 'all', limit: 50 });
-        if (res.ok) {
-          setMisReservasPista(res.reservations);
-          courtReservationsLoadedAt.current = Date.now();
-        } else if (isFirst) {
-          setHasInitialError(true);
-        }
-      } catch {
-        if (isFirst) setHasInitialError(true);
-      } finally {
-        if (isFirst) setCourtReservationsLoading(false);
-      }
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: homeKeys.courtReservations(userId) });
     },
-    [token],
+    [queryClient, userId],
   );
 
   const syncMisPartidoFromMatchId = useCallback(
@@ -544,13 +531,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     lastSessionUserIdRef.current = null;
     refreshMatchesGen.current = 0;
     matchesLoadedAt.current = 0;
-    courtReservationsLoadedAt.current = 0;
     setHasInitialError(false);
-    // Los dominios en queries (perfil, stats, racha, torneos) los limpia el
-    // queryClient.clear() del logout.
+    // Los dominios en queries los limpia el queryClient.clear() del logout.
     setPartidos([]);
     setMisPartidos([]);
-    setMisReservasPista([]);
   }, [userId]);
 
   // -----------------------------------------------------------------
@@ -571,21 +555,17 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
     bootstrappedUserIds.add(userId);
     matchesLoadedAt.current = 0;
-    courtReservationsLoadedAt.current = 0;
     setHasInitialError(false);
     // Los dominios en queries se cargan solos (montados arriba).
     void refreshMatches({ force: true });
-    void refreshCourtReservations({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   const refreshFnsRef = useRef({
     refreshMatches,
-    refreshCourtReservations,
   });
   refreshFnsRef.current = {
     refreshMatches,
-    refreshCourtReservations,
   };
 
   // -----------------------------------------------------------------
@@ -604,7 +584,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         const fns = refreshFnsRef.current;
         // Los dominios en queries los revalida el focusManager de RQ.
         void fns.refreshMatches({ force: true });
-        void fns.refreshCourtReservations({ force: true });
       }
     });
     return () => sub.remove();
@@ -615,6 +594,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   // (stats y racha no marcan error a propósito: fallback a ceros / silencioso.)
   const profileInitialError = profileQuery.isError && profileQuery.data == null;
   const tournamentsInitialError = tournamentsQuery.isError && tournamentsQuery.data == null;
+  const reservationsInitialError = courtReservationsQuery.isError && courtReservationsQuery.data == null;
 
   const value = useMemo<HomeDataValue>(
     () => ({
@@ -640,7 +620,8 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       streak,
       streakLoading,
       refreshStreak,
-      hasInitialError: hasInitialError || profileInitialError || tournamentsInitialError,
+      hasInitialError:
+        hasInitialError || profileInitialError || tournamentsInitialError || reservationsInitialError,
       refreshAll,
     }),
     [
@@ -649,6 +630,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       refreshProfile,
       profileInitialError,
       tournamentsInitialError,
+      reservationsInitialError,
       partidos,
       misPartidos,
       matchesLoading,
