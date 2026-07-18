@@ -5,13 +5,9 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   type ReactNode,
 } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
-import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches';
-import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { useMyProfile } from '../queries/profile';
 import {
@@ -22,39 +18,33 @@ import {
   usePublicTournamentsCount,
   type StreakState,
 } from '../queries/home';
-import { homeKeys, profileKeys } from '../queries/keys';
+import {
+  clearMisPartidosRegistry,
+  useMisPartidos,
+  useMisPartidosActions,
+  usePartidosDiscovery,
+} from '../queries/matches';
+import { homeKeys, matchesKeys, profileKeys } from '../queries/keys';
 import { type HomeStats } from '../api/home';
 import { type CourtReservation } from '../api/bookings';
-import {
-  getMatchBooking,
-  getMatchListPhase,
-  isPartidoCancelled,
-} from '../domain/matchLifecycle';
-import { normalizeMatchEnriched } from '../api/normalizeMatch';
-import { defaultPartidosDiscoveryDateRange } from '../domain/partidosFilters';
+import { isPartidoCancelled } from '../domain/matchLifecycle';
 import {
   cachePlayerAvatar,
   enrichPartidoWithProfileAvatar,
   enrichPartidosWithProfileAvatar,
-  isPartidoOpenForDiscovery,
-  mergeMisPartidosFromServer,
-  removeMisPartidoFromList,
-  upsertMisPartidosList,
   type ProfileForPartidoEnrich,
 } from '../lib/partidoPlayerUtils';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
-import { findMisPartidoIdsToRemove } from '../lib/pruneMisPartidos';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
-/** Evita re-bootstrap si el provider se remonta por un parpadeo de sesión. */
-const bootstrappedUserIds = new Set<string>();
-/** Cooldown entre refrescos completos al volver del background. */
-const lastBackgroundRefreshAtByUser = new Map<string, number>();
-const BACKGROUND_REFRESH_COOLDOWN_MS = 30_000;
-
 /** Identidad estable para el estado vacío (evita re-renders por `?? []`). */
 const EMPTY_RESERVATIONS: CourtReservation[] = [];
+const EMPTY_PARTIDOS: PartidoItem[] = [];
+
+/** Throttle (3s) de las revalidaciones 'mine' sin force tras mutaciones. */
+const lastMineRefreshAtByUser = new Map<string, number>();
+const MINE_REFRESH_THROTTLE_MS = 3000;
 
 type HomeDataValue = {
   // Profile
@@ -125,8 +115,6 @@ const HomeDataContext = createContext<HomeDataValue | null>(null);
 export function HomeDataProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
   const lastSessionUserIdRef = useRef<string | null>(null);
-  const refreshMatchesGen = useRef(0);
-  const refreshMatchesInFlight = useRef<Promise<void> | null>(null);
   const token = session?.access_token ?? null;
   const userId = session?.user?.id ?? null;
 
@@ -138,25 +126,19 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const profile: MyPlayerProfile | null = profileQuery.data ?? null;
   const profileLoading = profileQuery.isLoading;
 
-  const [partidos, setPartidos] = useState<PartidoItem[]>([]);
-  const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
+  // Matches: fuente de verdad en React Query (queries/matches.ts, con el merge
+  // de upserts optimistas dentro del queryFn); fachada como el resto.
+  const misPartidosQuery = useMisPartidos();
+  const misPartidos: PartidoItem[] = misPartidosQuery.data ?? EMPTY_PARTIDOS;
+  const discoveryQuery = usePartidosDiscovery();
+  const partidos: PartidoItem[] = discoveryQuery.data ?? EMPTY_PARTIDOS;
+  const matchesLoading = misPartidosQuery.isLoading || discoveryQuery.isLoading;
+  const { upsertMisPartido, removeMisPartido } = useMisPartidosActions();
 
   // Reservas de pista: fuente de verdad en React Query, fachada como el resto.
   const courtReservationsQuery = useMyCourtReservations();
   const misReservasPista: CourtReservation[] = courtReservationsQuery.data ?? EMPTY_RESERVATIONS;
   const courtReservationsLoading = courtReservationsQuery.isLoading;
-  useEffect(() => {
-    misPartidosRef.current = misPartidos;
-  }, [misPartidos]);
-  const [matchesLoading, setMatchesLoading] = useState(false);
-  const matchesLoadedAt = useRef(0);
-  const refreshMatchesMineAt = useRef(0);
-  const profileForEnrichRef = useRef<ProfileForPartidoEnrich | null>(null);
-  /** IDs que /matches/mine devolvió alguna vez — si desaparecen, no reinsertar en merge. */
-  const everSyncedMisPartidoIdsRef = useRef(new Set<string>());
-  /** Upserts locales recientes (crear/unirse) antes de que /mine los confirme. */
-  const pendingLocalMisPartidoIdsRef = useRef(new Map<string, number>());
-  const misPartidosRef = useRef<PartidoItem[]>([]);
 
   // Torneos (count): fuente de verdad en React Query, fachada como el resto.
   const tournamentsQuery = usePublicTournamentsCount();
@@ -174,11 +156,16 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const streakLoading = streakQuery.isLoading;
 
   /**
-   * Indica si la PRIMERA carga de cualquiera de los datasets falló y aún no
-   * tenemos datos. Permite a HomeScreen mostrar un banner de error en lugar
-   * de cards vacías sin contexto. Cuando llegan datos válidos vuelve a false.
+   * Banner de error inicial, derivado por completo de las queries: isError sin
+   * datos = primera carga fallida; se limpia solo cuando llegan datos válidos.
+   * (stats y racha no marcan error a propósito: fallback a ceros / silencioso.)
    */
-  const [hasInitialError, setHasInitialError] = useState(false);
+  const hasInitialError =
+    (profileQuery.isError && profileQuery.data == null) ||
+    (misPartidosQuery.isError && misPartidosQuery.data == null) ||
+    (discoveryQuery.isError && discoveryQuery.data == null) ||
+    (courtReservationsQuery.isError && courtReservationsQuery.data == null) ||
+    (tournamentsQuery.isError && tournamentsQuery.data == null);
 
   // -----------------------------------------------------------------
   // Refrescos (uno por entidad). `force: true` siempre re-fetch.
@@ -193,67 +180,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     },
     [queryClient, userId],
   );
-
-  /** Solo datos de GET /matches/mine — nunca el listado público de /matches. */
-  const buildMisPartidosFromMatches = useCallback(
-    (mineSource: MatchEnriched[], playerProfile: ProfileForPartidoEnrich | null) => {
-      const mineRawBase = mineSource.filter((m) => {
-        const b = getMatchBooking(m);
-        return Boolean(b?.start_at && b?.end_at);
-      });
-      const mineVisible = mineRawBase.filter((m) => {
-        const b = getMatchBooking(m);
-        if (b?.deleted_at != null) return false;
-        if (String(m.status).toLowerCase() === 'cancelled') return false;
-        if (String(b?.status ?? '').toLowerCase() === 'cancelled') return false;
-        return true;
-      });
-      const mineRaw = [
-        ...mineVisible
-          .filter((m) => {
-            const b = getMatchBooking(m)!;
-            return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) !== 'past';
-          })
-          .sort(
-            (a, b) =>
-              new Date(getMatchBooking(a)!.start_at!).getTime() -
-              new Date(getMatchBooking(b)!.start_at!).getTime(),
-          ),
-        ...mineVisible
-          .filter((m) => {
-            const b = getMatchBooking(m)!;
-            return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) === 'past';
-          })
-          .sort(
-            (a, b) =>
-              new Date(getMatchBooking(b)!.start_at!).getTime() -
-              new Date(getMatchBooking(a)!.start_at!).getTime(),
-          ),
-      ];
-      const viewerPlayerId = playerProfile?.id ?? null;
-      const mapped = mineRaw
-        .map((m) => mapMatchToPartido(m, { viewerPlayerId }))
-        .filter((p): p is PartidoItem => p != null)
-        .filter((p) => !isPartidoCancelled(p));
-      return enrichPartidosWithProfileAvatar(mapped, playerProfile);
-    },
-    [],
-  );
-
-  const upsertMisPartido = useCallback((item: PartidoItem) => {
-    if (isPartidoCancelled(item)) {
-      pendingLocalMisPartidoIdsRef.current.delete(item.id);
-      setMisPartidos((prev) => removeMisPartidoFromList(prev, item.id));
-      return;
-    }
-    pendingLocalMisPartidoIdsRef.current.set(item.id, Date.now());
-    setMisPartidos((prev) => upsertMisPartidosList(prev, item));
-  }, []);
-
-  const removeMisPartido = useCallback((matchId: string) => {
-    pendingLocalMisPartidoIdsRef.current.delete(matchId);
-    setMisPartidos((prev) => removeMisPartidoFromList(prev, matchId));
-  }, []);
 
   const profileForEnrich = useMemo((): ProfileForPartidoEnrich | null => {
     if (!profile?.id) return null;
@@ -274,127 +200,51 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     profile?.eloRating,
   ]);
 
-  useEffect(() => {
-    profileForEnrichRef.current = profileForEnrich;
-  }, [profileForEnrich]);
-
   /** Si el perfil llega después de /matches/mine, rellena avatares sin esperar otro refetch. */
   useEffect(() => {
-    if (!profileForEnrich?.id?.trim()) return;
+    if (!profileForEnrich?.id?.trim() || !userId) return;
     cachePlayerAvatar(profileForEnrich.id, profileForEnrich.avatarUrl);
-    setMisPartidos((prev) => {
-      if (prev.length === 0) return prev;
-      const next = enrichPartidosWithProfileAvatar(prev, profileForEnrich);
-      const same = next.every((p, i) => p === prev[i]);
-      return same ? prev : next;
-    });
+    const key = matchesKeys.mine(userId);
+    const prev = queryClient.getQueryData<PartidoItem[]>(key);
+    if (!prev?.length) return;
+    const next = enrichPartidosWithProfileAvatar(prev, profileForEnrich);
+    const same = next.every((p, i) => p === prev[i]);
+    if (!same) queryClient.setQueryData(key, next);
   }, [
     profileForEnrich?.id,
     profileForEnrich?.avatarUrl,
     profileForEnrich?.firstName,
     profileForEnrich?.lastName,
     profileForEnrich?.username,
+    userId,
+    queryClient,
   ]);
 
+  // Fachada sobre las queries de matches. Con force invalida mine (y discovery
+  // si el scope es full). Sin force, solo la revalidación post-mutación de
+  // 'mine' sigue refetcheando (con throttle de 3s, paridad con el contexto
+  // viejo); el resto de frescura la gestionan las queries solas.
   const refreshMatches = useCallback(
     async ({ force = false, scope = 'full' }: { force?: boolean; scope?: 'full' | 'mine' } = {}) => {
-      if (!token) {
-        setMisPartidos([]);
-        setPartidos([]);
-        matchesLoadedAt.current = 0;
-        everSyncedMisPartidoIdsRef.current.clear();
-        pendingLocalMisPartidoIdsRef.current.clear();
-        return;
-      }
+      if (!userId) return;
       const mineOnly = scope === 'mine';
-      if (!force && !mineOnly && matchesLoadedAt.current > 0) return;
-      if (mineOnly && !force && matchesLoadedAt.current > 0) {
-        const lastMineRefresh = refreshMatchesMineAt.current;
-        if (Date.now() - lastMineRefresh < 3000) return;
+      if (!force) {
+        if (!mineOnly) return;
+        const lastAt = lastMineRefreshAtByUser.get(userId) ?? 0;
+        if (Date.now() - lastAt < MINE_REFRESH_THROTTLE_MS) return;
       }
-
-      const execute = async () => {
-        const gen = ++refreshMatchesGen.current;
-        const isFirst = matchesLoadedAt.current === 0;
-        if (isFirst) setMatchesLoading(true);
-
-        try {
-          const playerId = profileForEnrichRef.current?.id ?? profile?.id ?? null;
-          const enrichProfile = profileForEnrichRef.current;
-
-          const myMatches = await fetchMyMatches(token, { phase: 'all', limit: 100 });
-          if (gen !== refreshMatchesGen.current) return;
-
-          const mineNormalized = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
-          for (const m of mineNormalized) {
-            if (m.id) everSyncedMisPartidoIdsRef.current.add(m.id);
-          }
-          const misFromServer = buildMisPartidosFromMatches(mineNormalized, enrichProfile);
-          const serverIds = new Set(misFromServer.map((p) => p.id));
-          for (const id of serverIds) {
-            pendingLocalMisPartidoIdsRef.current.delete(id);
-          }
-
-          const prevMis = misPartidosRef.current;
-          const staleIds = await findMisPartidoIdsToRemove(prevMis, serverIds, token);
-          for (const id of staleIds) {
-            pendingLocalMisPartidoIdsRef.current.delete(id);
-          }
-          const prunedPrev = prevMis.filter((p) => !staleIds.has(p.id));
-
-          setMisPartidos(
-            mergeMisPartidosFromServer(
-              prunedPrev,
-              misFromServer,
-              enrichProfile,
-              everSyncedMisPartidoIdsRef.current,
-              pendingLocalMisPartidoIdsRef.current,
-            ),
-          );
-
-          if (!mineOnly) {
-            const { dateFrom, dateTo } = defaultPartidosDiscoveryDateRange();
-            const discoveryRows = await fetchMatches({
-              expand: true,
-              token,
-              activeOnly: true,
-              discovery: true,
-              visibility: 'public',
-              dateFrom,
-              dateTo,
-              joinableOnly: true,
-              limit: 80,
-            });
-            if (gen !== refreshMatchesGen.current) return;
-            const open = discoveryRows
-              .map((m) => mapMatchToPartido(m, { viewerPlayerId: playerId }))
-              .filter((p): p is PartidoItem => p != null)
-              .filter((p) => p.matchPhase !== 'past')
-              .filter((p) => isPartidoOpenForDiscovery(p, playerId));
-            setPartidos(open);
-          }
-
-          matchesLoadedAt.current = Date.now();
-          if (mineOnly) refreshMatchesMineAt.current = Date.now();
-        } catch {
-          if (isFirst) setHasInitialError(true);
-        } finally {
-          if (isFirst && gen === refreshMatchesGen.current) setMatchesLoading(false);
-        }
-      };
-
-      if (!refreshMatchesInFlight.current) {
-        const p = execute();
-        refreshMatchesInFlight.current = p;
-        void p.finally(() => {
-          if (refreshMatchesInFlight.current === p) {
-            refreshMatchesInFlight.current = null;
-          }
-        });
+      if (mineOnly) lastMineRefreshAtByUser.set(userId, Date.now());
+      const invalidations = [
+        queryClient.invalidateQueries({ queryKey: matchesKeys.mine(userId) }),
+      ];
+      if (!mineOnly) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: matchesKeys.discoveryAll(userId) }),
+        );
       }
-      await refreshMatchesInFlight.current;
+      await Promise.all(invalidations);
     },
-    [token, buildMisPartidosFromMatches, profile?.id],
+    [queryClient, userId],
   );
 
   const refreshCourtReservations = useCallback(
@@ -495,12 +345,9 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   /**
    * Re-fetch forzado de todos los datasets. CTA del banner "Reintentar"
    * cuando la primera carga falló. También útil para pull-to-refresh.
-   *
-   * Resetea `hasInitialError` optimistamente: si alguno vuelve a fallar
-   * sin datos previos, su `setHasInitialError(true)` lo vuelve a marcar.
+   * El banner se limpia solo: al llegar datos, los isError derivados caen.
    */
   const refreshAll = useCallback(async () => {
-    setHasInitialError(false);
     await Promise.all([
       refreshProfile({ force: true }),
       refreshMatches({ force: true }),
@@ -519,82 +366,19 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   ]);
 
   // -----------------------------------------------------------------
-  // Logout: solo cuando userId desaparece (no en refresh de JWT).
+  // Logout / cambio de usuario: limpiar el registro de upserts de matches.
+  // El caché de queries lo limpian queryClient.clear() (logout) y las keys
+  // por userId (cambio de usuario). El resto (bootstrap, background) lo
+  // gestiona React Query solo: fetch al montar + focusManager.
   // -----------------------------------------------------------------
   useEffect(() => {
-    if (userId) return;
-    const prevUser = lastSessionUserIdRef.current;
-    if (prevUser) {
-      bootstrappedUserIds.delete(prevUser);
-      lastBackgroundRefreshAtByUser.delete(prevUser);
+    if (userId) {
+      lastSessionUserIdRef.current = userId;
+      return;
     }
+    clearMisPartidosRegistry(lastSessionUserIdRef.current);
     lastSessionUserIdRef.current = null;
-    refreshMatchesGen.current = 0;
-    matchesLoadedAt.current = 0;
-    setHasInitialError(false);
-    // Los dominios en queries los limpia el queryClient.clear() del logout.
-    setPartidos([]);
-    setMisPartidos([]);
   }, [userId]);
-
-  // -----------------------------------------------------------------
-  // Bootstrap: una sola vez por userId cuando hay token.
-  // -----------------------------------------------------------------
-  useEffect(() => {
-    if (!token || !userId) return;
-
-    const switchedUser =
-      lastSessionUserIdRef.current != null && lastSessionUserIdRef.current !== userId;
-    if (switchedUser) {
-      bootstrappedUserIds.delete(lastSessionUserIdRef.current!);
-      matchesLoadedAt.current = 0;
-    }
-
-    lastSessionUserIdRef.current = userId;
-    if (bootstrappedUserIds.has(userId)) return;
-
-    bootstrappedUserIds.add(userId);
-    matchesLoadedAt.current = 0;
-    setHasInitialError(false);
-    // Los dominios en queries se cargan solos (montados arriba).
-    void refreshMatches({ force: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
-
-  const refreshFnsRef = useRef({
-    refreshMatches,
-  });
-  refreshFnsRef.current = {
-    refreshMatches,
-  };
-
-  // -----------------------------------------------------------------
-  // Al volver del background: refresh con cooldown (30s por usuario).
-  // -----------------------------------------------------------------
-  useEffect(() => {
-    let last: AppStateStatus = AppState.currentState;
-    const sub = AppState.addEventListener('change', (next) => {
-      const prev = last;
-      last = next;
-      const uid = lastSessionUserIdRef.current;
-      if (prev.match(/inactive|background/) && next === 'active' && token && uid) {
-        const lastAt = lastBackgroundRefreshAtByUser.get(uid) ?? 0;
-        if (Date.now() - lastAt < BACKGROUND_REFRESH_COOLDOWN_MS) return;
-        lastBackgroundRefreshAtByUser.set(uid, Date.now());
-        const fns = refreshFnsRef.current;
-        // Los dominios en queries los revalida el focusManager de RQ.
-        void fns.refreshMatches({ force: true });
-      }
-    });
-    return () => sub.remove();
-  }, [token]);
-
-  // La parte de los dominios en queries del banner de error inicial se deriva:
-  // isError sin datos = primera carga fallida; se limpia sola al llegar datos.
-  // (stats y racha no marcan error a propósito: fallback a ceros / silencioso.)
-  const profileInitialError = profileQuery.isError && profileQuery.data == null;
-  const tournamentsInitialError = tournamentsQuery.isError && tournamentsQuery.data == null;
-  const reservationsInitialError = courtReservationsQuery.isError && courtReservationsQuery.data == null;
 
   const value = useMemo<HomeDataValue>(
     () => ({
@@ -620,17 +404,13 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       streak,
       streakLoading,
       refreshStreak,
-      hasInitialError:
-        hasInitialError || profileInitialError || tournamentsInitialError || reservationsInitialError,
+      hasInitialError,
       refreshAll,
     }),
     [
       profile,
       profileLoading,
       refreshProfile,
-      profileInitialError,
-      tournamentsInitialError,
-      reservationsInitialError,
       partidos,
       misPartidos,
       matchesLoading,

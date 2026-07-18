@@ -46,3 +46,15 @@ export const homeKeys = {
   /** Racha de la lección diaria (current/longest/multiplier). */
   streak: (userId: string) => ['home', userId, 'streak'] as const,
 };
+
+/** Partidos (mine + discovery). Volátil y con upserts optimistas: NO persistir. */
+export const matchesKeys = {
+  all: (userId: string) => ['matches', userId] as const,
+  /** Carrusel "Mis partidos": server + upserts locales merged. */
+  mine: (userId: string) => ['matches', userId, 'mine'] as const,
+  /** Prefijo para invalidar discovery con cualquier viewer. */
+  discoveryAll: (userId: string) => ['matches', userId, 'discovery'] as const,
+  /** Listado público de discovery, mapeado con el viewer actual. */
+  discovery: (userId: string, viewerId: string) =>
+    ['matches', userId, 'discovery', viewerId] as const,
+};

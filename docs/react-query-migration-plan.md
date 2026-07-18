@@ -55,8 +55,21 @@ raíz `home` volátil fuera de PERSIST_ROOTS; fachada en el contexto igual que
 el perfil base).
 
 **Torneos (count): HECHO** (`usePublicTournamentsCount` en `queries/home.ts`,
-misma fachada). Quedan reservas y matches — en pausa hasta que aterrice el WIP
-en curso sobre el dominio de partidos, para no colisionar.
+misma fachada).
+
+**Reservas de pista: HECHO** (`useMyCourtReservations` en `queries/home.ts`).
+
+**Matches: HECHO** (`queries/matches.ts`: `useMisPartidos` con el merge de
+upserts optimistas dentro del queryFn —registro `everSynced`/`pendingLocal` por
+usuario—, `usePartidosDiscovery` con el viewer en la key + keepPreviousData, y
+`useMisPartidosActions` con cancelQueries + setQueryData; raíz `matches` NO se
+persiste). `refreshMatches({scope:'mine'})` sin force conserva el throttle de
+3s. Bootstrap y background-refresh del provider eliminados: lo hace RQ
+(mount + focusManager). `hasInitialError` ahora es 100% derivado.
+
+**El contexto entero es ya una fachada sin estado propio.** Último paso
+pendiente de esta fase: migrar los ~30 consumidores de `useHomeData` a los
+hooks y borrar HomeDataContext.
 
 - Orden: profile → stats/streak → tournaments/reservations → **matches al
   final** (es el dominio con upserts optimistas de `misPartidos`,
