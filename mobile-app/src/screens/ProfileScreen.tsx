@@ -38,6 +38,7 @@ import { PlayerPreferencesCard } from '../components/profile/PlayerPreferencesCa
 import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
 import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
 import { CoachSkeleton } from '../components/profile/CoachSkeleton';
+import { ProfileSkeleton } from '../components/profile/ProfileSkeleton';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
 import { type CoachAssessment } from '../api/coachAssessment';
 import {
@@ -374,14 +375,40 @@ export function ProfileScreen({
     ]);
   };
 
+  // Header fijo (compartido entre el skeleton de carga y la pantalla real).
+  const headerBar = (
+    <View style={styles.header}>
+      <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+      <View style={styles.headerContent}>
+        <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel={t('profile.back')}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </Pressable>
+        <Text style={styles.headerTitle}>{t('profile.title')}</Text>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.headerIconBtn}>
+            <Ionicons name="chatbubble-outline" size={20} color="#fff" />
+          </Pressable>
+          <Pressable style={styles.headerIconBtn}>
+            <Ionicons name="notifications-outline" size={20} color="#fff" />
+          </Pressable>
+          <Pressable style={styles.headerIconBtn}>
+            <Ionicons name="people-outline" size={20} color="#fff" />
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+
   // Gate del hero: espera perfil + personalización (bundle) para aparecer
   // COMPLETO (marco/título/insignias juntos), sin el salto de la personalización.
+  // Mientras tanto, skeleton con la forma del perfil (header real por encima).
   // El radar, peer, stats, evolución y social NO bloquean: entran con skeleton
   // debajo. En reentrada todo está cacheado → instantáneo.
   if ((profileLoading && !profile) || !customizationReady) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color="#F18F34" />
+      <View style={styles.container}>
+        {headerBar}
+        <ProfileSkeleton />
       </View>
     );
   }
@@ -409,26 +436,7 @@ export function ProfileScreen({
   return (
     <View style={styles.container}>
       {/* Header fijo (fuera del scroll) */}
-      <View style={styles.header}>
-        <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={styles.headerContent}>
-          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel={t('profile.back')}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </Pressable>
-          <Text style={styles.headerTitle}>{t('profile.title')}</Text>
-          <View style={styles.headerActions}>
-            <Pressable style={styles.headerIconBtn}>
-              <Ionicons name="chatbubble-outline" size={20} color="#fff" />
-            </Pressable>
-            <Pressable style={styles.headerIconBtn}>
-              <Ionicons name="notifications-outline" size={20} color="#fff" />
-            </Pressable>
-            <Pressable style={styles.headerIconBtn}>
-              <Ionicons name="people-outline" size={20} color="#fff" />
-            </Pressable>
-          </View>
-        </View>
-      </View>
+      {headerBar}
 
       <ScrollView
         ref={scrollRef}
