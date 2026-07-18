@@ -84,6 +84,8 @@ export interface PartidosTranslationKeys {
   detailDeclining: string;
   detailLeaveA11y: string;
   matchCanceled: string;
+  resultPending: string;
+  resultNone: string;
   evalTitle: string;
   evalThanks: string;
   evalBackHome: string;

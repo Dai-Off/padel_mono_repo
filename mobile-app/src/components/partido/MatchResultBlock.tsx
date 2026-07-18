@@ -14,6 +14,8 @@ type MatchResultBlockProps = {
   compact?: boolean;
 };
 
+const NO_RESULT_COLOR = '#9CA3AF';
+
 export function MatchResultBlock({ partido, compact = false }: MatchResultBlockProps) {
   const { t } = useTranslation();
   const outcome = classifyPartidoOutcome(partido);
@@ -30,13 +32,26 @@ export function MatchResultBlock({ partido, compact = false }: MatchResultBlockP
     );
   }
 
+  // Cerrado sin resultado: estado terminal, sin marcador aunque queden sets de una disputa.
+  const scoreSt = String(partido.score_status ?? partido.scoreStatus ?? '').toLowerCase();
+  if (scoreSt === 'no_result') {
+    return (
+      <View style={[styles.row, compact && styles.rowCompact]}>
+        <Ionicons name="remove-circle-outline" size={compact ? 14 : 16} color={NO_RESULT_COLOR} />
+        <Text style={[styles.label, compact && styles.labelCompact, { color: NO_RESULT_COLOR }]}>
+          {t('partidos.resultNone')}
+        </Text>
+      </View>
+    );
+  }
+
   if (!hasScore && outcome === 'incomplete') {
     if (partido.matchPhase !== 'past') return null;
     return (
       <View style={[styles.row, compact && styles.rowCompact]}>
         <Ionicons name="help-circle-outline" size={compact ? 14 : 16} color={color} />
         <Text style={[styles.label, compact && styles.labelCompact, { color }]}>
-          Resultado pendiente
+          {t('partidos.resultPending')}
         </Text>
       </View>
     );

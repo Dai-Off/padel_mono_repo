@@ -60,6 +60,7 @@ import {
 } from '../lib/partidoPlayerUtils';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
+import { isPostMatchFlowOpen } from '../domain/matchLifecycle';
 import { rejectMatchmakingProposal, leaveMatchmaking } from '../api/matchmaking';
 import { buildLeaveMatchAlertMessage, buildLeaveMatchDoneMessage } from '../utils/matchLeaveAlert';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
@@ -929,7 +930,7 @@ export function PartidoDetailScreen({
     isInMatch &&
     !pendingMmPay &&
     canRecordScore &&
-    (partido.score_status !== 'confirmed' || !partido.hasMyFeedback);
+    isPostMatchFlowOpen(partido);
   const showLeaveBar =
     playerContextResolved &&
     isInMatch &&
