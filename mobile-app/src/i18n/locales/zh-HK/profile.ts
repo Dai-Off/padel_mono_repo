@@ -14,6 +14,7 @@ export const profile: ProfileTranslationKeys = {
   coachImprove: '提升',
   coachGoals: '目標',
   coachMatches: '球局',
+  coachWinStreak: '連勝',
   coachTabPlan: '計劃',
   coachTodaySummary: '今日摘要',
   coachAnalysisTitle: '你目前水平分析',

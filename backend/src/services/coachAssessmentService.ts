@@ -19,6 +19,7 @@ export interface CoachAssessmentResult {
   recommendation: string;
   stats?: {
     matchCount: number;
+    winStreak: number;
     matchesThisWeek: number;
     matchesThisMonth: number;
     completedObjectives: number;
@@ -84,6 +85,28 @@ async function countCompletedMatchesSince(
   const recentBookingIds = new Set(bookings.map((b) => String((b as { id: string }).id)));
   return matches.filter((m) => recentBookingIds.has(String((m as { booking_id?: string }).booking_id ?? '')))
     .length;
+}
+
+// Same criteria as GET /players/:id/stats: consecutive 'win' results from the
+// most recent decided match backwards (draws excluded), capped at 50 lookback.
+async function countCurrentWinStreak(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+): Promise<number> {
+  const { data: rows, error } = await supabase
+    .from('match_players')
+    .select('result')
+    .eq('player_id', playerId)
+    .in('result', ['win', 'loss'])
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error || !rows?.length) return 0;
+  let streak = 0;
+  for (const row of rows) {
+    if ((row as { result: string }).result !== 'win') break;
+    streak++;
+  }
+  return streak;
 }
 
 async function countTournamentPlayed(
@@ -269,6 +292,7 @@ async function getPlayerStats(playerId: string) {
     matchesThisMonth,
     tournamentPlayedCount,
     coursesCompletedCount,
+    winStreak,
   ] = await Promise.all([
     supabase.from('match_players').select('*', { count: 'exact', head: true }).eq('player_id', playerId),
     supabase.from('learning_sessions').select('*', { count: 'exact', head: true }).eq('player_id', playerId),
@@ -291,21 +315,25 @@ async function getPlayerStats(playerId: string) {
     countCompletedMatchesSince(supabase, playerId, monthStart),
     countTournamentPlayed(supabase, playerId, now),
     countCoursesWithProgress(supabase, playerId),
+    countCurrentWinStreak(supabase, playerId),
   ]);
 
   const improvementPercentage = 0;
+  const totalObjectives = 10;
 
   return {
     matchCount: matchCountRes.count || 0,
+    winStreak,
     matchesThisWeek,
     matchesThisMonth,
-    completedObjectives: completedObjectivesRes.count || 0,
+    // Lifetime lessons can exceed the fixed target; the card shows x/total.
+    completedObjectives: Math.min(completedObjectivesRes.count || 0, totalObjectives),
     dailyLessonsThisWeek: dailyLessonsThisWeekRes.count || 0,
     tournamentEnrolledCount: tournamentEnrolledRes.count || 0,
     tournamentPlayedCount,
     classesAttendedCount: classesAttendedRes.count || 0,
     coursesCompletedCount,
-    totalObjectives: 10,
+    totalObjectives,
     improvementPercentage,
   };
 }
