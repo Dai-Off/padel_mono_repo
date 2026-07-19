@@ -36,6 +36,14 @@ export const LESSON_SIZE = 5;
 // catálogo crece mucho o quieres más densidad interactiva, sube a 2.
 const TARGET_PUZZLES_PER_LESSON = 1;
 
+// Suelo (no techo) de preguntas NO-puzzle con vídeo reproducible por lección.
+// A diferencia del puzzle (target + cap), aquí solo garantizamos un mínimo: si
+// el relleno natural trae más preguntas con vídeo, entran igual. El banco está
+// muy diluido (la mayoría son preguntas de texto sin vídeo), así que sin este
+// suelo las lecciones salían casi siempre sin vídeo. El puzzle no cuenta para
+// este mínimo aunque traiga su propio vídeo de intro (decisión de producto).
+const MIN_VIDEOS_PER_LESSON = 2;
+
 function daysBetween(a: Date, b: Date): number {
   return Math.max(0, Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24)));
 }
@@ -92,6 +100,14 @@ function shuffleInPlace<T>(arr: T[]): void {
   }
 }
 
+// Vídeo reproducible en el mobile = has_video Y video_url. Exigimos ambos
+// porque el cliente solo reproduce cuando existen los dos; forzar un slot
+// mirando solo has_video gastaría el hueco sin llegar a mostrar vídeo (registros
+// legacy con has_video=true y video_url=null existen en el banco).
+function hasPlayableVideo(q: QuestionRow): boolean {
+  return q.has_video === true && !!q.video_url;
+}
+
 function pickFromScored(scored: ScoredQuestion[]): QuestionRow[] {
   const selected: QuestionRow[] = [];
   const used = new Set<string>();
@@ -118,6 +134,24 @@ function pickFromScored(scored: ScoredQuestion[]): QuestionRow[] {
     selected.push(bestPuzzle.question);
     used.add(bestPuzzle.question.id);
     areas.add(bestPuzzle.question.area);
+  }
+
+  // Garantizar un suelo de MIN_VIDEOS_PER_LESSON preguntas NO-puzzle con vídeo
+  // reproducible. Coge las mejores por weight (el pool viene ordenado), así que
+  // rotan entre días igual que el resto. Si un test_classic del primer slot ya
+  // trae vídeo cuenta hacia el mínimo. `break` si no hay suficientes: degradar
+  // sin bloquear — el relleno completará hasta LESSON_SIZE igualmente.
+  while (
+    selected.filter((q) => q.type !== 'puzzle' && hasPlayableVideo(q)).length < MIN_VIDEOS_PER_LESSON &&
+    selected.length < LESSON_SIZE
+  ) {
+    const bestVideo = scored.find(
+      (s) => !used.has(s.question.id) && s.question.type !== 'puzzle' && hasPlayableVideo(s.question),
+    );
+    if (!bestVideo) break;
+    selected.push(bestVideo.question);
+    used.add(bestVideo.question.id);
+    areas.add(bestVideo.question.area);
   }
 
   while (selected.length < LESSON_SIZE) {
