@@ -86,6 +86,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         priceMax: '' as string,
         timeFrom: '' as string,
         timeTo: '' as string,
+        withoutPlayers: false,
         playStatus: 'upcoming' as '' | 'upcoming' | 'played' | 'all',
     });
 
@@ -298,7 +299,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
 
     const activeFilterCount = Object.entries(filters).filter(([key, value]) => {
         if (key === 'playStatus' && value === 'upcoming') return false;
-        return value !== '';
+        return value !== '' && value !== false;
     }).length;
 
     const courtNames = [...new Set(matches.map(m => {
@@ -350,6 +351,14 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
             if (startTime > filters.timeTo) return false;
         }
 
+        if (filters.withoutPlayers) {
+            const hasPlayers = (m.match_players || []).some((mp: any) => {
+                const player = Array.isArray(mp?.players) ? mp.players[0] : mp?.players;
+                return Boolean(player?.id || player?.first_name || player?.last_name);
+            });
+            if (hasPlayers) return false;
+        }
+
         if (filters.playStatus === 'upcoming') {
             const endMs = new Date(booking.end_at).getTime();
             if (endMs <= Date.now()) return false;
@@ -372,6 +381,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         priceMax: '',
         timeFrom: '',
         timeTo: '',
+        withoutPlayers: false,
         playStatus: 'upcoming',
     });
 
@@ -663,6 +673,18 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                             <option value="played">Jugados</option>
                                             <option value="all">Todos</option>
                                         </select>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Jugadores</label>
+                                        <label className="flex h-[26px] items-center gap-2 px-2 text-xs border border-gray-200 rounded-lg bg-white cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={filters.withoutPlayers}
+                                                onChange={e => setFilters(f => ({ ...f, withoutPlayers: e.target.checked }))}
+                                                className="accent-[#006A6A]"
+                                            />
+                                            Sin jugadores
+                                        </label>
                                     </div>
                                     <div className="flex flex-col gap-0.5">
                                         <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Cliente</label>
