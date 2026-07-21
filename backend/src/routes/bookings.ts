@@ -497,7 +497,7 @@ const COURT_MAINTENANCE_PREFIX = '__COURT_MAINTENANCE__';
  *               reason:
  *                 type: string
  *                 description: Etiqueta libre que se muestra en la grilla
- *                 example: Cumpleaños Marcos
+ *                 example: Cumpleaños
  *               displace_incomplete:
  *                 type: boolean
  *                 description: Si true, cancela y reembolsa turnos incompletos en conflicto antes de crear

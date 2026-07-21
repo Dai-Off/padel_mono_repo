@@ -91,7 +91,7 @@ export const BulkSlotMaintenanceModal: React.FC<Props> = ({
             icon: <Sparkles className="w-5 h-5 text-[#0f766e]" />,
             iconBg: 'bg-teal-50',
             bookingType: customType,
-            reasonPlaceholder: 'Ej. Escuela infantil, cumpleaños Marcos, fiesta...',
+            reasonPlaceholder: 'Ej. Escuela infantil, cumpleaños, fiesta...',
             defaultReason: customTypeLabel,
             intro: 'Se reservarán los horarios seleccionados con el tipo elegido (escuela, fiestas, cumpleaños...). Las reservas existentes en esos slots no se cancelan ni acortan automáticamente.',
             confirmLabel: 'Reservar selección',
