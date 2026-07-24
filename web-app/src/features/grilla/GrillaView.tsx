@@ -138,6 +138,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [gridReservations, setGridReservations] = useState<Reservation[]>([]);
     const [listReservations, setListReservations] = useState<Reservation[]>([]);
     const [loading, setLoading] = useState(true);
+    const [bootstrapped, setBootstrapped] = useState(false);
     const [authResolved, setAuthResolved] = useState(false);
     const [isCreatingCourt, setIsCreatingCourt] = useState(false);
     const [clubId, setClubId] = useState<string | null>(null);
@@ -346,7 +347,10 @@ const useClubData = (dateOrStr: Date | string) => {
         const requestSequence = ++fetchSequenceRef.current;
         const requestedDate = dateStr;
         if (!clubId) {
-            if (requestSequence === fetchSequenceRef.current) setLoading(false);
+            if (requestSequence === fetchSequenceRef.current) {
+                setLoading(false);
+                setBootstrapped(true);
+            }
             return;
         }
         setLoading(true);
@@ -364,7 +368,10 @@ const useClubData = (dateOrStr: Date | string) => {
                 console.error('Error fetching club data:', err);
             }
         } finally {
-            if (requestSequence === fetchSequenceRef.current) setLoading(false);
+            if (requestSequence === fetchSequenceRef.current) {
+                setLoading(false);
+                setBootstrapped(true);
+            }
         }
     }, [authResolved, clubId, dateStr, fetchCourts, fetchBookingsForDate, prefetchWindow]);
 
@@ -373,11 +380,17 @@ const useClubData = (dateOrStr: Date | string) => {
         fetchDataRef.current = fetchData;
     }, [fetchData]);
 
-    // Force-refresh: invalidate cache for current date and re-fetch
+    // Force-refresh: invalidate cache and re-fetch (current day or the requested date if visible)
     const refresh = useCallback(async (opts?: { date?: string }) => {
         const d = opts?.date ?? dateStr;
         delete bookingsCache[d];
-        if (d === dateStr) await fetchData();
+        // Always drop neighboring cache noise for the same club day mutations
+        if (d === dateStr) {
+            await fetchData();
+            return;
+        }
+        // Booking created/updated on another day: ensure that day is stale so next visit refetches
+        delete bookingsCache[d];
     }, [dateStr, fetchData]);
 
     useEffect(() => {
@@ -626,6 +639,7 @@ const useClubData = (dateOrStr: Date | string) => {
         setGridReservations,
         setListReservations,
         loading,
+        bootstrapped,
         authResolved,
         isCreatingCourt,
         refresh,
@@ -859,6 +873,7 @@ function GrillaViewInner() {
     setGridReservations,
     setListReservations,
     loading,
+    bootstrapped,
     authResolved,
     isCreatingCourt,
     refresh,
@@ -2534,7 +2549,7 @@ function resolveManualBookingTotalCents(
     navigate('/login', { replace: true });
   };
 
-  if (loading || !authResolved) return <PageSpinner />;
+  if (!authResolved || !bootstrapped) return <PageSpinner />;
 
   return (
     <GridBoundsProvider weeklySchedule={weeklySchedule} dateStr={selectedDateKey} slotDurationMin={slotDurationMin}>
@@ -2718,7 +2733,14 @@ function resolveManualBookingTotalCents(
             modifiers={[restrictToWindowEdges]}
           >
             <div className="flex-1 bg-white overflow-hidden flex flex-col relative min-h-0 min-w-0 grilla-flex-shrink">
-
+              {loading && (
+                <div className="absolute inset-0 z-40 flex items-center justify-center bg-white/75 backdrop-blur-[1px]">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-8 h-8 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs font-semibold text-gray-500">Cargando grilla…</span>
+                  </div>
+                </div>
+              )}
 
               {/* Scrollable area */}
               <div className={clsx(

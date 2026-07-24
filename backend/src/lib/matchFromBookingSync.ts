@@ -59,6 +59,7 @@ export type OpenMatchSyncOpts = {
 /**
  * Reservas `open_match` creadas solo con POST /bookings necesitan fila en `matches` + jugadores para la app.
  * Idempotente: si ya existe `matches` para el booking, solo sincroniza `match_players`.
+ * Permite partidos publicados por el club sin organizador (0 jugadores) para compartir link / unirse desde la app.
  */
 export async function ensureOpenMatchRecordForBooking(
   supabase: SupabaseClient,
@@ -77,7 +78,7 @@ export async function ensureOpenMatchRecordForBooking(
     organizer_player_id?: string | null;
     total_price_cents?: number | null;
   };
-  if (row.reservation_type !== 'open_match' || !row.organizer_player_id) return;
+  if (row.reservation_type !== 'open_match') return;
 
   const { data: existing } = await supabase.from('matches').select('id').eq('booking_id', bookingId).maybeSingle();
   let matchId = (existing as { id?: string } | null)?.id;
@@ -112,13 +113,15 @@ export async function ensureOpenMatchRecordForBooking(
 
   if (!matchId) return;
 
-  const totalCents = Number(row.total_price_cents ?? 0);
-  const shareCents = Math.ceil(totalCents / 4);
-  await supabase
-    .from('booking_participants')
-    .update({ share_amount_cents: shareCents })
-    .eq('booking_id', bookingId)
-    .eq('player_id', row.organizer_player_id);
+  if (row.organizer_player_id) {
+    const totalCents = Number(row.total_price_cents ?? 0);
+    const shareCents = Math.ceil(totalCents / 4);
+    await supabase
+      .from('booking_participants')
+      .update({ share_amount_cents: shareCents })
+      .eq('booking_id', bookingId)
+      .eq('player_id', row.organizer_player_id);
+  }
 
   await syncMatchPlayersFromBooking(supabase, matchId, bookingId);
 }

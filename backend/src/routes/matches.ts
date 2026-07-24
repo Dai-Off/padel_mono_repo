@@ -945,6 +945,15 @@ router.post('/:id/admin-add-player', async (req: Request, res: Response) => {
     }
 
     const shareCents = Math.ceil((booking.total_price_cents || 0) / 4);
+    const becomesOrganizer = !booking.organizer_player_id;
+
+    if (becomesOrganizer) {
+      const { error: orgErr } = await supabase
+        .from('bookings')
+        .update({ organizer_player_id: player_id, updated_at: new Date().toISOString() })
+        .eq('id', booking_id);
+      if (orgErr) return res.status(500).json({ ok: false, error: orgErr.message });
+    }
 
     if (!realMatchId.startsWith('mock-match-')) {
       const { error: errMP } = await supabase.from('match_players').insert([
@@ -965,7 +974,12 @@ router.post('/:id/admin-add-player', async (req: Request, res: Response) => {
     }
 
     const { error: errBP } = await supabase.from('booking_participants').insert([
-      { booking_id, player_id, role: 'guest', share_amount_cents: shareCents },
+      {
+        booking_id,
+        player_id,
+        role: becomesOrganizer ? 'organizer' : 'guest',
+        share_amount_cents: shareCents,
+      },
     ]);
     if (errBP) {
       if (errBP.code === '23505') {
