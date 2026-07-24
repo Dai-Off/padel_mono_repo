@@ -24,6 +24,9 @@ interface CreateMatchModalProps {
     isOpen: boolean;
     onClose: () => void;
     initialDate?: string;
+    initialCourtId?: string;
+    initialStartHour?: string;
+    initialStartMinute?: string;
     onCreated?: (bookingDate: string) => void;
 }
 
@@ -32,6 +35,9 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     isOpen,
     onClose,
     initialDate,
+    initialCourtId,
+    initialStartHour,
+    initialStartMinute,
     onCreated,
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
@@ -184,8 +190,13 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     const effectiveBookingType = 'open_match';
 
     useEffect(() => {
-        if (isOpen && initialDate) setBookingDate(initialDate);
-    }, [isOpen, initialDate]);
+        if (!isOpen) return;
+        if (initialDate) setBookingDate(initialDate);
+        if (initialStartHour) setStartHour(initialStartHour.padStart(2, '0'));
+        if (initialStartMinute) setStartMinute(initialStartMinute.padStart(2, '0'));
+        if (initialCourtId) setSelectedCourtId(initialCourtId);
+        setDuration(90);
+    }, [isOpen, initialDate, initialStartHour, initialStartMinute, initialCourtId]);
 
     const totalPriceCents = useMemo(() => {
         const pricePerHour = pricesByType[effectiveBookingType]?.price_per_hour_cents || pricesByType['standard']?.price_per_hour_cents || 0;

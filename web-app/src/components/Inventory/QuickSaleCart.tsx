@@ -6,6 +6,7 @@ import { inventoryService, type CartSaleDetail } from '../../services/inventory'
 import { playerService } from '../../services/player';
 import { apiFetchWithAuth } from '../../services/api';
 import { browserIanaTimeZone } from '../../lib/browserTimeZone';
+import { useCashSessionActive } from '../../hooks/useCashSessionActive';
 import type { Player } from '../../types/api';
 import type { InventoryCategory, InventoryItem } from '../../types/inventory';
 
@@ -93,6 +94,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const searchInputRef = useRef<HTMLInputElement | null>(null);
+    const { loading: cashSessionLoading, active: cashSessionActive, refresh: refreshCashSession } = useCashSessionActive(clubId);
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [categories, setCategories] = useState<InventoryCategory[]>([]);
     const [loading, setLoading] = useState(false);
@@ -624,10 +626,25 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     };
 
     const hasCartContent = cartLines.length > 0 || cartBookingLines.length > 0;
-    const canSubmitSale = Boolean(clubId && selectedPlayer && hasCartContent && !submitting);
+    const canSubmitSale = Boolean(
+        clubId && selectedPlayer && hasCartContent && !submitting && cashSessionActive && !cashSessionLoading,
+    );
+
+    const requireOpenCash = useCallback(() => {
+        toast.error('Debes abrir la caja antes de usar el carrito', {
+            action: {
+                label: 'Abrir caja',
+                onClick: () => navigate('/cierreCaja'),
+            },
+        });
+    }, [navigate]);
 
     const submitSale = async () => {
         if (!clubId || !hasCartContent) return;
+        if (!cashSessionActive) {
+            requireOpenCash();
+            return;
+        }
         if (!selectedPlayer) {
             toast.error('Selecciona un jugador/cliente');
             return;
@@ -753,15 +770,47 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
 
     return (
         <>
-        <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+        {!cashSessionLoading && !cashSessionActive && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <div>
+                    <p className="text-sm font-bold text-amber-900">Caja cerrada</p>
+                    <p className="text-xs text-amber-800">
+                        Debes abrir la caja antes de cargar turnos o productos en el carrito.
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => void refreshCashSession()}
+                        className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-900 hover:bg-amber-100"
+                    >
+                        Reintentar
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => navigate('/cierreCaja')}
+                        className="rounded-xl bg-[#0B5B7A] px-3 py-2 text-xs font-black text-white hover:opacity-90"
+                    >
+                        Abrir caja
+                    </button>
+                </div>
+            </div>
+        )}
+        <div className={`grid gap-4 lg:grid-cols-[1fr_360px] ${!cashSessionActive && !cashSessionLoading ? 'pointer-events-none opacity-60' : ''}`}>
             <section className="rounded-3xl border border-gray-200 bg-gray-100 p-4">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
                     {topActions.map((action) => (
                         <button
                             key={action.label}
                             type="button"
-                            onClick={action.onClick}
-                            disabled={action.disabled === true}
+                            onClick={() => {
+                                if (!cashSessionActive && !cashSessionLoading) {
+                                    requireOpenCash();
+                                    return;
+                                }
+                                action.onClick();
+                            }}
+                            disabled={action.disabled === true || (!cashSessionActive && !cashSessionLoading)}
                             className={`${action.tone === 'red' ? 'bg-[#E31E24]' : 'bg-[#0B5B7A]'} rounded-xl px-3 py-3 text-xs font-black text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50`}
                         >
                             {action.label}
