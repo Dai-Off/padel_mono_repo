@@ -76,11 +76,14 @@ const APP_CONTENT_STYLE = { backgroundColor: '#0F0F0F' } as const;
  * esta está encima (native-stack v7 no la detacha en modales transparentes),
  * así al volver se revela sin flash negro ni re-montaje. Las pantallas tienen
  * fondo opaco propio (RouteShell), no se transparentan en uso.
+ *
+ * `animation: 'none'`: la entrada instantánea cubre el Home al momento, así el
+ * reset de la cascada (esconder los bloques en el blur) queda oculto y no se ve
+ * el parpadeo que sí producía el fade al dejar el Home visible durante 220 ms.
  */
 const REVEAL_HOME_OPTIONS: NativeStackNavigationOptions = {
   presentation: 'transparentModal',
-  animation: 'fade',
-  animationDuration: 220,
+  animation: 'none',
 };
 
 /**
