@@ -20,10 +20,11 @@ export type HomeMission = {
 
 type Props = {
   missions?: HomeMission[];
+  onViewAll?: () => void;
 };
 
 /** Sin misiones: solo cabecera + mensaje vacío (sin tarjeta placeholder). */
-export function MissionsHomeSection({ missions = [] }: Props) {
+export function MissionsHomeSection({ missions = [], onViewAll }: Props) {
   const { t } = useTranslation();
   const hasMissions = missions.length > 0;
 
@@ -52,9 +53,11 @@ export function MissionsHomeSection({ missions = [] }: Props) {
           <Ionicons name="radio-button-on" size={22} color={ACCENT} />
           <Text style={styles.h2}>{t('home.missions.title')}</Text>
         </View>
-        <Pressable>
-          <Text style={styles.link}>{t('home.missions.viewAll')}</Text>
-        </Pressable>
+        {onViewAll ? (
+          <Pressable onPress={onViewAll}>
+            <Text style={styles.link}>{t('home.missions.viewAll')}</Text>
+          </Pressable>
+        ) : null}
       </View>
       <ScrollView
         horizontal

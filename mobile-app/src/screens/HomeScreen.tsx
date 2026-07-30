@@ -75,7 +75,6 @@ function mapSeasonMissionToHome(
     progress: `${m.current}/${m.target}`,
     pct: `${pctNum}%`,
     pctNum,
-    highlight: m.done,
   };
 }
 
@@ -466,7 +465,15 @@ export function HomeScreen({
 
   const homeMissionsFromPass = useMemo(() => {
     const list = misionesQuery.data?.missions ?? [];
-    return list.filter((m) => m.period === 'daily').slice(0, 8).map((m) => mapSeasonMissionToHome(m, t));
+    // Solo misiones "activas": las completadas ya no son accionables, se ven en el pase.
+    // Todos los periodos entran; se ordenan por progreso (en curso antes que sin empezar)
+    // y se limita a un teaser corto. Se destaca la más cerca de completarse.
+    const active = list
+      .filter((m) => !m.done && m.current < m.target)
+      .map((m) => mapSeasonMissionToHome(m, t))
+      .sort((a, b) => b.pctNum - a.pctNum)
+      .slice(0, 4);
+    return active.map((m, i) => (i === 0 && m.pctNum > 0 ? { ...m, highlight: true } : m));
   }, [misionesQuery.data?.missions, t]);
 
   const seasonPassCardProps =
@@ -667,7 +674,7 @@ export function HomeScreen({
           />
         </InicioEnterBlock>
         <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 5}>
-          <MissionsHomeSection missions={homeMissionsFromPass} />
+          <MissionsHomeSection missions={homeMissionsFromPass} onViewAll={onOpenSeasonPass} />
         </InicioEnterBlock>
         <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 6}>
           <EnDirectoSection
