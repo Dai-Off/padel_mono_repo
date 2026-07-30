@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PageSpinner } from '../Layout/PageSpinner';
+import { notifyCashSessionChanged } from '../../hooks/useCashOpeningPending';
 import { clubStaffService } from '../../services/clubStaff';
 import { HttpError } from '../../services/api';
 import {
@@ -27,13 +28,13 @@ import {
   SectionTabs,
   emptyBreakdown,
   denominations,
-  localDateYmd,
   staffRoleAllowsCashLedger,
   type CashBreakdown,
   type CashLedgerRecord,
   type CashSection,
   type CashTimelineEntry,
 } from './cashRegisterUi';
+import { localDateYmd } from '../../lib/localDate';
 import { EditCartSaleModal } from './EditCartSaleModal';
 
 function mapSavedToLocal(r: CashClosingSavedRecord): CashLedgerRecord {
@@ -61,6 +62,7 @@ export function ClubCashClosingTab({
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [section, setSection] = useState<CashSection>('listado');
   const [staff, setStaff] = useState<ClubStaffMember[]>([]);
   const [observations, setObservations] = useState('');
@@ -209,6 +211,16 @@ export function ClubCashClosingTab({
     if (!showOpeningTab && section === 'apertura') setSection('listado');
   }, [showOpeningTab, section]);
 
+  // Deep link from the pending-opening reminder: /cierreCaja?section=apertura
+  const requestedSection = searchParams.get('section');
+  useEffect(() => {
+    if (requestedSection !== 'apertura' || loadingExpected) return;
+    if (showOpeningTab) setSection('apertura');
+    const next = new URLSearchParams(searchParams);
+    next.delete('section');
+    setSearchParams(next, { replace: true });
+  }, [requestedSection, loadingExpected, showOpeningTab, searchParams, setSearchParams]);
+
   useEffect(() => {
     if (!needsNewOpeningAfterClosing) return;
     setOpeningCashTotal('');
@@ -326,6 +338,7 @@ export function ClubCashClosingTab({
       );
       setHistoryRecords((prev) => [mapSavedToLocal(saved), ...prev]);
       applyExpected(refreshedExpected);
+      notifyCashSessionChanged();
       resetCountForm();
       toast.success(recordKind === 'arqueo' ? t('cash_arqueo_success') : t('cash_cierre_success'));
       setSection('listado');
@@ -358,6 +371,7 @@ export function ClubCashClosingTab({
       setOpeningRecord(saved);
       const expected = await paymentsService.getCashClosingExpected(clubId, saved.for_date, operativeTimezone);
       applyExpected(expected);
+      notifyCashSessionChanged();
       setOpeningCashTotal('');
       setOpeningNotes('');
       toast.success(t('cash_opening_success'));

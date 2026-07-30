@@ -21,6 +21,7 @@ import type {
   CashMovementType,
 } from '../../services/payments';
 import type { CashRecordKind } from '../../services/payments';
+import { localDateYmd } from '../../lib/localDate';
 
 export type CashSection = 'listado' | 'apertura' | 'arqueo' | 'cierre';
 
@@ -68,13 +69,6 @@ export const denominations: { key: keyof CashBreakdown; label: string; value: nu
   { key: 'coins_020', label: '0,20€', value: 0.2 }, { key: 'coins_010', label: '0,10€', value: 0.1 }, { key: 'coins_005', label: '0,05€', value: 0.05 },
   { key: 'coins_002', label: '0,02€', value: 0.02 }, { key: 'coins_001', label: '0,01€', value: 0.01 },
 ];
-
-export function localDateYmd(d = new Date()): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 export function shiftDateYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -790,7 +784,8 @@ const toneBandClass: Record<CashTimelineEntry['tone'], string> = {
   neutral: 'bg-white text-[#1A1A1A]',
 };
 
-function shortRef(id: string | null | undefined, prefix = ''): string {
+/** Ref. corta de una reserva/venta: mismos 7 caracteres que devuelve el backend. */
+export function shortRef(id: string | null | undefined, prefix = ''): string {
   const raw = String(id ?? '').replace(/-/g, '');
   const body = raw.slice(-7).toUpperCase();
   return body ? `${prefix}${body}` : '—';

@@ -13,7 +13,6 @@ import {
   Calendar,
   Banknote,
   Wallet,
-  HelpCircle,
   X,
   Trash2,
   AlertTriangle,
@@ -25,7 +24,8 @@ import { inventoryService } from '../../services/inventory';
 import { EditCartSaleModal } from '../CashClosing/EditCartSaleModal';
 import { useTranslation } from 'react-i18next';
 import { PageSpinner } from '../Layout/PageSpinner';
-import { localDateYmd, shiftDateYmd } from '../CashClosing/cashRegisterUi';
+import { shiftDateYmd, shortRef } from '../CashClosing/cashRegisterUi';
+import { localDateYmd } from '../../lib/localDate';
 
 type PaymentMethod = 'cash' | 'card' | 'wallet' | 'app';
 type PaymentStatus = 'completed' | 'pending' | 'failed' | 'refunded' | 'cancelled_admin';
@@ -41,7 +41,7 @@ type Payment = {
   concept: string;
   method: PaymentMethod;
   source: 'booking' | 'store';
-  amount: number;
+  amountCents: number;
   status: PaymentStatus;
   courtName?: string;
   bookingId?: string | null;
@@ -49,6 +49,18 @@ type Payment = {
   saleId?: string | null;
   participants: PaymentParticipant[];
 };
+
+const eurFormatter = new Intl.NumberFormat('es-ES', {
+  style: 'currency',
+  currency: 'EUR',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** Importes siempre con céntimos: se formatea desde cents, nunca desde euros redondeados. */
+function formatEur(cents: number): string {
+  return eurFormatter.format((cents ?? 0) / 100);
+}
 
 function resolveSaleId(tx: PaymentTransaction): string | null {
   if (tx.sale_id) return tx.sale_id;
@@ -75,32 +87,6 @@ function paymentMethodBadgeClass(method: PaymentMethod): string {
   if (method === 'card') return 'bg-red-50 text-[#E31E24] border-red-100';
   if (method === 'wallet') return 'bg-blue-50 text-blue-700 border-blue-100';
   return 'bg-indigo-50 text-indigo-700 border-indigo-100';
-}
-
-function participantName(p: PaymentParticipant): string {
-  const full = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
-  return full || p.email || 'Jugador';
-}
-
-function methodLabel(method: PaymentParticipant['payment_method']): string {
-  if (method === 'cash') return 'Efectivo';
-  if (method === 'card') return 'Tarjeta';
-  if (method === 'wallet') return 'Monedero';
-  return 'Sin pago';
-}
-
-function MethodIcon({ method }: { method: PaymentParticipant['payment_method'] }) {
-  if (method === 'cash') return <Banknote className="w-3.5 h-3.5 text-green-600" />;
-  if (method === 'card') return <CreditCard className="w-3.5 h-3.5 text-[#E31E24]" />;
-  if (method === 'wallet') return <Wallet className="w-3.5 h-3.5 text-blue-600" />;
-  return <HelpCircle className="w-3.5 h-3.5 text-gray-400" />;
-}
-
-function methodBadgeClass(method: PaymentParticipant['payment_method']): string {
-  if (method === 'cash') return 'bg-green-50 text-green-700 border-green-100';
-  if (method === 'card') return 'bg-red-50 text-[#E31E24] border-red-100';
-  if (method === 'wallet') return 'bg-blue-50 text-blue-700 border-blue-100';
-  return 'bg-gray-50 text-gray-500 border-gray-100';
 }
 
 function AnimSection({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
@@ -215,7 +201,7 @@ function toPayment(tx: PaymentTransaction): Payment {
     concept,
     method,
     source: tx.source ?? (tx.booking_id ? 'booking' : 'store'),
-    amount: Math.round((tx.amount_cents ?? 0) / 100),
+    amountCents: tx.amount_cents ?? 0,
     status: mapStatus(tx.status, tx.booking_status, tx.cancelled_by),
     courtName: tx.court_name ?? undefined,
     bookingId: tx.booking_id ?? null,
@@ -223,6 +209,36 @@ function toPayment(tx: PaymentTransaction): Payment {
     saleId: resolveSaleId(tx),
     participants: tx.participants ?? [],
   };
+}
+
+/**
+ * Posición del pago dentro de su reserva: «pago 2 de 4», donde el total son las personas
+ * de la reserva (no los pagos), así se ve de un vistazo cuántas faltan por pagar.
+ * Se calcula sobre todos los pagos cargados, no sobre los filtrados, para que el índice no baile.
+ */
+function buildBookingShareIndex(payments: Payment[]): Map<string, { position: number; people: number }> {
+  const byBooking = new Map<string, Payment[]>();
+  for (const p of payments) {
+    if (p.source !== 'booking' || !p.bookingId) continue;
+    const list = byBooking.get(p.bookingId) ?? [];
+    list.push(p);
+    byBooking.set(p.bookingId, list);
+  }
+
+  const index = new Map<string, { position: number; people: number }>();
+  for (const [, list] of byBooking) {
+    const people = Math.max(...list.map((p) => p.participants.length), 0);
+    if (people < 2) continue;
+    const ordered = [...list].sort(
+      (a, b) => a.dateIso.localeCompare(b.dateIso) || a.id.localeCompare(b.id),
+    );
+    ordered.forEach((p, i) => {
+      // Pagos parciales pueden superar el nº de personas: no inventamos un «5 de 4».
+      if (i + 1 > people) return;
+      index.set(p.id, { position: i + 1, people });
+    });
+  }
+  return index;
 }
 
 function PaymentStatusBadge({ status }: { status: PaymentStatus }) {
@@ -318,6 +334,8 @@ export function ClubPaymentsTab({
     });
   }, [periodPayments, searchQuery, clientFilter, filterMethod, filterSource, filterStatus]);
 
+  const shareIndex = useMemo(() => buildBookingShareIndex(allPayments), [allPayments]);
+
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (filterMethod !== 'all') n += 1;
@@ -329,11 +347,11 @@ export function ClubPaymentsTab({
   }, [filterMethod, filterSource, filterStatus, clientFilter, dateMode, dateFrom, dateTo, todayYmd]);
 
   const completed = (p: Payment) => p.status === 'completed';
-  const cashPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
-  const cardPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'card').reduce((sum, p) => sum + p.amount, 0);
-  const appPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'app').reduce((sum, p) => sum + p.amount, 0);
-  const walletPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'wallet').reduce((sum, p) => sum + p.amount, 0);
-  const storePeriodTotal = periodPayments.filter((p) => completed(p) && p.source === 'store').reduce((sum, p) => sum + p.amount, 0);
+  const cashPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'cash').reduce((sum, p) => sum + p.amountCents, 0);
+  const cardPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'card').reduce((sum, p) => sum + p.amountCents, 0);
+  const appPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'app').reduce((sum, p) => sum + p.amountCents, 0);
+  const walletPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'wallet').reduce((sum, p) => sum + p.amountCents, 0);
+  const storePeriodTotal = periodPayments.filter((p) => completed(p) && p.source === 'store').reduce((sum, p) => sum + p.amountCents, 0);
   const distributionTotal = cashPeriodTotal + cardPeriodTotal + appPeriodTotal + walletPeriodTotal || 1;
   const cashPct = Math.round((cashPeriodTotal / distributionTotal) * 100);
   const cardPct = Math.round((cardPeriodTotal / distributionTotal) * 100);
@@ -568,10 +586,10 @@ export function ClubPaymentsTab({
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: 'Efectivo', value: `EUR ${cashPeriodTotal}`, icon: <Banknote className="w-4 h-4" />, color: '#22C55E', sub: 'Mostrador' },
-                { label: 'Tarjeta', value: `EUR ${cardPeriodTotal}`, icon: <CreditCard className="w-4 h-4" />, color: '#E31E24', sub: 'Mostrador' },
-                { label: 'App', value: `EUR ${appPeriodTotal}`, icon: <Smartphone className="w-4 h-4" />, color: '#5B8DEE', sub: t('payments_digital') },
-                { label: 'Tienda', value: `EUR ${storePeriodTotal}`, icon: <DollarSign className="w-4 h-4" />, color: '#8B5CF6', sub: 'Carrito' },
+                { label: 'Efectivo', value: formatEur(cashPeriodTotal), icon: <Banknote className="w-4 h-4" />, color: '#22C55E', sub: 'Mostrador' },
+                { label: 'Tarjeta', value: formatEur(cardPeriodTotal), icon: <CreditCard className="w-4 h-4" />, color: '#E31E24', sub: 'Mostrador' },
+                { label: 'App', value: formatEur(appPeriodTotal), icon: <Smartphone className="w-4 h-4" />, color: '#5B8DEE', sub: t('payments_digital') },
+                { label: 'Tienda', value: formatEur(storePeriodTotal), icon: <DollarSign className="w-4 h-4" />, color: '#8B5CF6', sub: 'Carrito' },
               ].map((stat, i) => (
                 <motion.div
                   key={stat.label}
@@ -613,7 +631,7 @@ export function ClubPaymentsTab({
                     <span className="text-xs font-semibold text-[#1A1A1A]">{method.label}</span>
                   </div>
                   <span className="text-[10px] text-gray-400">
-                    EUR {method.total} ({method.pct}%)
+                    {formatEur(method.total)} ({method.pct}%)
                   </span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -772,124 +790,132 @@ export function ClubPaymentsTab({
       </AnimSection>
 
       <AnimSection delay={0.15}>
-        <div className="space-y-2">
-          {loading ? (
-            <div className="text-center py-12">
-              <p className="text-xs text-gray-400">{t('loading')}</p>
-            </div>
-          ) : filteredPayments.length > 0 ? (
-            filteredPayments.map((payment) => {
-              const canOpenGrilla = payment.source === 'booking' && Boolean(payment.bookingId);
-              const canEditStore = payment.source === 'store' && Boolean(payment.saleId);
-              return (
-              <div key={payment.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5 relative">
-                <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${paymentMethodBadgeClass(payment.method)}`}>
-                    <PaymentMethodIcon method={payment.method} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5 gap-2">
-                      <p className="text-xs font-bold text-[#1A1A1A] truncate">{payment.client}</p>
-                      <p className="text-xs font-black text-[#1A1A1A] shrink-0">EUR {payment.amount}</p>
-                    </div>
-                    <div className="flex items-center gap-2 text-[10px] text-gray-400 flex-wrap">
-                      {canOpenGrilla ? (
-                        <button
-                          type="button"
-                          onClick={() => openBookingInGrilla(payment.bookingId!)}
-                          className="font-semibold text-[#006A6A] hover:underline text-left"
-                        >
-                          {payment.concept}
-                        </button>
-                      ) : canEditStore ? (
-                        <button
-                          type="button"
-                          onClick={() => setEditSaleId(payment.saleId!)}
-                          className="font-semibold text-[#006A6A] hover:underline text-left"
-                        >
-                          {payment.concept}
-                        </button>
-                      ) : (
-                        <span>{payment.concept}</span>
-                      )}
-                      <span className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${paymentMethodBadgeClass(payment.method)}`}>
-                        {paymentMethodLabel(payment.method)}
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded-md border border-gray-100 bg-gray-50 text-[9px] font-bold text-gray-500">
-                        {payment.source === 'store' ? 'Tienda' : 'Turno'}
-                      </span>
-                      {payment.courtName && <span>• {payment.courtName}</span>}
-                      <span>• {payment.dateLabel} · {payment.time}</span>
-                    </div>
-                  </div>
-                  <PaymentStatusBadge status={payment.status} />
-                  {canEditStore && (
-                    <button
-                      type="button"
-                      title="Anular venta"
-                      disabled={voidingSaleId === payment.saleId}
-                      onClick={() => setVoidConfirmPayment(payment)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-                {payment.participants.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-50">
-                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-2">Desglose por jugador</p>
-                    <div className="space-y-1.5">
-                      {payment.participants.map((participant, idx) => {
-                        const paidCents = (participant.paid_amount_cents ?? 0) + (participant.wallet_amount_cents ?? 0);
-                        const amountCents = paidCents > 0 ? paidCents : participant.share_amount_cents ?? 0;
-                        const amountEur = Math.round(amountCents / 100);
-                        const hasWalletSplit =
-                          (participant.paid_amount_cents ?? 0) > 0 && (participant.wallet_amount_cents ?? 0) > 0;
-                        return (
-                          <div
-                            key={`${payment.id}-${participant.player_id ?? idx}`}
-                            className="flex items-center justify-between gap-2"
+        {loading ? (
+          <div className="text-center py-12">
+            <p className="text-xs text-gray-400">{t('loading')}</p>
+          </div>
+        ) : filteredPayments.length > 0 ? (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+            <table className="w-full min-w-[960px] text-xs border-collapse">
+              <thead>
+                <tr className="bg-[#f3f4f6] text-left text-[11px] font-bold text-gray-600 border-b border-gray-200">
+                  <th className="px-3 py-2.5 whitespace-nowrap">Ref.</th>
+                  <th className="px-3 py-2.5 whitespace-nowrap">Fecha</th>
+                  <th className="px-3 py-2.5">Concepto</th>
+                  <th className="px-3 py-2.5 whitespace-nowrap">Cliente</th>
+                  <th className="px-3 py-2.5 whitespace-nowrap">Forma de pago</th>
+                  <th className="px-3 py-2.5 whitespace-nowrap">Estado</th>
+                  <th className="px-3 py-2.5 text-right whitespace-nowrap">Total</th>
+                  <th className="px-3 py-2.5 w-10" />
+                </tr>
+              </thead>
+              <tbody>
+                {filteredPayments.map((payment) => {
+                  const canOpenGrilla = payment.source === 'booking' && Boolean(payment.bookingId);
+                  const canEditStore = payment.source === 'store' && Boolean(payment.saleId);
+                  const share = shareIndex.get(payment.id);
+                  const ref = shortRef(payment.bookingId ?? payment.saleId ?? payment.id);
+                  return (
+                    <tr key={payment.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
+                      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+                        {canOpenGrilla ? (
+                          <button
+                            type="button"
+                            onClick={() => openBookingInGrilla(payment.bookingId!)}
+                            className="font-mono text-[#0B5B7A] font-semibold hover:underline"
                           >
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <span className="text-[11px] font-semibold text-[#1A1A1A] truncate">
-                                {participantName(participant)}
-                              </span>
-                              {participant.payment_status === 'pending' && (
-                                <span className="text-[9px] font-bold text-yellow-600">Pendiente</span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[9px] font-bold ${methodBadgeClass(
-                                  participant.payment_method,
-                                )}`}
+                            {ref}
+                          </button>
+                        ) : canEditStore ? (
+                          <button
+                            type="button"
+                            onClick={() => setEditSaleId(payment.saleId!)}
+                            className="font-mono text-[#0B5B7A] font-semibold hover:underline"
+                          >
+                            {ref}
+                          </button>
+                        ) : (
+                          <span className="font-mono text-gray-700">{ref}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 align-top whitespace-nowrap text-gray-700">
+                        {payment.dateLabel} · {payment.time}
+                      </td>
+                      <td className="px-3 py-2.5 align-top">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-[#1A1A1A]">{payment.concept}</p>
+                          <span className="px-1.5 py-0.5 rounded-md border border-gray-100 bg-gray-50 text-[9px] font-bold text-gray-500">
+                            {payment.source === 'store' ? 'Tienda' : 'Turno'}
+                          </span>
+                          {share && (
+                            <span className="text-[10px] text-gray-400">
+                              pago {share.position} de {share.people}
+                            </span>
+                          )}
+                        </div>
+                        {(canOpenGrilla || canEditStore) && (
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            {canOpenGrilla && (
+                              <button
+                                type="button"
+                                onClick={() => openBookingInGrilla(payment.bookingId!)}
+                                className="text-[10px] font-bold text-[#0B5B7A] hover:underline"
                               >
-                                <MethodIcon method={participant.payment_method} />
-                                {methodLabel(participant.payment_method)}
-                                {hasWalletSplit && (
-                                  <span className="text-[8px] font-semibold opacity-70">+ Monedero</span>
-                                )}
-                              </span>
-                              <span className="text-[11px] font-black text-[#1A1A1A] tabular-nums">
-                                EUR {amountEur}
-                              </span>
-                            </div>
+                                Ver en grilla
+                              </button>
+                            )}
+                            {canEditStore && (
+                              <button
+                                type="button"
+                                onClick={() => setEditSaleId(payment.saleId!)}
+                                className="text-[10px] font-bold text-[#0B5B7A] hover:underline"
+                              >
+                                Editar
+                              </button>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-            })
-          ) : (
-            <div className="text-center py-12">
-              <DollarSign className="w-10 h-10 text-gray-200 mx-auto mb-2" />
-              <p className="text-xs text-gray-400">{t('payments_not_found')}</p>
-            </div>
-          )}
-        </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 align-top whitespace-nowrap text-gray-700">
+                        {payment.client?.trim() || '—'}
+                      </td>
+                      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold ${paymentMethodBadgeClass(payment.method)}`}>
+                          <PaymentMethodIcon method={payment.method} />
+                          {paymentMethodLabel(payment.method)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+                        <PaymentStatusBadge status={payment.status} />
+                      </td>
+                      <td className="px-3 py-2.5 align-top text-right whitespace-nowrap font-bold text-[#1A1A1A] tabular-nums">
+                        {formatEur(payment.amountCents)}
+                      </td>
+                      <td className="px-3 py-2.5 align-top text-right">
+                        {canEditStore && (
+                          <button
+                            type="button"
+                            title="Anular venta"
+                            disabled={voidingSaleId === payment.saleId}
+                            onClick={() => setVoidConfirmPayment(payment)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <DollarSign className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+            <p className="text-xs text-gray-400">{t('payments_not_found')}</p>
+          </div>
+        )}
       </AnimSection>
 
       {clubId && editSaleId && (
@@ -946,7 +972,7 @@ export function ClubPaymentsTab({
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="text-gray-500">Importe</span>
-                  <span className="font-black text-[#1A1A1A]">EUR {voidConfirmPayment.amount}</span>
+                  <span className="font-black text-[#1A1A1A]">{formatEur(voidConfirmPayment.amountCents)}</span>
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="text-gray-500">Fecha</span>
