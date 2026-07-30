@@ -48,6 +48,23 @@ export const homeKeys = {
 };
 
 /**
+ * "Tu actividad" (historial): partidos pasados, inscripciones a cursos,
+ * torneos (paginado) y conteo de clubs favoritos. Volátil: NO se persiste.
+ */
+export const tuActividadKeys = {
+  all: (userId: string) => ['tu-actividad', userId] as const,
+  /** Partidos pasados mapeados con el viewer (perspectiva del jugador). */
+  pastPartidos: (userId: string, viewerId: string) =>
+    ['tu-actividad', userId, 'past-partidos', viewerId] as const,
+  /** Inscripciones a cursos de escuela. */
+  enrollments: (userId: string) => ['tu-actividad', userId, 'enrollments'] as const,
+  /** Torneos del jugador (infinite query paginada por offset). */
+  tournaments: (userId: string) => ['tu-actividad', userId, 'tournaments'] as const,
+  /** Conteo de clubs favoritos (resuelto contra el catálogo). */
+  favoriteClubs: (userId: string) => ['tu-actividad', userId, 'favorite-clubs'] as const,
+};
+
+/**
  * Catálogo público de la tienda. Sin userId: los datos no dependen de la
  * sesión (endpoints públicos). Volátil: la raíz 'store' NO se persiste.
  */

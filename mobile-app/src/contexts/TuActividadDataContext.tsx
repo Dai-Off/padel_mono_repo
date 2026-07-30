@@ -1,23 +1,22 @@
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { type CourseEnrollment } from '../api/schoolCourses';
+import { type PublicTournamentRow } from '../api/tournaments';
+import { useMyProfile } from '../queries/profile';
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react';
-import { fetchMyMatches } from '../api/matches';
-import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { fetchMyEnrollments, type CourseEnrollment } from '../api/schoolCourses';
-import { fetchMyTournaments, type PublicTournamentRow } from '../api/tournaments';
-import { countFavoriteClubsFromIds, resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
-import { useClubCatalog } from '../hooks/useClubCatalog';
+  useFavoriteClubCountQuery,
+  useMyEnrollmentsQuery,
+  useMyTournamentsInfinite,
+  usePastPartidosQuery,
+} from '../queries/tuActividad';
+import { tuActividadKeys } from '../queries/keys';
 import { useAuth } from './AuthContext';
-import { useHomeData } from './HomeDataContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
-const TOURNAMENTS_PAGE = 50;
+/** Identidades estables para los estados vacíos (evitan re-renders por `?? []`). */
+const EMPTY_PARTIDOS: PartidoItem[] = [];
+const EMPTY_ENROLLMENTS: CourseEnrollment[] = [];
+const EMPTY_TOURNAMENTS: PublicTournamentRow[] = [];
 
 type TuActividadDataValue = {
   loading: boolean;
@@ -40,96 +39,59 @@ type TuActividadDataValue = {
 
 const TuActividadDataContext = createContext<TuActividadDataValue | null>(null);
 
+/**
+ * Provider de "Tu actividad": ahora es una fachada sin estado propio sobre las
+ * queries de React Query (queries/tuActividad.ts). La paginación de torneos usa
+ * useInfiniteQuery; el resto son queries simples. La API pública no cambia.
+ */
 export function TuActividadDataProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
-  const { profile, profileLoading } = useHomeData();
-  const { clubs: clubCatalog } = useClubCatalog();
-  const [loading, setLoading] = useState(true);
-  const [favoriteClubCount, setFavoriteClubCount] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loadingMoreTournaments, setLoadingMoreTournaments] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pastPartidos, setPastPartidos] = useState<PartidoItem[]>([]);
-  const [enrollments, setEnrollments] = useState<CourseEnrollment[]>([]);
-  const [tournaments, setTournaments] = useState<PublicTournamentRow[]>([]);
-  const [tournamentsHasMore, setTournamentsHasMore] = useState(false);
+  const userId = session?.user?.id ?? null;
+  const token = session?.access_token ?? null;
+  const queryClient = useQueryClient();
 
-  const loadAll = useCallback(async () => {
-    const token = session?.access_token;
-    if (!token) {
-      setPastPartidos([]);
-      setEnrollments([]);
-      setTournaments([]);
-      setTournamentsHasMore(false);
-      setError('Inicia sesión para ver tu actividad.');
-      return;
-    }
-    setError(null);
-    try {
-      const [pastMatches, enrollRes, tourRes] = await Promise.all([
-        fetchMyMatches(token, { phase: 'past', limit: 200 }),
-        fetchMyEnrollments(token),
-        fetchMyTournaments(token, { limit: TOURNAMENTS_PAGE, offset: 0 }),
-      ]);
+  const profileQuery = useMyProfile();
+  const pastQuery = usePastPartidosQuery();
+  const enrollmentsQuery = useMyEnrollmentsQuery();
+  const tournamentsQuery = useMyTournamentsInfinite();
+  const favoriteClubsQuery = useFavoriteClubCountQuery();
 
-      const favoriteIds = await resolveSavedFavoriteClubIds(profile, clubCatalog);
-      setFavoriteClubCount(countFavoriteClubsFromIds(favoriteIds));
+  const pastPartidos = pastQuery.data ?? EMPTY_PARTIDOS;
+  const enrollments = enrollmentsQuery.data ?? EMPTY_ENROLLMENTS;
+  const tournaments = tournamentsQuery.data
+    ? tournamentsQuery.data.pages.flatMap((p) => p.tournaments)
+    : EMPTY_TOURNAMENTS;
+  const favoriteClubCount = favoriteClubsQuery.data ?? 0;
 
-      setPastPartidos(
-        pastMatches
-          .map((m) => mapMatchToPartido(m, { viewerPlayerId: profile?.id ?? null }))
-          .filter((p): p is PartidoItem => p != null),
-      );
-      setEnrollments(enrollRes.ok && Array.isArray(enrollRes.enrollments) ? enrollRes.enrollments : []);
-      if (tourRes.ok) {
-        setTournaments(tourRes.tournaments);
-        setTournamentsHasMore(tourRes.pagination.has_more);
-      } else {
-        setTournaments([]);
-        setTournamentsHasMore(false);
-        setError(tourRes.error);
-      }
-    } catch {
-      setError('No se pudo cargar tu actividad.');
-      setPastPartidos([]);
-      setEnrollments([]);
-      setTournaments([]);
-      setTournamentsHasMore(false);
-    }
-  }, [session?.access_token, profile?.id, profile, clubCatalog]);
+  const loading =
+    profileQuery.isLoading ||
+    pastQuery.isLoading ||
+    enrollmentsQuery.isLoading ||
+    tournamentsQuery.isLoading;
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      setLoading(true);
-      await loadAll();
-      if (!cancelled) setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadAll]);
+  // Pull-to-refresh visual: cualquier revalidación con datos ya presentes.
+  const refreshing =
+    pastQuery.isRefetching || enrollmentsQuery.isRefetching || tournamentsQuery.isRefetching;
+
+  // Sin sesión, mensaje del contexto viejo; con sesión, error genérico si algún
+  // dataset falló en su primera carga (sin dato previo).
+  const error = !token
+    ? 'Inicia sesión para ver tu actividad.'
+    : (pastQuery.isError && pastQuery.data == null) ||
+        (enrollmentsQuery.isError && enrollmentsQuery.data == null) ||
+        (tournamentsQuery.isError && tournamentsQuery.data == null)
+      ? 'No se pudo cargar tu actividad.'
+      : null;
 
   const refresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadAll();
-    setRefreshing(false);
-  }, [loadAll]);
+    if (!userId) return;
+    await queryClient.invalidateQueries({ queryKey: tuActividadKeys.all(userId) });
+  }, [queryClient, userId]);
 
   const loadMoreTournaments = useCallback(async () => {
-    const token = session?.access_token;
-    if (!token || !tournamentsHasMore || loadingMoreTournaments) return;
-    setLoadingMoreTournaments(true);
-    try {
-      const r = await fetchMyTournaments(token, { limit: TOURNAMENTS_PAGE, offset: tournaments.length });
-      if (r.ok) {
-        setTournaments((prev) => [...prev, ...r.tournaments]);
-        setTournamentsHasMore(r.pagination.has_more);
-      }
-    } finally {
-      setLoadingMoreTournaments(false);
-    }
-  }, [session?.access_token, tournamentsHasMore, loadingMoreTournaments, tournaments.length]);
+    if (!tournamentsQuery.hasNextPage || tournamentsQuery.isFetchingNextPage) return;
+    await tournamentsQuery.fetchNextPage();
+  }, [tournamentsQuery]);
 
   const counts = useMemo(
     () => ({
@@ -138,33 +100,32 @@ export function TuActividadDataProvider({ children }: { children: ReactNode }) {
       tournaments: tournaments.length,
       favoriteClubs: favoriteClubCount,
     }),
-    [favoriteClubCount, pastPartidos.length, enrollments.length, tournaments.length],
+    [pastPartidos.length, enrollments.length, tournaments.length, favoriteClubCount],
   );
 
-  const value = useMemo(
+  const value = useMemo<TuActividadDataValue>(
     () => ({
-      loading: loading || profileLoading,
+      loading,
       refreshing,
       error,
       pastPartidos,
       enrollments,
       tournaments,
-      tournamentsHasMore,
-      loadingMoreTournaments,
+      tournamentsHasMore: Boolean(tournamentsQuery.hasNextPage),
+      loadingMoreTournaments: tournamentsQuery.isFetchingNextPage,
       counts,
       refresh,
       loadMoreTournaments,
     }),
     [
       loading,
-      profileLoading,
       refreshing,
       error,
       pastPartidos,
       enrollments,
       tournaments,
-      tournamentsHasMore,
-      loadingMoreTournaments,
+      tournamentsQuery.hasNextPage,
+      tournamentsQuery.isFetchingNextPage,
       counts,
       refresh,
       loadMoreTournaments,
