@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useHomeData } from '../../contexts/HomeDataContext';
+import { useMyProfile } from '../../queries/profile';
 import { useTuActividadData } from '../../contexts/TuActividadDataContext';
 import { TournamentListCard } from '../../components/competiciones/TournamentListCard';
 import { ActivityEmptyState } from '../../components/tuActividad/ActivityEmptyState';
@@ -27,7 +27,7 @@ type MisCompeticionesActividadScreenProps = {
 export function MisCompeticionesActividadScreen({ onBack }: MisCompeticionesActividadScreenProps) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const {
     loading,
     refreshing,

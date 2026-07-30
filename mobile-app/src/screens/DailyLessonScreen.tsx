@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
 import { useVideoPreloader } from '../hooks/useVideoPreloader';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { DEFAULT_STREAK, useDailyStreak } from '../queries/home';
 import { submitDailyLesson, submitLessonFeedback, fetchTodayResults, fetchLocalizedDailyQuestions, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
 import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } from '../lib/dailyLessonStorage';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
@@ -121,7 +121,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding, onOpen
   // Señal cacheada (app-level, misma que la card de la Home) de si la lección
   // de hoy ya está completada. Permite pintar la variante correcta del intro
   // desde el primer frame mientras el fetch carga en background.
-  const { streak: homeStreak } = useHomeData();
+  const homeStreak = useDailyStreak().data ?? DEFAULT_STREAK;
 
   // Preguntas que se muestran. Por defecto vienen del hook (el algoritmo de
   // selección de hoy). Se sobreescriben en dos casos:

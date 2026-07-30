@@ -21,7 +21,7 @@ import { TournamentListCard } from '../components/competiciones/TournamentListCa
 import { TournamentDetailScreen } from './TournamentDetailScreen';
 import { OnboardingInlineBanner } from '../components/onboarding/OnboardingInlineBanner';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
 import { tournamentTitle } from '../domain/tournamentDisplay';
 import {
   countTournamentActiveFilters,
@@ -77,7 +77,7 @@ export function CompeticionesScreen({
   const [filterSheet, setFilterSheet] = useState<TournamentSheetKind>(null);
   // elo y onboarding del profile compartido (HomeDataContext) — evita un GET
   // /players/me al montar esta pantalla.
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const myElo = profile?.eloRating ?? null;
   /**
    * Soft block: torneos competitivos bloquean inscripción si el usuario no

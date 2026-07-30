@@ -11,7 +11,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { AvatarWithFrame } from "../profile/AvatarWithFrame";
-import { useHomeData } from "../../contexts/HomeDataContext";
+import { useMyProfile } from "../../queries/profile";
 import {
   isPartidoPlayerCurrentViewer,
   resolvePlayerDisplayAvatar,
@@ -121,7 +121,7 @@ function PlayerFace({
 /** Tarjeta alineada al listado web (imagen + meta + slots horizontales). */
 export function PartidoOpenCard({ item, onPress, fullWidth, showVisibilityBadge }: Props) {
   const { t } = useTranslation();
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const currentProfile: ProfileForPartidoEnrich | null = profile?.id
     ? {
         id: profile.id,

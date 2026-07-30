@@ -53,7 +53,7 @@ import {
   type MatchmakingStatusResponse,
   type PairInvite,
 } from '../api/matchmaking';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
 import { useTranslation } from '../i18n';
 import { getMatchBooking } from '../domain/matchLifecycle';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
@@ -131,7 +131,7 @@ export function CompetitiveLeagueScreen({
   const [errorText, setErrorText] = useState<string | null>(null);
   const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(true);
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const { t } = useTranslation();
   const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
   const [rankingRows, setRankingRows] = useState<MatchmakingLeaderboardRow[]>([]);

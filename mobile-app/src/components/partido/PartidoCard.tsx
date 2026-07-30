@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "../../i18n";
 import { theme } from "../../theme";
 import { AvatarWithFrame } from "../profile/AvatarWithFrame";
-import { useHomeData } from "../../contexts/HomeDataContext";
+import { useMyProfile } from "../../queries/profile";
 import {
   resolvePlayerDisplayAvatar,
   resolvePlayerDisplayInitials,
@@ -102,7 +102,7 @@ export function PartidoCard({
 }: PartidoCardProps) {
   const { t } = useTranslation();
   const d = surface === "dark";
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const currentProfile: ProfileForPartidoEnrich | null = profile?.id
     ? {
         id: profile.id,

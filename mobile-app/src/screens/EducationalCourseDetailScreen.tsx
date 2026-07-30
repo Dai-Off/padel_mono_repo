@@ -16,7 +16,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EducationalCourse, fetchCourseDetail, completeCourseLesson, type CourseLesson } from "../api/learning";
 import { useAuth } from "../contexts/AuthContext";
-import { useHomeData } from "../contexts/HomeDataContext";
+import { useMyProfile } from "../queries/profile";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { androidReadableText } from "../components/home/inicio/textStyles";
 import { useTranslation } from "../i18n";
@@ -52,7 +52,7 @@ export function EducationalCourseDetailScreen({
    *
    * Profile viene del HomeDataContext (cacheado). No hace falta fetch local.
    */
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const needsOnboarding = profile != null && profile.onboardingCompleted === false;
 
   useEffect(() => {

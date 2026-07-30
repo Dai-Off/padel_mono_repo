@@ -35,7 +35,7 @@ import type {
   TournamentCourtBookingSlot,
   TournamentPlayerAgenda,
 } from '../api/tournaments';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
 import { OnboardingSoftBlockBanner } from '../components/onboarding/OnboardingSoftBlockBanner';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 import { PlayerProfileOverlay } from '../components/profile/PlayerProfileOverlay';
@@ -376,7 +376,7 @@ export function TournamentDetailScreen({
   const [myStatus, setMyStatus] = useState<string | null>(null);
   // elo y onboarding del profile compartido (HomeDataContext) — evita un GET
   // /players/me extra en cada apertura del detalle de torneo.
-  const { profile: meProfile } = useHomeData();
+  const meProfile = useMyProfile().data ?? null;
   const myElo = meProfile?.eloRating ?? null;
   /** Soft block: si torneo competitivo + onboarding pendiente, bloqueamos CTA. */
   const needsOnboarding = meProfile != null && meProfile.onboardingCompleted === false;
