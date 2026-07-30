@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
@@ -6,15 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
-import { fetchPublicPlayerProfile, type PublicPlayerProfile } from '../api/players';
-import {
-  fetchPlayerLevelHistory,
-  fetchPlayerStats,
-  type LevelHistory,
-  type LevelHistoryLimit,
-  type PlayerStats,
-} from '../api/profileStats';
-import { fetchPlayerPublicCustomization, type PublicProfileCustomization } from '../api/profileCustomization';
+import { type LevelHistoryLimit } from '../api/profileStats';
 import { PlayerName } from '../components/profile/PlayerName';
 import { ProfileThemeBackground } from '../components/profile/ProfileThemeBackground';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
@@ -27,12 +19,20 @@ import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSecti
 import { PlayerPreferencesCard } from '../components/profile/PlayerPreferencesCard';
 import { FrequentClubsCard } from '../components/profile/FrequentClubsCard';
 import { FrequentPartnersCard } from '../components/profile/FrequentPartnersCard';
-import { fetchFrequentClubs, fetchFrequentPartners, type FrequentClub, type FrequentPartner } from '../api/profileSocial';
+import { type FrequentClub, type FrequentPartner } from '../api/profileSocial';
 import { RARITY_CONFIG } from '../design/rarity';
-import { toggleFollow } from '../api/playerFollows';
-import { fetchMyPlayerId } from '../api/players';
 import { FollowListModal } from '../components/profile/FollowListModal';
 import { isFeatureHidden } from '../config';
+import { useMyProfile } from '../queries/profile';
+import {
+  usePublicCustomization,
+  usePublicLevelHistory,
+  usePublicPlayerProfile,
+  usePublicPlayerStats,
+  usePublicSocial,
+  useSyncPublicProfileFollow,
+  useToggleFollowMutation,
+} from '../queries/publicProfile';
 
 type PublicProfileScreenProps = {
   playerId: string;
@@ -41,6 +41,10 @@ type PublicProfileScreenProps = {
   onOpenMatch?: (matchId: string) => void;
   onOpenPlayer?: (playerId: string) => void;
 };
+
+/** Identidades estables para el estado de carga (evitan re-renders por `?? []`). */
+const EMPTY_CLUBS: FrequentClub[] = [];
+const EMPTY_PARTNERS: FrequentPartner[] = [];
 
 function getInitials(firstName?: string | null, lastName?: string | null): string {
   if (firstName && lastName) return (firstName[0] + lastName[0]).toUpperCase();
@@ -54,89 +58,36 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
   const { t } = useTranslation();
   const token = session?.access_token ?? null;
 
-  const [profile, setProfile] = useState<PublicPlayerProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [customization, setCustomization] = useState<PublicProfileCustomization | null>(null);
-  const [levelHistory, setLevelHistory] = useState<LevelHistory | null>(null);
   const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
-  const [levelLoading, setLevelLoading] = useState(true);
-  const [stats, setStats] = useState<PlayerStats | null>(null);
-  const [frequentClubs, setFrequentClubs] = useState<FrequentClub[]>([]);
-  const [frequentPartners, setFrequentPartners] = useState<FrequentPartner[]>([]);
-  const [socialLoading, setSocialLoading] = useState(true);
-  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [followListVisible, setFollowListVisible] = useState(false);
   const [followListTab, setFollowListTab] = useState<'followers' | 'following'>('followers');
 
-  // Cargar mi ID de jugador
-  useEffect(() => {
-    if (token) {
-      fetchMyPlayerId(token).then(setMyPlayerId);
-    }
-  }, [token]);
+  // Mi identidad de jugador: reutiliza el perfil propio ya cacheado (antes era
+  // un fetchMyPlayerId aparte). Solo se usa para ocultar el botón "Seguir" en
+  // el propio perfil y como currentUserId del modal.
+  const { data: myProfile } = useMyProfile();
+  const myPlayerId = myProfile?.id ?? null;
 
-  // Datos base + personalización (gate del spinner)
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    Promise.all([fetchPublicPlayerProfile(playerId, token), fetchPlayerPublicCustomization(playerId)])
-      .then(([p, c]) => {
-        if (cancelled) return;
-        setProfile(p);
-        setCustomization(c);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [playerId, token]);
+  // Datos del perfil ajeno en React Query (keyed por playerId objetivo).
+  const baseQuery = usePublicPlayerProfile(playerId);
+  const customizationQuery = usePublicCustomization(playerId);
+  const statsQuery = usePublicPlayerStats(playerId);
+  const socialQuery = usePublicSocial(playerId);
+  const levelQuery = usePublicLevelHistory(playerId, levelLimit);
+  const followMutation = useToggleFollowMutation(playerId);
+  const syncFollowFromModal = useSyncPublicProfileFollow(playerId);
 
-  // Estadísticas (independiente)
-  useEffect(() => {
-    let cancelled = false;
-    fetchPlayerStats(token, playerId).then((s) => {
-      if (!cancelled) setStats(s);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [playerId, token]);
-
-  // Clubs y compañeros frecuentes (públicos)
-  useEffect(() => {
-    let cancelled = false;
-    setSocialLoading(true);
-    Promise.all([fetchFrequentClubs(playerId), fetchFrequentPartners(playerId)])
-      .then(([c, p]) => {
-        if (cancelled) return;
-        setFrequentClubs(c);
-        setFrequentPartners(p);
-      })
-      .finally(() => {
-        if (!cancelled) setSocialLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [playerId]);
-
-  // Evolución del nivel (recarga al cambiar el límite)
-  useEffect(() => {
-    let cancelled = false;
-    setLevelLoading(true);
-    fetchPlayerLevelHistory(playerId, levelLimit)
-      .then((h) => {
-        if (!cancelled) setLevelHistory(h);
-      })
-      .finally(() => {
-        if (!cancelled) setLevelLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [playerId, levelLimit]);
+  const profile = baseQuery.data ?? null;
+  const customization = customizationQuery.data ?? null;
+  // El spinner gatea con base + customización (evita el flash sin tema), igual
+  // que el Promise.all original.
+  const loading = baseQuery.isLoading || customizationQuery.isLoading;
+  const stats = statsQuery.data ?? null;
+  const levelHistory = levelQuery.data ?? null;
+  const levelLoading = levelQuery.isLoading;
+  const frequentClubs = socialQuery.data?.clubs ?? EMPTY_CLUBS;
+  const frequentPartners = socialQuery.data?.partners ?? EMPTY_PARTNERS;
+  const socialLoading = socialQuery.isLoading;
 
   if (loading) {
     return (
@@ -278,27 +229,10 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
                     styles.followBtn,
                     profile.isFollowing ? styles.followingBtnActive : styles.followBtnActive,
                   ]}
-                  onPress={async () => {
-                    if (!token) return;
-                    const prevFollowing = profile.isFollowing;
-                    const prevCount = profile.followersCount ?? 0;
-
-                    // Optimistic update
-                    setProfile({
-                      ...profile,
-                      isFollowing: !prevFollowing,
-                      followersCount: prevFollowing ? prevCount - 1 : prevCount + 1,
-                    });
-
-                    const res = await toggleFollow(token, profile.id);
-                    if (!res.ok) {
-                      // Revertir si falla
-                      setProfile({
-                        ...profile,
-                        isFollowing: prevFollowing,
-                        followersCount: prevCount,
-                      });
-                    }
+                  onPress={() => {
+                    if (!token || followMutation.isPending) return;
+                    // Update optimista + rollback los gestiona la mutación.
+                    followMutation.mutate();
                   }}
                 >
                   <Text
@@ -376,17 +310,9 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress, onOpenMatch
         currentUserId={myPlayerId}
         onOpenPlayer={onOpenPlayer}
         onFollowChange={(targetPlayerId, isFollowingNow) => {
-          // Si el targetPlayerId es el dueño del perfil que estamos viendo
+          // Si el cambio afecta al dueño del perfil visible, sincroniza su caché.
           if (targetPlayerId === profile.id) {
-            setProfile(prev => {
-              if (!prev) return null;
-              const prevCount = prev.followersCount ?? 0;
-              return {
-                ...prev,
-                isFollowing: isFollowingNow,
-                followersCount: isFollowingNow ? prevCount + 1 : Math.max(0, prevCount - 1),
-              };
-            });
+            syncFollowFromModal(isFollowingNow);
           }
         }}
       />

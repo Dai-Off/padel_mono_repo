@@ -48,6 +48,25 @@ export const homeKeys = {
 };
 
 /**
+ * Perfil público de OTRO jugador. Keyed por el playerId objetivo (no por el
+ * viewer): en una sesión solo hay un viewer y el caché es volátil (no se
+ * persiste, y el logout hace queryClient.clear()).
+ */
+export const publicProfileKeys = {
+  all: (playerId: string) => ['public-profile', playerId] as const,
+  /** Perfil base público (incluye isFollowing/followersCount para el viewer). */
+  base: (playerId: string) => ['public-profile', playerId, 'base'] as const,
+  /** Personalización pública (marco, título, tema). */
+  customization: (playerId: string) => ['public-profile', playerId, 'customization'] as const,
+  /** Estadísticas agregadas del jugador. */
+  stats: (playerId: string) => ['public-profile', playerId, 'stats'] as const,
+  /** Evolución del ELO. Por límite seleccionado (5/10/all). */
+  level: (playerId: string, limit: string) => ['public-profile', playerId, 'level', limit] as const,
+  /** Clubs y compañeros frecuentes (públicos). */
+  social: (playerId: string) => ['public-profile', playerId, 'social'] as const,
+};
+
+/**
  * "Tu actividad" (historial): partidos pasados, inscripciones a cursos,
  * torneos (paginado) y conteo de clubs favoritos. Volátil: NO se persiste.
  */
