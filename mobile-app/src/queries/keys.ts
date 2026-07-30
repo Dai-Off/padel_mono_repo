@@ -48,6 +48,19 @@ export const homeKeys = {
 };
 
 /**
+ * Matchmaking: estado de cola (+ invitaciones de pareja embebidas) e
+ * invitaciones a partidos recibidas. Polling con refetchInterval. Volátil:
+ * la raíz 'matchmaking' NO se persiste.
+ */
+export const matchmakingKeys = {
+  all: (userId: string) => ['matchmaking', userId] as const,
+  /** Estado de matchmaking + pair_invites (poll 5s). */
+  status: (userId: string) => ['matchmaking', userId, 'status'] as const,
+  /** Invitaciones a partidos recibidas (poll 8s). */
+  receivedInvites: (userId: string) => ['matchmaking', userId, 'received-invites'] as const,
+};
+
+/**
  * Perfil público de OTRO jugador. Keyed por el playerId objetivo (no por el
  * viewer): en una sesión solo hay un viewer y el caché es volátil (no se
  * persiste, y el logout hace queryClient.clear()).

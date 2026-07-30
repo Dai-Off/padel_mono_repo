@@ -10,16 +10,19 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { leaveMatchmaking, type PairInvite } from '../api/matchmaking';
+import { type ReceivedMatchInvite } from '../api/matchInvites';
 import {
-  fetchMatchmakingStatus,
-  leaveMatchmaking,
-  type PairInvite,
-} from '../api/matchmaking';
-import {
-  fetchReceivedMatchInvites,
-  type ReceivedMatchInvite,
-} from '../api/matchInvites';
+  useMatchmakingStatusQuery,
+  useReceivedMatchInvitesQuery,
+} from '../queries/matchmaking';
+import { matchmakingKeys } from '../queries/keys';
 import { useAuth } from './AuthContext';
+
+/** Identidades estables para los estados vacíos. */
+const EMPTY_PAIR_INVITES: PairInvite[] = [];
+const EMPTY_RECEIVED_INVITES: ReceivedMatchInvite[] = [];
 
 export type MatchmakingBannerState = 'hidden' | 'searching' | 'matched' | 'timed_out';
 
@@ -52,22 +55,28 @@ const MatchmakingContext = createContext<MatchmakingValue | null>(null);
  */
 export function MatchmakingProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
+  const userId = session?.user?.id ?? null;
+  const token = session?.access_token ?? null;
+  const queryClient = useQueryClient();
 
   const [bannerState, setBannerStateRaw] = useState<MatchmakingBannerState>('hidden');
   const [queueElapsedSec, setQueueElapsedSec] = useState(0);
   const [queueStartedAtMs, setQueueStartedAtMs] = useState<number | null>(null);
   const [timeoutNoticePending, setTimeoutNoticePending] = useState(false);
   const timeoutInFlightRef = useRef(false);
-  const [pairInvites, setPairInvites] = useState<PairInvite[]>([]);
-  const [pairInviteNonce, setPairInviteNonce] = useState(0);
-  const [matchReceivedInvites, setMatchReceivedInvites] = useState<ReceivedMatchInvite[]>([]);
-  const [matchInviteNonce, setMatchInviteNonce] = useState(0);
 
-  // Poll de estado de matchmaking (5 s) + timer de cola + timeout de 3 min.
+  // El FETCH lo hacen las queries (poll 5s / 8s); aquí solo vive la máquina de
+  // banner/timeout, que reacciona al último status recibido.
+  const statusQuery = useMatchmakingStatusQuery();
+  const invitesQuery = useReceivedMatchInvitesQuery();
+
+  const pairInvites = statusQuery.data?.pair_invites ?? EMPTY_PAIR_INVITES;
+  const matchReceivedInvites = invitesQuery.data ?? EMPTY_RECEIVED_INVITES;
+
+  // Deriva el banner, el timer de cola y la auto-salida a los 3 min a partir
+  // del status. Antes vivía dentro del pollStatus; ahora reacciona al dato de
+  // la query (cada refetch produce un data nuevo → el efecto recomputa).
   useEffect(() => {
-    const token = session?.access_token ?? null;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     if (!token) {
       setBannerStateRaw('hidden');
       setTimeoutNoticePending(false);
@@ -76,28 +85,25 @@ export function MatchmakingProvider({ children }: { children: ReactNode }) {
       timeoutInFlightRef.current = false;
       return;
     }
-
-    const pollStatus = async () => {
-      const status = await fetchMatchmakingStatus(token);
-      if (cancelled) return;
-      setPairInvites(status?.pair_invites ?? []);
-      if (status?.status === 'matched') {
-        setBannerStateRaw('matched');
-        setTimeoutNoticePending(false);
-        setQueueStartedAtMs(null);
-        setQueueElapsedSec(0);
-        timeoutInFlightRef.current = false;
-      } else if (status?.status === 'searching') {
-        setBannerStateRaw('searching');
-        setTimeoutNoticePending(false);
-        const startedAt = queueStartedAtMs ?? Date.now();
-        if (queueStartedAtMs == null) setQueueStartedAtMs(startedAt);
-        const elapsedSec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-        setQueueElapsedSec(elapsedSec);
-        if (elapsedSec >= MATCHMAKING_TIMEOUT_SECONDS && !timeoutInFlightRef.current) {
-          timeoutInFlightRef.current = true;
+    const status = statusQuery.data;
+    if (status === undefined) return; // aún sin primer dato
+    if (status?.status === 'matched') {
+      setBannerStateRaw('matched');
+      setTimeoutNoticePending(false);
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
+      timeoutInFlightRef.current = false;
+    } else if (status?.status === 'searching') {
+      setBannerStateRaw('searching');
+      setTimeoutNoticePending(false);
+      const startedAt = queueStartedAtMs ?? Date.now();
+      if (queueStartedAtMs == null) setQueueStartedAtMs(startedAt);
+      const elapsedSec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      setQueueElapsedSec(elapsedSec);
+      if (elapsedSec >= MATCHMAKING_TIMEOUT_SECONDS && !timeoutInFlightRef.current) {
+        timeoutInFlightRef.current = true;
+        void (async () => {
           const leaveResult = await leaveMatchmaking(token);
-          if (cancelled) return;
           if (leaveResult.ok) {
             setBannerStateRaw('timed_out');
             setTimeoutNoticePending(true);
@@ -106,47 +112,21 @@ export function MatchmakingProvider({ children }: { children: ReactNode }) {
           } else {
             timeoutInFlightRef.current = false;
           }
-        }
-      } else {
-        setQueueStartedAtMs(null);
-        setQueueElapsedSec(0);
-        timeoutInFlightRef.current = false;
-        setBannerStateRaw(timeoutNoticePending ? 'timed_out' : 'hidden');
+        })();
       }
-      timer = setTimeout(() => {
-        void pollStatus();
-      }, 5000);
-    };
-
-    void pollStatus();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [queueStartedAtMs, timeoutNoticePending, pairInviteNonce, session?.access_token]);
-
-  // Poll de invitaciones a partidos recibidas (8 s).
-  useEffect(() => {
-    const token = session?.access_token ?? null;
-    if (!token) {
-      setMatchReceivedInvites([]);
-      return;
+    } else {
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
+      timeoutInFlightRef.current = false;
+      setBannerStateRaw(timeoutNoticePending ? 'timed_out' : 'hidden');
     }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const poll = async () => {
-      const res = await fetchReceivedMatchInvites(token);
-      if (!cancelled && res.ok) setMatchReceivedInvites(res.invites);
-      if (!cancelled) {
-        timer = setTimeout(() => void poll(), 8000);
-      }
-    };
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [session?.access_token, matchInviteNonce]);
+  }, [
+    statusQuery.data,
+    statusQuery.dataUpdatedAt,
+    queueStartedAtMs,
+    timeoutNoticePending,
+    token,
+  ]);
 
   const setBannerState = useCallback(
     (state: MatchmakingBannerState, options?: { force?: boolean }) => {
@@ -177,8 +157,15 @@ export function MatchmakingProvider({ children }: { children: ReactNode }) {
     [timeoutNoticePending],
   );
 
-  const bumpPairInvites = useCallback(() => setPairInviteNonce((n) => n + 1), []);
-  const bumpMatchInvites = useCallback(() => setMatchInviteNonce((n) => n + 1), []);
+  // Fuerza un poll inmediato reejecutando la query correspondiente.
+  const bumpPairInvites = useCallback(() => {
+    if (userId) void queryClient.refetchQueries({ queryKey: matchmakingKeys.status(userId) });
+  }, [queryClient, userId]);
+  const bumpMatchInvites = useCallback(() => {
+    if (userId) {
+      void queryClient.refetchQueries({ queryKey: matchmakingKeys.receivedInvites(userId) });
+    }
+  }, [queryClient, userId]);
 
   const value = useMemo(
     () => ({
