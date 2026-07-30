@@ -45,6 +45,18 @@ function clockFromMinutes(totalMin: number): string {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+/** Campos de la reserva ya presentes en la fila de la tabla. */
+type RowBooking = {
+    id?: string;
+    court_id?: string;
+    courts?: { id?: string; name?: string } | null;
+    start_at?: string;
+    end_at?: string;
+    status?: Reservation['status'];
+    reservation_type?: string;
+    players?: { first_name?: string; last_name?: string } | null;
+};
+
 type FreeSlotRow = {
     id: string;
     courtId: string;
@@ -117,11 +129,11 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         playStatus: 'upcoming' as '' | 'upcoming' | 'played' | 'all',
     });
 
-    const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
-    const [inlineEditingData, setInlineEditingData] = useState<Record<string, unknown> | null>(null);
-    const [inlineReservation, setInlineReservation] = useState<Reservation | null>(null);
-    const [inlineLoading, setInlineLoading] = useState(false);
-    const [inlineInitialTab, setInlineInitialTab] = useState<'details' | 'chat'>('details');
+    const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+    const [detailBookingData, setDetailBookingData] = useState<Record<string, unknown> | null>(null);
+    const [detailReservation, setDetailReservation] = useState<Reservation | null>(null);
+    const [detailLoading, setDetailLoading] = useState(false);
+    const [detailInitialTab, setDetailInitialTab] = useState<'details' | 'chat'>('details');
 
     const filterPanelRef = useRef<HTMLDivElement>(null);
     const datePickerRef = useRef<HTMLDivElement>(null);
@@ -645,38 +657,46 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         playStatus: 'upcoming',
     });
 
-    const closeInlineEdit = useCallback(() => {
-        setExpandedBookingId(null);
-        setInlineEditingData(null);
-        setInlineReservation(null);
-        setInlineLoading(false);
-        setInlineInitialTab('details');
+    const closeDetailModal = useCallback(() => {
+        setDetailBookingId(null);
+        setDetailBookingData(null);
+        setDetailReservation(null);
+        setDetailLoading(false);
+        setDetailInitialTab('details');
     }, []);
 
-    const openInlineEdit = useCallback(async (bookingId: string, opts?: { tab?: 'details' | 'chat' }) => {
+    /** Reserva provisional con lo que ya muestra la fila: el modal abre sin esperar al fetch. */
+    const seedReservationFromRow = useCallback((booking: RowBooking | null | undefined): Reservation | null => {
+        if (!booking?.id || !booking.start_at || !booking.end_at) return null;
+        const start = new Date(String(booking.start_at));
+        const end = new Date(String(booking.end_at));
+        const organizer = booking.players;
+        return {
+            id: String(booking.id),
+            courtId: String(booking.court_id ?? booking.courts?.id ?? ''),
+            courtName: booking.courts?.name || 'Pista',
+            startTime: start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+            durationMinutes: Math.round((end.getTime() - start.getTime()) / 60000),
+            playerName: organizer?.first_name ? `${organizer.first_name} ${organizer.last_name || ''}`.trim() : '',
+            status: booking.status ?? 'pending_payment',
+            booking_type: String(booking.reservation_type ?? 'open_match'),
+        };
+    }, []);
+
+    const openDetailModal = useCallback(async (
+        bookingId: string,
+        opts?: { tab?: 'details' | 'chat'; seed?: Reservation | null },
+    ) => {
         if (!onUpdateBooking) return;
-        const tab = opts?.tab ?? 'details';
-        if (expandedBookingId === bookingId) {
-            if (tab === 'chat') {
-                setInlineInitialTab('chat');
-                return;
-            }
-            if (inlineInitialTab === 'chat' && tab === 'details') {
-                setInlineInitialTab('details');
-                return;
-            }
-            closeInlineEdit();
-            return;
-        }
-        setInlineInitialTab(tab);
-        setExpandedBookingId(bookingId);
-        setInlineLoading(true);
-        setInlineEditingData(null);
-        setInlineReservation(null);
+        setDetailInitialTab(opts?.tab ?? 'details');
+        setDetailBookingId(bookingId);
+        setDetailLoading(true);
+        setDetailBookingData(null);
+        setDetailReservation(opts?.seed ?? null);
         try {
             const data = await apiFetchWithAuth<{ ok?: boolean; booking?: Record<string, unknown> }>(`/bookings/${bookingId}`);
             if (!data.ok || !data.booking) {
-                closeInlineEdit();
+                closeDetailModal();
                 return;
             }
             const b = data.booking;
@@ -685,8 +705,8 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
             const start = new Date(String(b.start_at));
             const end = new Date(String(b.end_at));
             const players = b.players as { first_name?: string; last_name?: string } | null;
-            setInlineEditingData({ ...b, courtName });
-            setInlineReservation({
+            setDetailBookingData({ ...b, courtName });
+            setDetailReservation({
                 id: bookingId,
                 courtId: String(b.court_id),
                 courtName,
@@ -697,12 +717,12 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                 booking_type: String(b.reservation_type ?? 'open_match'),
             });
         } catch (err) {
-            console.error('Error loading booking for inline edit:', err);
-            closeInlineEdit();
+            console.error('Error loading booking for match modal:', err);
+            closeDetailModal();
         } finally {
-            setInlineLoading(false);
+            setDetailLoading(false);
         }
-    }, [closeInlineEdit, courts, expandedBookingId, inlineInitialTab, onUpdateBooking]);
+    }, [closeDetailModal, courts, onUpdateBooking]);
 
     const formatTime = (isoString: string) => {
         const d = new Date(isoString);
@@ -1168,12 +1188,28 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                         void (async () => {
                                                             const created = await publishFreeSlot(slot);
                                                             if (!created) return;
-                                                            await openInlineEdit(created.bookingId, { tab: 'chat' });
+                                                            await openDetailModal(created.bookingId, {
+                                                                tab: 'chat',
+                                                                seed: {
+                                                                    id: created.bookingId,
+                                                                    courtId: slot.courtId,
+                                                                    courtName: slot.courtName,
+                                                                    startTime: clockFromMinutes(slot.startMin),
+                                                                    durationMinutes: OPEN_MATCH_DURATION_MIN,
+                                                                    playerName: '',
+                                                                    status: 'pending_payment',
+                                                                    booking_type: 'open_match',
+                                                                },
+                                                            });
                                                         })();
                                                     }}
                                                     className="p-2 hover:bg-[#006A6A]/10 rounded-full text-gray-400 hover:text-[#006A6A] transition-colors disabled:opacity-50"
                                                 >
-                                                    <MessageCircle size={16} />
+                                                    {publishingSlots ? (
+                                                        <span className="block w-4 h-4 border-2 border-[#006A6A]/30 border-t-[#006A6A] rounded-full animate-spin" />
+                                                    ) : (
+                                                        <MessageCircle size={16} />
+                                                    )}
                                                 </button>
                                                 <button
                                                     type="button"
@@ -1185,7 +1221,11 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                     }}
                                                     className="p-2 hover:bg-[#006A6A]/10 rounded-full text-gray-400 hover:text-[#006A6A] transition-colors disabled:opacity-50"
                                                 >
-                                                    <Link2 size={16} />
+                                                    {publishingSlots ? (
+                                                        <span className="block w-4 h-4 border-2 border-[#006A6A]/30 border-t-[#006A6A] rounded-full animate-spin" />
+                                                    ) : (
+                                                        <Link2 size={16} />
+                                                    )}
                                                 </button>
                                             </div>
                                         </td>
@@ -1202,17 +1242,22 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                 const totalPaid = paymentTransactions.reduce((acc: number, pt: any) => pt.status === 'succeeded' ? acc + (pt.amount_cents || 0) : acc, 0) / 100;
                                 
                                 const playerSlots = resolveMatchPlayerSlots(match.match_players || []);
-                                const isExpanded = expandedBookingId === booking?.id;
+                                const isActive = !!booking?.id && detailBookingId === String(booking.id);
 
                                 return (
-                                    <React.Fragment key={match.id}>
-                                    <tr 
+                                    <tr
+                                        key={match.id}
                                         onClick={() => {
-                                            if (booking?.id) void openInlineEdit(String(booking.id));
+                                            if (booking?.id) {
+                                                void openDetailModal(String(booking.id), {
+                                                    tab: 'details',
+                                                    seed: seedReservationFromRow(booking),
+                                                });
+                                            }
                                         }}
                                         className={clsx(
                                             'hover:bg-gray-50/50 transition-colors group cursor-pointer',
-                                            isExpanded && 'bg-[#006A6A]/5',
+                                            isActive && 'bg-[#006A6A]/5',
                                         )}
                                     >
                                         <td className="px-3 py-3 whitespace-nowrap">
@@ -1286,7 +1331,12 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                     title="Chat del partido"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        if (booking?.id) void openInlineEdit(String(booking.id), { tab: 'chat' });
+                                                        if (booking?.id) {
+                                                            void openDetailModal(String(booking.id), {
+                                                                tab: 'chat',
+                                                                seed: seedReservationFromRow(booking),
+                                                            });
+                                                        }
                                                     }}
                                                     className="p-2 hover:bg-[#006A6A]/10 rounded-full text-gray-400 hover:text-[#006A6A] transition-colors"
                                                 >
@@ -1331,9 +1381,11 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         setMenuOpenFor(null);
-                                                                        const bookingId = booking?.id;
-                                                                        if (bookingId) {
-                                                                            void openInlineEdit(String(bookingId));
+                                                                        if (booking?.id) {
+                                                                            void openDetailModal(String(booking.id), {
+                                                                                tab: 'details',
+                                                                                seed: seedReservationFromRow(booking),
+                                                                            });
                                                                         }
                                                                     }}
                                                                     className="w-full text-left px-3 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 font-medium"
@@ -1372,54 +1424,6 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                             </div>
                                         </td>
                                     </tr>
-                                    {isExpanded && booking?.id && onUpdateBooking && (
-                                        <tr>
-                                            <td colSpan={10} className="px-3 py-3 bg-gray-50 border-b border-gray-200">
-                                                {inlineLoading || !inlineReservation ? (
-                                                    <div className="flex items-center justify-center py-10">
-                                                        <div className="w-6 h-6 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
-                                                    </div>
-                                                ) : (
-                                                    <ReservationModal
-                                                        presentation={inlineInitialTab === 'chat' ? 'modal' : 'inline'}
-                                                        initialTab={inlineInitialTab}
-                                                        clubId={clubId}
-                                                        gridDate={currentDateStr}
-                                                        weeklySchedule={weeklySchedule}
-                                                        gridReservations={gridReservations}
-                                                        isOpen
-                                                        reservation={inlineReservation}
-                                                        editingBookingData={inlineEditingData}
-                                                        isLoadingBookingData={inlineLoading}
-                                                        onClose={closeInlineEdit}
-                                                        onUpdate={async (bookingId, data) => {
-                                                            await onUpdateBooking(bookingId, data);
-                                                            await fetchMatches();
-                                                            await onRefreshGrid({ date: currentDateStr });
-                                                            closeInlineEdit();
-                                                        }}
-                                                        onDelete={onDeleteBooking ? async (...args) => {
-                                                            await onDeleteBooking(...args);
-                                                            await fetchMatches();
-                                                            await onRefreshGrid({ date: currentDateStr });
-                                                            closeInlineEdit();
-                                                        } : undefined}
-                                                        onMarkPaid={onMarkPaid ? async (bookingId) => {
-                                                            await onMarkPaid(bookingId);
-                                                            await fetchMatches();
-                                                            await onRefreshGrid({ date: currentDateStr });
-                                                        } : undefined}
-                                                        onGridRefresh={async () => {
-                                                            await fetchMatches();
-                                                            await onRefreshGrid({ date: currentDateStr });
-                                                        }}
-                                                        isOnHiddenCourt={courts.find((c) => c.id === inlineReservation.courtId)?.is_hidden === true}
-                                                    />
-                                                )}
-                                            </td>
-                                        </tr>
-                                    )}
-                                    </React.Fragment>
                                 );
                             })}
                             </>
@@ -1609,6 +1613,44 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                 />
             )}
             
+            {/* Detalle del partido: único acceso, con pestañas Detalles / Chat */}
+            {detailBookingId && detailReservation && onUpdateBooking && (
+                <ReservationModal
+                    initialTab={detailInitialTab}
+                    clubId={clubId}
+                    gridDate={currentDateStr}
+                    weeklySchedule={weeklySchedule}
+                    gridReservations={gridReservations}
+                    isOpen
+                    reservation={detailReservation}
+                    editingBookingData={detailBookingData}
+                    isLoadingBookingData={detailLoading}
+                    onClose={closeDetailModal}
+                    onUpdate={async (bookingId, data) => {
+                        await onUpdateBooking(bookingId, data);
+                        await fetchMatches();
+                        await onRefreshGrid({ date: currentDateStr });
+                        closeDetailModal();
+                    }}
+                    onDelete={onDeleteBooking ? async (...args) => {
+                        await onDeleteBooking(...args);
+                        await fetchMatches();
+                        await onRefreshGrid({ date: currentDateStr });
+                        closeDetailModal();
+                    } : undefined}
+                    onMarkPaid={onMarkPaid ? async (bookingId) => {
+                        await onMarkPaid(bookingId);
+                        await fetchMatches();
+                        await onRefreshGrid({ date: currentDateStr });
+                    } : undefined}
+                    onGridRefresh={async () => {
+                        await fetchMatches();
+                        await onRefreshGrid({ date: currentDateStr });
+                    }}
+                    isOnHiddenCourt={courts.find((c) => c.id === detailReservation.courtId)?.is_hidden === true}
+                />
+            )}
+
             {isCreateMatchOpen && (
                 <CreateMatchModal
                     clubId={clubId}

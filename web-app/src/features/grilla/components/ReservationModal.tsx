@@ -62,14 +62,6 @@ function portalModal(node: React.ReactNode): React.ReactNode {
     return createPortal(node, document.body);
 }
 
-function presentReservationModal(
-    node: React.ReactNode,
-    presentation: 'modal' | 'inline',
-): React.ReactNode {
-    if (presentation === 'inline') return node;
-    return portalModal(node);
-}
-
 function extractPlayMode(rawNotes: string | null | undefined): { mode: 'single' | 'double'; cleanNotes: string } {
     const src = String(rawNotes ?? '');
     const parts = src
@@ -131,8 +123,6 @@ interface ReservationModalProps {
     /** Reservas visibles en la grilla (para cancelar mantenimientos en bloque). */
     gridReservations?: Reservation[];
     onCancelMaintenance?: (bookingIds: string[]) => Promise<void>;
-    /** Embebido en Partidos: sin overlay ni portal. */
-    presentation?: 'modal' | 'inline';
     /** Pestaña inicial al abrir (p. ej. chat desde lista de partidos). */
     initialTab?: 'details' | 'chat';
 }
@@ -414,10 +404,9 @@ export const PlayerSearch: React.FC<{
 
 // ─── Tipos de pago por slot ───────────────────────────────────────────────────
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance, presentation = 'modal', initialTab = 'details',
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule, gridReservations = [], onCancelMaintenance, initialTab = 'details',
 }) => {
-    const isInline = presentation === 'inline';
-    const vvStyle = useVisualViewportFix(isOpen && !isInline);
+    const vvStyle = useVisualViewportFix(isOpen);
     const { t, i18n } = useGrillaTranslation();
     const isEditMode = !!editingBookingData;
     const tournamentIdFromBooking = useMemo(() => {
@@ -470,7 +459,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [courtToAdd, setCourtToAdd] = useState('');
     const { active: cashSessionActive, loading: cashSessionLoading } = useCashSessionActive(clubId);
 
-    const [activeTab, setActiveTab] = useState<'details' | 'chat'>('details');
+    const [activeTab, setActiveTab] = useState<'details' | 'chat'>(initialTab);
     const [chatMessages, setChatMessages] = useState<any[]>([]);
     const [loadingChat, setLoadingChat] = useState(false);
     const [chatDraft, setChatDraft] = useState('');
@@ -920,12 +909,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
     if (isLoadingBookingData && reservation && !reservation.id.startsWith('new-')) {
         const loadingBody = (
-            <div className={clsx(
-                'relative flex flex-col w-full bg-gray-50 overflow-hidden',
-                isInline ? 'max-h-[min(70vh,720px)] rounded-xl border border-gray-200 shadow-sm' : 'h-[90vh] sm:h-auto sm:max-h-[90vh] sm:w-[520px] sm:rounded-2xl',
-            )}>
+            <div className="relative flex flex-col w-full bg-gray-50 overflow-hidden h-[90vh] sm:h-auto sm:max-h-[90vh] sm:w-[520px] sm:rounded-2xl">
                 <div className="flex items-start justify-between px-6 py-4 bg-white border-b border-gray-100 shrink-0">
-                    <h2 className="text-xl font-bold text-gray-900">{t('reservation.modalTitleEdit')}</h2>
+                    <h2 className="text-xl font-bold text-gray-900">
+                        {activeTab === 'chat' ? 'Chat del partido' : t('reservation.modalTitleEdit')}
+                    </h2>
                     <button
                         onClick={onClose}
                         className="p-2 text-gray-400 transition-colors bg-gray-100 rounded-full hover:bg-gray-200 hover:text-gray-600 shrink-0"
@@ -936,12 +924,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 <div className="flex-1 flex items-center justify-center p-8">
                     <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
                         <div className="w-4 h-4 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
-                        Cargando datos de la reserva...
+                        {activeTab === 'chat' ? 'Cargando el chat...' : 'Cargando datos de la reserva...'}
                     </div>
                 </div>
             </div>
         );
-        if (isInline) return loadingBody;
         return portalModal(
             <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
                 <div className="absolute inset-0" onClick={onClose} />
@@ -1279,13 +1266,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const panelContent = (
             <div className={clsx(
                 'relative flex flex-col w-full bg-gray-50 overflow-hidden',
-                isInline
-                    ? activeTab === 'chat'
-                        ? 'h-[min(78vh,760px)] rounded-xl border border-gray-200 shadow-sm'
-                        : 'max-h-[min(70vh,720px)] rounded-xl border border-gray-200 shadow-sm'
-                    : activeTab === 'chat'
-                        ? 'h-[92vh] max-h-[920px] w-full max-w-[480px] rounded-t-3xl shadow-2xl sm:h-[min(88vh,820px)] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in'
-                        : 'h-[90vh] rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[900px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in',
+                activeTab === 'chat'
+                    ? 'h-[92vh] max-h-[920px] w-full max-w-[480px] rounded-t-3xl shadow-2xl sm:h-[min(88vh,820px)] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in'
+                    : 'h-[90vh] rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[900px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in',
             )}>
 
                 {/* Mobile Drag Indicator */}
@@ -2231,14 +2214,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             </div>
     );
 
-    return presentReservationModal(
+    return portalModal(
         <>
-        {isInline ? panelContent : (
         <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
             <div className="absolute inset-0" onClick={onClose} />
             {panelContent}
         </div>
-        )}
             {maintenanceCancelScopeOpen && reservation && (
                 <MaintenanceCancelScopeModal
                     target={reservation}
@@ -2261,6 +2242,5 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 />
             )}
         </>,
-        presentation,
     );
 };
