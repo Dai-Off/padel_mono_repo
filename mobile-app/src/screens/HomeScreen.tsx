@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CompetitiveLeagueHomeCard,
@@ -254,18 +254,14 @@ export function HomeScreen({
       setRetrying(false);
     }
   };
-  // Entrada escalonada "tipo remount" sin remontar. Solo se re-arma en
-  // CAMBIOS DE TAB: el swap es instantáneo, así que esconder en el blur es
-  // garantizado invisible y la vuelta entra en cascada sobre lienzo limpio.
-  // Al volver de pantallas apiladas (pase, detalles…) NO hay replay — el
-  // contenido sigue en su sitio, como hacen las apps grandes: cualquier
-  // reset ahí compite con la transición (timers = carreras perdidas) y
-  // acababa viéndose como un parpadeo.
+  // Entrada escalonada "tipo remount" sin remontar. Se re-arma al perder foco,
+  // tanto en cambios de tab como al apilar una pantalla encima: se esconden los
+  // bloques en el blur y se re-animan en el focus de vuelta. Con transparentModal
+  // la pantalla de encima cubre el Home al instante, así que el reset queda
+  // oculto y al volver la cascada entra sobre lienzo limpio.
   const [enterNonce, setEnterNonce] = useState(0);
   const [resetNonce, setResetNonce] = useState(0);
   const isFirstFocusRef = useRef(true);
-  const tabNavigation = useNavigation();
-  const tabRoute = useRoute();
   useFocusEffect(
     useCallback(() => {
       if (isFirstFocusRef.current) {
@@ -273,21 +269,12 @@ export function HomeScreen({
         // haría tartamudear la entrada inicial.
         isFirstFocusRef.current = false;
       } else {
-        // Si el blur anterior no escondió nada (vuelta de una pantalla
-        // apilada), animar visible→visible no produce ningún cambio.
         setEnterNonce((n) => n + 1);
       }
       return () => {
-        // ¿Este blur es un cambio de tab o una pantalla apilada encima?
-        // Si el tab activo ya no es este, el Home quedó oculto en este mismo
-        // frame: esconder aquí es seguro e invisible.
-        const state = tabNavigation.getState?.();
-        const activeTab = state?.routes?.[state.index ?? 0]?.name;
-        if (activeTab !== tabRoute.name) {
-          setResetNonce((n) => n + 1);
-        }
+        setResetNonce((n) => n + 1);
       };
-    }, [tabNavigation, tabRoute.name]),
+    }, []),
   );
 
   const [affinityModalVisible, setAffinityModalVisible] = useState(() => consumeAffinityModalPendingReopen());
