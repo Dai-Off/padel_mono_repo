@@ -1,8 +1,16 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchMatchmakingStatus } from '../api/matchmaking';
+import {
+  fetchMatchmakingLeaderboard,
+  fetchMatchmakingLeagueConfig,
+  fetchMatchmakingStatus,
+} from '../api/matchmaking';
+import { fetchMatches } from '../api/matches';
 import { fetchReceivedMatchInvites } from '../api/matchInvites';
 import { matchmakingKeys } from './keys';
+
+/** Tamaño de página del ranking (paridad con RANKING_PAGE_SIZE de la pantalla). */
+const RANKING_PAGE_SIZE = 15;
 
 /**
  * Polls de matchmaking en React Query (sustituyen a los dos setTimeout
@@ -46,5 +54,51 @@ export function useReceivedMatchInvitesQuery() {
     refetchInterval: 8000,
     refetchIntervalInBackground: false,
     staleTime: 0,
+  });
+}
+
+/**
+ * Config de divisiones de la liga. Pública y casi estática: staleTime alto y
+ * caché en memoria (evita re-fetch al reabrir la pantalla de liga).
+ */
+export function useMatchmakingLeagueConfigQuery() {
+  return useQuery({
+    queryKey: matchmakingKeys.leagueConfig(),
+    queryFn: async () => (await fetchMatchmakingLeagueConfig()) ?? [],
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+/** Ranking de la liga (paginado por offset). Cachea entre aperturas por liga. */
+export function useMatchmakingLeaderboardInfinite(liga: string | null | undefined) {
+  const { token, userId } = useMatchmakingSession();
+  return useInfiniteQuery({
+    queryKey: matchmakingKeys.leaderboard(userId ?? 'anon', liga ?? 'none'),
+    queryFn: async ({ pageParam }) => {
+      const r = await fetchMatchmakingLeaderboard(token, {
+        liga,
+        limit: RANKING_PAGE_SIZE,
+        offset: pageParam,
+      });
+      if (!r) throw new Error('leaderboard failed');
+      return r;
+    },
+    initialPageParam: 0,
+    getNextPageParam: (last, all) =>
+      last?.has_more ? all.reduce((sum, p) => sum + (p?.rows.length ?? 0), 0) : undefined,
+    enabled: Boolean(token && userId && liga),
+  });
+}
+
+/**
+ * Partidos de matchmaking recientes del jugador. Devuelve los MatchEnriched
+ * crudos; la pantalla aplica su mapeo `toRecentRows`. Cachea entre aperturas.
+ */
+export function useRecentMatchmakingMatchesQuery(viewerId: string | null | undefined) {
+  const { token, userId } = useMatchmakingSession();
+  return useQuery({
+    queryKey: matchmakingKeys.recent(userId ?? 'anon', viewerId ?? 'none'),
+    queryFn: () => fetchMatches({ expand: true, token: token!, activeOnly: false }),
+    enabled: Boolean(token && userId && viewerId),
   });
 }

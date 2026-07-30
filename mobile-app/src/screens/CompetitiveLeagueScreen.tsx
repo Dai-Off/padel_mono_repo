@@ -33,11 +33,10 @@ import { useClubCatalog } from '../hooks/useClubCatalog';
 import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
 import { computeMatchAvailabilityWindow } from '../lib/matchAvailabilityWindow';
 import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
-import { fetchMatches, fetchMatchById, type MatchEnriched } from '../api/matches';
+import { fetchMatchById, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from './PartidosScreen';
 import {
-  fetchMatchmakingLeagueConfig,
   fetchMatchmakingLeaderboard,
   fetchMatchmakingProposal,
   fetchMatchmakingStatus,
@@ -54,6 +53,12 @@ import {
   type PairInvite,
 } from '../api/matchmaking';
 import { useMyProfile } from '../queries/profile';
+import { useQueryClient } from '@tanstack/react-query';
+import { matchmakingKeys } from '../queries/keys';
+import {
+  useMatchmakingLeagueConfigQuery,
+  useRecentMatchmakingMatchesQuery,
+} from '../queries/matchmaking';
 import { useTranslation } from '../i18n';
 import { getMatchBooking } from '../domain/matchLifecycle';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
@@ -123,17 +128,26 @@ export function CompetitiveLeagueScreen({
 }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const userId = session?.user?.id ?? null;
+  const queryClient = useQueryClient();
+  // Status sembrado desde la query global (MatchmakingContext ya la poll-ea a
+  // nivel app): al abrir/reabrir la pantalla no re-parpadea el skeleton si el
+  // estado ya se conoce. El bootstrap de abajo revalida en silencio.
+  const cachedStatus = userId
+    ? queryClient.getQueryData<MatchmakingStatusResponse>(matchmakingKeys.status(userId)) ?? null
+    : null;
   const [mainTab, setMainTab] = useState<MainTab>('liga');
   const [step, setStep] = useState<Step>('home');
   const [form, setForm] = useState<SearchForm>(DEFAULT_FORM);
   const [loading, setLoading] = useState(false);
   const [openingProposal, setOpeningProposal] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(true);
+  const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(cachedStatus == null);
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
   const profile = useMyProfile().data ?? null;
   const { t } = useTranslation();
-  const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
+  // Config de divisiones desde React Query (cachea entre aperturas).
+  const leagueRows = useMatchmakingLeagueConfigQuery().data ?? null;
   const [rankingRows, setRankingRows] = useState<MatchmakingLeaderboardRow[]>([]);
   const [rankingTotal, setRankingTotal] = useState(0);
   const [rankingHasMore, setRankingHasMore] = useState(false);
@@ -141,7 +155,7 @@ export function CompetitiveLeagueScreen({
   const [rankingLoadingMore, setRankingLoadingMore] = useState(false);
   const [rankingError, setRankingError] = useState<string | null>(null);
   const rankingLoadGenRef = useRef(0);
-  const [status, setStatus] = useState<MatchmakingStatusResponse | null>(null);
+  const [status, setStatus] = useState<MatchmakingStatusResponse | null>(cachedStatus);
   const [proposal, setProposal] = useState<MatchmakingProposalResponse | null>(null);
   const [proposalMatch, setProposalMatch] = useState<MatchEnriched | null>(null);
   const [recentMatchRows, setRecentMatchRows] = useState<
@@ -255,10 +269,6 @@ export function CompetitiveLeagueScreen({
     setQueueStartedAtMs,
   ]);
   refreshStatusRef.current = refreshStatus;
-
-  useEffect(() => {
-    void fetchMatchmakingLeagueConfig().then(setLeagueRows);
-  }, []);
 
   const loadRankingPage = useCallback(
     async (offset: number, append: boolean) => {
@@ -376,20 +386,17 @@ export function CompetitiveLeagueScreen({
     onPartnerApplied?.();
   }, [pendingPartnerInvite, onPartnerApplied]);
 
+  // Partidos recientes desde React Query (cachea entre aperturas); el mapeo a
+  // filas sigue en la pantalla. Se sincroniza al state al llegar/cambiar el dato.
+  const recentMatchesQuery = useRecentMatchmakingMatchesQuery(profile?.id);
   useEffect(() => {
-    const token = session?.access_token ?? null;
     const myId = profile?.id;
-    if (!token || !myId) return;
-    let cancelled = false;
-    void fetchMatches({ expand: true, token, activeOnly: false }).then((rows) => {
-      if (cancelled) return;
-      const myMatches = rows.filter((m) => (m.match_players ?? []).some((mp) => mp.players?.id === myId));
-      setRecentMatchRows(toRecentRows(myMatches, myId));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.id, session?.access_token]);
+    if (!myId || !recentMatchesQuery.data) return;
+    const myMatches = recentMatchesQuery.data.filter((m) =>
+      (m.match_players ?? []).some((mp) => mp.players?.id === myId),
+    );
+    setRecentMatchRows(toRecentRows(myMatches, myId));
+  }, [recentMatchesQuery.data, profile?.id]);
 
   useEffect(() => {
     if (preferredClubsSeedDoneRef.current || clubCatalog.length === 0) return;

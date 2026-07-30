@@ -58,6 +58,14 @@ export const matchmakingKeys = {
   status: (userId: string) => ['matchmaking', userId, 'status'] as const,
   /** Invitaciones a partidos recibidas (poll 8s). */
   receivedInvites: (userId: string) => ['matchmaking', userId, 'received-invites'] as const,
+  /** Config de divisiones de la liga (pública, casi estática). */
+  leagueConfig: () => ['matchmaking', 'league-config'] as const,
+  /** Ranking de la liga (infinite, paginado por offset), por liga. */
+  leaderboard: (userId: string, liga: string) =>
+    ['matchmaking', userId, 'leaderboard', liga] as const,
+  /** Partidos de matchmaking recientes del jugador, keyed por viewer. */
+  recent: (userId: string, viewerId: string) =>
+    ['matchmaking', userId, 'recent', viewerId] as const,
 };
 
 /**
