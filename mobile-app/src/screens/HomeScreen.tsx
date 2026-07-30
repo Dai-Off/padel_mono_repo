@@ -24,7 +24,14 @@ import {
   SeasonPassHomeCard,
 } from '../components/home/inicio';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import {
+  useHomeActions,
+  useHomeStats,
+  useMyCourtReservations,
+  usePublicTournamentsCount,
+} from '../queries/home';
+import { useMisPartidos, usePartidosDiscovery } from '../queries/matches';
 import type { PartidoItem } from './PartidosScreen';
 import type { CourtReservation } from '../api/bookings';
 import { IAAfinidadModal, type AffinityCriteria } from '../components/home/IAAfinidadModal';
@@ -55,6 +62,10 @@ import { es } from '../i18n/es';
 import { zhHK } from '../i18n/zh-HK';
 
 type TabId = 'pistas' | 'partidos' | 'torneos';
+
+/** Identidades estables para los estados vacíos (evitan re-renders por `?? []`). */
+const EMPTY_PARTIDOS: PartidoItem[] = [];
+const EMPTY_RESERVATIONS: CourtReservation[] = [];
 
 function mapSeasonMissionToHome(
   m: SeasonPassMissionDto,
@@ -185,25 +196,40 @@ export function HomeScreen({
   const { session } = useAuth();
   const numberLocale = formatLocale(locale);
   const homeCopy = locale === 'zh-HK' ? zhHK.home : es.home;
-  // Datos del home cacheados a nivel de app (sobreviven a remounts del Home
-  // cuando navegas a otras pantallas y vuelves). Ver HomeDataContext.
-  const {
-    profile: myPlayerProfile,
-    profileLoading,
-    refreshProfile,
-    partidos,
-    misPartidos,
-    misReservasPista,
-    matchesLoading,
-    courtReservationsLoading,
-    publicTournamentsCount,
-    tournamentsLoading,
-    stats,
-    statsLoading,
-    refreshStreak,
-    hasInitialError,
-    refreshAll,
-  } = useHomeData();
+  // Datos del home leídos directo de React Query (el caché a nivel de app
+  // sobrevive a remounts del Home al navegar y volver).
+  const myProfileQuery = useMyProfile();
+  const myPlayerProfile = myProfileQuery.data ?? null;
+  const profileLoading = myProfileQuery.isLoading;
+
+  const misPartidosQuery = useMisPartidos();
+  const misPartidos = misPartidosQuery.data ?? EMPTY_PARTIDOS;
+  const discoveryQuery = usePartidosDiscovery();
+  const partidos = discoveryQuery.data ?? EMPTY_PARTIDOS;
+  const matchesLoading = misPartidosQuery.isLoading || discoveryQuery.isLoading;
+
+  const courtReservationsQuery = useMyCourtReservations();
+  const misReservasPista = courtReservationsQuery.data ?? EMPTY_RESERVATIONS;
+  const courtReservationsLoading = courtReservationsQuery.isLoading;
+
+  const tournamentsQuery = usePublicTournamentsCount();
+  const publicTournamentsCount = tournamentsQuery.data ?? null;
+  const tournamentsLoading = tournamentsQuery.isLoading;
+
+  const statsQuery = useHomeStats();
+  const stats = statsQuery.data ?? null;
+  const statsLoading = statsQuery.isLoading;
+
+  const { refreshProfile, refreshStreak, refreshAll } = useHomeActions();
+
+  // Banner de error inicial: isError sin datos = primera carga fallida (stats y
+  // racha no marcan error a propósito: degradan a ceros / silencioso).
+  const hasInitialError =
+    (myProfileQuery.isError && myProfileQuery.data == null) ||
+    (misPartidosQuery.isError && misPartidosQuery.data == null) ||
+    (discoveryQuery.isError && discoveryQuery.data == null) ||
+    (courtReservationsQuery.isError && courtReservationsQuery.data == null) ||
+    (tournamentsQuery.isError && tournamentsQuery.data == null);
   // Season pass: queries compartidas con la pantalla del pase. La card usa
   // /estado (rápido); las misiones del Home, /misiones (evaluación lenta).
   // isLoading = primera carga en vuelo, como el antiguo seasonPassLoading.

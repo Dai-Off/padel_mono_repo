@@ -2,9 +2,9 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches';
+import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { normalizeMatchEnriched } from '../api/normalizeMatch';
-import type { MyPlayerProfile } from '../api/players';
 import {
   getMatchBooking,
   getMatchListPhase,
@@ -12,6 +12,7 @@ import {
 } from '../domain/matchLifecycle';
 import { defaultPartidosDiscoveryDateRange } from '../domain/partidosFilters';
 import {
+  enrichPartidoWithProfileAvatar,
   enrichPartidosWithProfileAvatar,
   isPartidoOpenForDiscovery,
   mergeMisPartidosFromServer,
@@ -19,6 +20,7 @@ import {
   upsertMisPartidosList,
   type ProfileForPartidoEnrich,
 } from '../lib/partidoPlayerUtils';
+import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { findMisPartidoIdsToRemove } from '../lib/pruneMisPartidos';
 import type { PartidoItem } from '../screens/PartidosScreen';
 import { useMyProfile } from './profile';
@@ -317,4 +319,79 @@ export function useMisPartidosActions() {
   );
 
   return { upsertMisPartido, removeMisPartido };
+}
+
+/**
+ * Tras crear/unirse a un partido: trae el perfil fresco, recarga el match, lo
+ * inserta (o lo quita si está cancelado) en el carrusel y revalida /mine.
+ * Extraído de HomeDataContext.syncMisPartidoFromMatchId sin cambios de lógica.
+ */
+export function useSyncMisPartidoFromMatchId() {
+  const { session } = useAuth();
+  const token = session?.access_token ?? null;
+  const userId = session?.user?.id ?? null;
+  const queryClient = useQueryClient();
+  const { data: profile } = useMyProfile();
+  const { upsertMisPartido, removeMisPartido } = useMisPartidosActions();
+  const refreshMatches = useRefreshMatches();
+
+  return useCallback(
+    async (
+      matchId: string,
+      opts?: {
+        organizerPlayerId?: string | null;
+        forceSlotIndex?: number;
+        matchVisibility?: 'public' | 'private';
+      },
+    ) => {
+      if (!token || !matchId.trim()) return;
+
+      const freshProfile = await fetchMyPlayerProfile(token);
+      const playerId = freshProfile?.id ?? opts?.organizerPlayerId?.trim() ?? profile?.id ?? null;
+      if (!playerId) {
+        await refreshMatches({ force: true, scope: 'mine' });
+        return;
+      }
+
+      const profileEnrich: ProfileForPartidoEnrich = {
+        id: playerId,
+        firstName: freshProfile?.firstName ?? profile?.firstName,
+        lastName: freshProfile?.lastName ?? profile?.lastName,
+        avatarUrl: freshProfile?.avatarUrl ?? profile?.avatarUrl ?? null,
+      };
+
+      const loaded = await reloadMatchPartido(matchId, token, {
+        retryIfMissingPlayerId: playerId,
+      });
+      if (loaded) {
+        if (isPartidoCancelled(loaded)) {
+          await removeMisPartido(matchId);
+        } else {
+          let enriched = enrichPartidoWithProfileAvatar(loaded, profileEnrich, {
+            forceSlotIndex: opts?.forceSlotIndex,
+          });
+          enriched = {
+            ...enriched,
+            organizerPlayerId: enriched.organizerPlayerId ?? opts?.organizerPlayerId ?? playerId,
+            visibility:
+              enriched.visibility ??
+              (opts?.matchVisibility === 'private'
+                ? 'private'
+                : opts?.matchVisibility === 'public'
+                  ? 'public'
+                  : undefined),
+          };
+          await upsertMisPartido(enriched);
+        }
+      }
+
+      await refreshMatches({ force: true, scope: 'mine' });
+
+      if (freshProfile && userId) {
+        // Siembra el caché del perfil base (lo marca fresco: evita otro fetch).
+        queryClient.setQueryData(profileKeys.base(userId), freshProfile);
+      }
+    },
+    [token, userId, queryClient, profile?.id, profile?.firstName, profile?.lastName, profile?.avatarUrl, upsertMisPartido, removeMisPartido, refreshMatches],
+  );
 }

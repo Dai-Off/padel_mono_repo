@@ -7,14 +7,15 @@ import type { ReceivedMatchInvite } from '../api/matchInvites';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { isPlayerInPartido } from '../lib/partidoPlayerUtils';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import { useMisPartidosActions } from '../queries/matches';
 import { useTranslation } from '../i18n';
 import { navigationRef } from './navigationRef';
 
 /** Carga un partido por id y abre su detalle (grafico de evolucion, etc.). */
 export function useOpenMatchById() {
   const { session } = useAuth();
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   return useCallback(
     async (matchId: string) => {
       const m = await fetchMatchById(matchId, session?.access_token ?? null);
@@ -31,7 +32,8 @@ export function useOpenMatchById() {
 /** Carga el partido de una invitacion recibida y abre su detalle. */
 export function useOpenMatchFromInvite() {
   const { session } = useAuth();
-  const { profile, upsertMisPartido } = useHomeData();
+  const profile = useMyProfile().data ?? null;
+  const { upsertMisPartido } = useMisPartidosActions();
   const { t } = useTranslation();
   return useCallback(
     async (invite: ReceivedMatchInvite) => {

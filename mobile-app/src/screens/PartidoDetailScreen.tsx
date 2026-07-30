@@ -38,7 +38,9 @@ import {
 } from '../api/payments';
 import { fetchMyPlayerId, fetchMyPlayerProfile } from '../api/players';
 import { normalizePlayerAvatarUrl } from '../api/playerAvatar';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import { useHomeActions } from '../queries/home';
+import { useMisPartidosActions, useRefreshMatches } from '../queries/matches';
 import {
   applyPartidoJoinAfterPayment,
   applyPartidoServerMerge,
@@ -162,7 +164,10 @@ export function PartidoDetailScreen({
    * todavía no ha llegado, tratamos como "completado" para no mostrar el
    * candado durante el flicker inicial.
    */
-  const { profile: myProfile, refreshMatches, refreshProfile, upsertMisPartido, removeMisPartido } = useHomeData();
+  const myProfile = useMyProfile().data ?? null;
+  const refreshMatches = useRefreshMatches();
+  const { refreshProfile } = useHomeActions();
+  const { upsertMisPartido, removeMisPartido } = useMisPartidosActions();
   const matchFetchGen = useRef(0);
   /** Tras pagar: conservar plaza en UI hasta que el servidor confirme al jugador. */
   const postJoinPendingRef = useRef<{

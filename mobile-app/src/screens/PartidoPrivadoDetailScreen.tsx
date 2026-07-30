@@ -16,7 +16,7 @@ import { fetchMyPlayerId } from '../api/players';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import { OpenMatchPriceBreakdown } from '../components/partido/OpenMatchPriceBreakdown';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMisPartidosActions, useRefreshMatches } from '../queries/matches';
 import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 import { buildLeaveMatchAlertMessage } from '../utils/matchLeaveAlert';
@@ -37,7 +37,8 @@ function StatusDot({ color }: { color: string }) {
 export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDetailScreenProps) {
   const { t } = useTranslation();
   const { session } = useAuth();
-  const { removeMisPartido, refreshMatches } = useHomeData();
+  const { removeMisPartido } = useMisPartidosActions();
+  const refreshMatches = useRefreshMatches();
   const [clubInfoVisible, setClubInfoVisible] = useState(false);
   const [partidoLocal, setPartidoLocal] = useState(partido);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);

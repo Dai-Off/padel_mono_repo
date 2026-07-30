@@ -215,7 +215,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
   const [selectedClubIds, setSelectedClubIds] = useState<string[]>([]);
   const { clubs: clubCatalog } = useClubCatalog();
   // Invalidamos la cache global del profile tras guardar — el resto de
-  // pantallas que leen `useHomeData().profile` verán los cambios.
+  // pantallas que leen `useMyProfile()` verán los cambios.
   const { refreshProfile: refreshGlobalProfile } = useHomeActions();
 
   useEffect(() => {
