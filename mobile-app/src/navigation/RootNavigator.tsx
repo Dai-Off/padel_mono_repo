@@ -1,5 +1,8 @@
 import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import {
+  createNativeStackNavigator,
+  type NativeStackNavigationOptions,
+} from '@react-navigation/native-stack';
 import { RequireAuth } from '../components/auth';
 import { MainShell } from './MainShell';
 import { navigationRef } from './navigationRef';
@@ -67,6 +70,19 @@ const APP_NAV_THEME: Theme = {
 /** Fondo de las pantallas del stack durante las transiciones nativas. */
 const APP_CONTENT_STYLE = { backgroundColor: '#0F0F0F' } as const;
 
+/**
+ * Opciones para las rutas que se apilan sobre el Home y desde las que se vuelve
+ * a él. `transparentModal` mantiene la pantalla de debajo (el Home) montada y
+ * pintada mientras esta está encima (native-stack v7 no la detacha en modales
+ * transparentes), así al volver se revela sin flash negro ni re-montaje. Las
+ * pantallas tienen fondo opaco propio (RouteShell), no se transparentan en uso.
+ */
+const REVEAL_HOME_OPTIONS: NativeStackNavigationOptions = {
+  presentation: 'transparentModal',
+  animation: 'fade',
+  animationDuration: 220,
+};
+
 function MainRoute() {
   return (
     <RequireAuth>
@@ -113,26 +129,19 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="ChangePassword" component={ChangePasswordRoute} />
             {/* Cluster comercio / reservas / cursos */}
             <RootStack.Screen name="Cart" component={CartRoute} />
-            <RootStack.Screen name="DailyLesson" component={DailyLessonRoute} />
+            <RootStack.Screen
+              name="DailyLesson"
+              component={DailyLessonRoute}
+              options={REVEAL_HOME_OPTIONS}
+            />
             <RootStack.Screen name="EducationalCourseDetail" component={EducationalCourseDetailRoute} />
             <RootStack.Screen name="PublicCourseDetail" component={PublicCourseDetailRoute} />
             <RootStack.Screen name="CrearPartido" component={CrearPartidoRoute} />
             <RootStack.Screen name="CourtReservationDetail" component={CourtReservationDetailRoute} />
-            {/* El pase pinta al instante (skeleton/cache), así que puede
-                permitirse animación de entrada sin mostrar cascarón. Fade
-                discreto: el slide se descartó por brusco para esta pantalla.
-                presentation 'transparentModal' mantiene el Home montado y
-                pintado debajo (native-stack v7 no detacha la pantalla anterior
-                en modales transparentes), así el fade de salida lo revela en
-                vez de desvanecerse a negro. El pase tiene fondo opaco propio. */}
             <RootStack.Screen
               name="SeasonPass"
               component={SeasonPassRoute}
-              options={{
-                presentation: 'transparentModal',
-                animation: 'fade',
-                animationDuration: 220,
-              }}
+              options={REVEAL_HOME_OPTIONS}
             />
             {/* Grafo social / partidos */}
             <RootStack.Screen name="PartidoDetail" component={PartidoDetailRoute} />
@@ -140,10 +149,18 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="Messages" component={MessagesRoute} />
             <RootStack.Screen name="DirectMessageThread" component={DirectMessageThreadRoute} />
             <RootStack.Screen name="Notifications" component={NotificationsRoute} />
-            <RootStack.Screen name="Community" component={CommunityRoute} />
+            <RootStack.Screen
+              name="Community"
+              component={CommunityRoute}
+              options={REVEAL_HOME_OPTIONS}
+            />
             <RootStack.Screen name="ClubDetail" component={ClubDetailRoute} />
             {/* Matchmaking / actividad */}
-            <RootStack.Screen name="CompetitiveLeague" component={CompetitiveLeagueRoute} />
+            <RootStack.Screen
+              name="CompetitiveLeague"
+              component={CompetitiveLeagueRoute}
+              options={REVEAL_HOME_OPTIONS}
+            />
             <RootStack.Screen name="TuActividad" component={TuActividadNavigator} />
           </RootStack.Group>
         ) : (
