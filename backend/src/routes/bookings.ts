@@ -497,7 +497,7 @@ const COURT_MAINTENANCE_PREFIX = '__COURT_MAINTENANCE__';
  *               reason:
  *                 type: string
  *                 description: Etiqueta libre que se muestra en la grilla
- *                 example: Cumpleaños Marcos
+ *                 example: Cumpleaños
  *               displace_incomplete:
  *                 type: boolean
  *                 description: Si true, cancela y reembolsa turnos incompletos en conflicto antes de crear
@@ -1600,7 +1600,10 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   const typesWithoutOrganizer = ['blocked', 'tournament'];
-  const needsOrganizer = !typesWithoutOrganizer.includes(booking_type);
+  const isClubPublishedOpenMatch =
+    String(booking_type ?? '') === 'open_match' &&
+    ['manual', 'system'].includes(String(source_channel ?? ''));
+  const needsOrganizer = !typesWithoutOrganizer.includes(booking_type) && !isClubPublishedOpenMatch;
   if (needsOrganizer && !organizer_player_id) {
     return res.status(400).json({
       ok: false,

@@ -26,6 +26,8 @@ import { apiFetchWithAuth } from '../../../services/api';
 import { clubIanaTimeZone, zonedTimeToUtc, formatTimeHHmmInClubTz, dayKeyInClubTz, validateBookingSlotWithinClubHours } from '../../../lib/clubTimeZone';
 import { clubChatsService } from '../../../services/clubChats';
 import { authService } from '../../../services/auth';
+import { useCashSessionActive } from '../../../hooks/useCashSessionActive';
+import { copyTextToClipboard } from '../../../lib/copyTextToClipboard';
 
 function clubSlotToUtcIso(dateBase: string, hour: string, minute: string): string {
     return zonedTimeToUtc(`${dateBase}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`).toISOString();
@@ -466,6 +468,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [multiCourtTotalCents, setMultiCourtTotalCents] = useState<number | null>(null);
     const navigate = useNavigate();
     const [courtToAdd, setCourtToAdd] = useState('');
+    const { active: cashSessionActive, loading: cashSessionLoading } = useCashSessionActive(clubId);
 
     const [activeTab, setActiveTab] = useState<'details' | 'chat'>('details');
     const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -474,6 +477,15 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [sendingChat, setSendingChat] = useState(false);
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const [me, setMe] = useState<{ authUserId: string | null; playerId: string | null }>({ authUserId: null, playerId: null });
+
+    const requireOpenCash = useCallback(() => {
+        toast.error('Debes abrir la caja antes de cobrar turnos o usar el carrito', {
+            action: {
+                label: 'Abrir caja',
+                onClick: () => navigate('/cierreCaja'),
+            },
+        });
+    }, [navigate]);
 
     useEffect(() => {
         if (!isOpen) {
@@ -1208,6 +1220,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
     const goToCart = () => {
         if (!editingBookingData) return;
+        if (!cashSessionLoading && !cashSessionActive) {
+            requireOpenCash();
+            return;
+        }
         const q = new URLSearchParams();
         if (editingBookingData.organizer_player_id) q.set('player', String(editingBookingData.organizer_player_id));
         q.set('booking', String(editingBookingData.id));
@@ -1217,6 +1233,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
     const handleMarkPaid = async () => {
         if (!onMarkPaid || !editingBookingData) return;
+        if (!cashSessionLoading && !cashSessionActive) {
+            requireOpenCash();
+            return;
+        }
         setIsMarkingPaid(true);
         try {
             await onMarkPaid(editingBookingData.id);
@@ -1260,8 +1280,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             <div className={clsx(
                 'relative flex flex-col w-full bg-gray-50 overflow-hidden',
                 isInline
-                    ? 'max-h-[min(70vh,720px)] rounded-xl border border-gray-200 shadow-sm'
-                    : 'h-[90vh] rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[900px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in',
+                    ? activeTab === 'chat'
+                        ? 'h-[min(78vh,760px)] rounded-xl border border-gray-200 shadow-sm'
+                        : 'max-h-[min(70vh,720px)] rounded-xl border border-gray-200 shadow-sm'
+                    : activeTab === 'chat'
+                        ? 'h-[92vh] max-h-[920px] w-full max-w-[480px] rounded-t-3xl shadow-2xl sm:h-[min(88vh,820px)] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in'
+                        : 'h-[90vh] rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[900px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in',
             )}>
 
                 {/* Mobile Drag Indicator */}
@@ -1270,48 +1294,58 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 </div>
 
                 {/* Header */}
-                <div className="flex items-start justify-between px-6 py-4 bg-white border-b border-gray-100 shrink-0">
+                <div className={clsx(
+                    'flex items-start justify-between bg-white border-b border-gray-100 shrink-0',
+                    activeTab === 'chat' ? 'px-4 py-3' : 'px-6 py-4',
+                )}>
                     <div className="flex flex-col gap-2">
                         <div className="flex items-center gap-3 flex-wrap">
-                            <h2 className="text-xl font-bold text-gray-900 leading-tight">
-                                {isEditMode ? t('reservation.modalTitleEdit') : t('reservation.modalTitleNew')}
+                            <h2 className={clsx(
+                                'font-bold text-gray-900 leading-tight',
+                                activeTab === 'chat' ? 'text-base' : 'text-xl',
+                            )}>
+                                {activeTab === 'chat'
+                                    ? 'Chat del partido'
+                                    : isEditMode
+                                      ? t('reservation.modalTitleEdit')
+                                      : t('reservation.modalTitleNew')}
                             </h2>
-                            {courtDisplayName && (
+                            {activeTab !== 'chat' && courtDisplayName && (
                                 <span className="px-3 py-0.5 bg-[#006A6A] text-white text-sm font-bold rounded-md uppercase tracking-wide">
                                     {courtDisplayName}
                                 </span>
                             )}
                         </div>
-                        {isEditMode && editingBookingData?.created_at && (
+                        {activeTab !== 'chat' && isEditMode && editingBookingData?.created_at && (
                             <span className="text-[11px] text-gray-400">
                                 Creada el {new Date(editingBookingData.created_at).toLocaleDateString(calendarLocale(i18n.language), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </span>
                         )}
-                        {overlapError && (
+                        {activeTab !== 'chat' && overlapError && (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
                                 <AlertTriangle size={13} className="shrink-0" />
                                 {overlapError}
                             </div>
                         )}
-                        {hoursError && (
+                        {activeTab !== 'chat' && hoursError && (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
                                 <AlertTriangle size={13} className="shrink-0" />
                                 {hoursError}
                             </div>
                         )}
-                        {paymentError && (
+                        {activeTab !== 'chat' && paymentError && (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
                                 <AlertCircle size={13} className="shrink-0" />
                                 {paymentError}
                             </div>
                         )}
-                        {moveToHiddenError && (
+                        {activeTab !== 'chat' && moveToHiddenError && (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700 font-medium mt-1">
                                 <AlertTriangle size={13} className="shrink-0" />
                                 {moveToHiddenError}
                             </div>
                         )}
-                        {batchResult && batchResult.failed.length > 0 && (
+                        {activeTab !== 'chat' && batchResult && batchResult.failed.length > 0 && (
                             <div className="mt-2 max-h-32 overflow-y-auto rounded-md border border-red-200 bg-red-50 px-3 py-2">
                                 <p className="text-xs font-bold text-red-800">
                                     {batchResult.created} creada(s) · {batchResult.failed.length} fallida(s)
@@ -1353,10 +1387,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            void navigator.clipboard
-                                                .writeText(shareText)
-                                                .then(() => toast.success('Invitación copiada al portapapeles'))
-                                                .catch(() => toast.error('No se pudo copiar la invitación'));
+                                            void copyTextToClipboard(shareText).then((ok) => {
+                                                if (ok) toast.success('Invitación copiada al portapapeles');
+                                                else toast.error('No se pudo copiar la invitación');
+                                            });
                                         }}
                                         className="flex items-center gap-1.5 px-4 py-1.5 bg-white border border-gray-300 text-gray-700 text-xs font-bold rounded-md hover:bg-gray-50 transition-colors"
                                     >
@@ -1458,55 +1492,138 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 )}
 
                 {/* Scrollable Content */}
-                <div className="flex-1 p-6 overflow-y-auto hidden-scrollbar flex flex-col">
+                <div className={clsx(
+                    'flex-1 overflow-y-auto hidden-scrollbar flex flex-col',
+                    activeTab === 'chat' ? 'p-0 bg-[#F3F4F6]' : 'p-6',
+                )}>
 
                     {isEditMode && editingBookingData && activeTab === 'chat' ? (
-                        <div className="flex-1 flex flex-col min-h-[300px] sm:min-h-[400px]">
+                        <div className="flex-1 flex flex-col min-h-0">
+                            {/* Match context — estilo Playtomic */}
+                            <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-bold text-[#1A1A1A]">
+                                            {courtDisplayName || 'Partido'}
+                                        </p>
+                                        <p className="mt-0.5 text-[11px] font-medium text-gray-500">
+                                            {formattedDate}
+                                            {reservation?.startTime ? ` · ${reservation.startTime}` : ''}
+                                            {reservation?.durationMinutes ? ` · ${reservation.durationMinutes} min` : ''}
+                                        </p>
+                                    </div>
+                                    <div className="flex -space-x-2 shrink-0">
+                                        {(reservation?.detailedPlayers || []).slice(0, 4).map((p, idx) => (
+                                            <div
+                                                key={`${p.name}-${idx}`}
+                                                title={p.name}
+                                                className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#006A6A] text-[10px] font-bold text-white"
+                                            >
+                                                {(p.name || '?').trim().charAt(0).toUpperCase()}
+                                            </div>
+                                        ))}
+                                        {(reservation?.detailedPlayers || []).length === 0 && (
+                                            <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-gray-200 text-[10px] font-bold text-gray-500">
+                                                ?
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
                             {/* Messages area */}
-                            <div ref={chatContainerRef} className="flex-1 overflow-y-auto space-y-3 pr-2 mb-4 max-h-[350px] sm:max-h-[450px]">
+                            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-3 py-4 space-y-1 min-h-[280px]">
                                 {loadingChat ? (
-                                    <div className="flex items-center justify-center h-full text-xs text-gray-500 gap-2">
+                                    <div className="flex items-center justify-center h-full text-xs text-gray-500 gap-2 py-16">
                                         <div className="w-4 h-4 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
                                         Cargando mensajes...
                                     </div>
                                 ) : chatMessages.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-xs text-gray-400 py-12">
-                                        <MessageSquare className="w-8 h-8 opacity-30 mb-2" />
-                                        Aún no hay mensajes en este partido.
+                                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 py-16 px-6">
+                                        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-sm">
+                                            <MessageSquare className="w-7 h-7 opacity-40 text-[#006A6A]" />
+                                        </div>
+                                        <p className="text-sm font-semibold text-gray-600">Chat del partido</p>
+                                        <p className="mt-1 text-xs text-gray-400 max-w-[240px]">
+                                            Escribe al grupo para avisar cambios de horario, pista o jugadores.
+                                        </p>
                                     </div>
                                 ) : (
-                                    chatMessages.map((m) => {
-                                        const isClubMessage = Boolean(me.authUserId && m.author_user_id === me.authUserId);
-                                        return (
-                                            <div
-                                                key={m.id}
-                                                className={`w-fit max-w-[75%] rounded-xl px-3 py-2 text-xs ${
-                                                    isClubMessage
-                                                        ? "ml-auto bg-[#006A6A] text-white"
-                                                        : "bg-gray-100 text-[#1A1A1A]"
-                                                }`}
-                                            >
-                                                <div className="mb-0.5 flex items-center gap-1.5">
-                                                    <p className="text-[9px] opacity-75 font-bold">{m.author_name}</p>
-                                                    {isClubMessage && (
-                                                        <span className="rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide bg-white/20">
-                                                            Club
-                                                        </span>
+                                    (() => {
+                                        let lastDayKey = '';
+                                        return chatMessages.map((m) => {
+                                            const isClubMessage = Boolean(me.authUserId && m.author_user_id === me.authUserId);
+                                            const created = new Date(m.created_at);
+                                            const dayKey = created.toLocaleDateString('es-ES', {
+                                                year: 'numeric',
+                                                month: '2-digit',
+                                                day: '2-digit',
+                                            });
+                                            const showDay = dayKey !== lastDayKey;
+                                            lastDayKey = dayKey;
+                                            const initials = String(m.author_name || '?').trim().charAt(0).toUpperCase();
+                                            return (
+                                                <React.Fragment key={m.id}>
+                                                    {showDay && (
+                                                        <div className="flex justify-center py-3">
+                                                            <span className="rounded-full bg-white/90 px-3 py-1 text-[10px] font-semibold text-gray-500 shadow-sm">
+                                                                {created.toLocaleDateString('es-ES', {
+                                                                    weekday: 'short',
+                                                                    day: 'numeric',
+                                                                    month: 'short',
+                                                                })}
+                                                            </span>
+                                                        </div>
                                                     )}
-                                                </div>
-                                                <p className="wrap-break-word">{m.message}</p>
-                                                <span className="block text-[8px] opacity-60 text-right mt-1">
-                                                    {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                </span>
-                                            </div>
-                                        );
-                                    })
+                                                    <div className={clsx(
+                                                        'flex gap-2 mb-2',
+                                                        isClubMessage ? 'flex-row-reverse' : 'flex-row',
+                                                    )}>
+                                                        {!isClubMessage && (
+                                                            <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-[10px] font-bold text-gray-600 shadow-sm">
+                                                                {initials}
+                                                            </div>
+                                                        )}
+                                                        <div
+                                                            className={clsx(
+                                                                'max-w-[78%] rounded-2xl px-3.5 py-2 text-[13px] leading-snug shadow-sm',
+                                                                isClubMessage
+                                                                    ? 'rounded-br-md bg-[#006A6A] text-white'
+                                                                    : 'rounded-bl-md bg-white text-[#1A1A1A]',
+                                                            )}
+                                                        >
+                                                            <div className="mb-0.5 flex items-center gap-1.5">
+                                                                <p className={clsx(
+                                                                    'text-[10px] font-bold',
+                                                                    isClubMessage ? 'opacity-80' : 'text-gray-500',
+                                                                )}>
+                                                                    {m.author_name}
+                                                                </p>
+                                                                {isClubMessage && (
+                                                                    <span className="rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide bg-white/20">
+                                                                        Club
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p className="wrap-break-word whitespace-pre-wrap">{m.message}</p>
+                                                            <span className={clsx(
+                                                                'mt-1 block text-[9px] text-right',
+                                                                isClubMessage ? 'opacity-70' : 'text-gray-400',
+                                                            )}>
+                                                                {created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </React.Fragment>
+                                            );
+                                        });
+                                    })()
                                 )}
                             </div>
                             
-                            {/* Send input */}
-                            <div className="border-t border-gray-200 pt-3 mt-auto shrink-0">
-                                <div className="flex gap-2">
+                            {/* Composer fijo */}
+                            <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3">
+                                <div className="flex items-end gap-2">
                                     <input
                                         type="text"
                                         value={chatDraft}
@@ -1516,8 +1633,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                                 void handleSendChatMessage();
                                             }
                                         }}
-                                        placeholder="Escribe un mensaje..."
-                                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#006A6A]/20"
+                                        placeholder="Escribe un mensaje… Usa @club para avisar"
+                                        className="w-full rounded-full border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#006A6A]/20"
                                     />
                                     <button
                                         type="button"
@@ -1525,9 +1642,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                         onClick={() => {
                                             void handleSendChatMessage();
                                         }}
-                                        className="rounded-xl bg-[#006A6A] hover:bg-[#005555] px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+                                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#006A6A] text-white hover:bg-[#005555] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
                                     >
-                                        <Send className="h-3.5 w-3.5" />
+                                        <Send className="h-4 w-4" />
                                     </button>
                                 </div>
                             </div>

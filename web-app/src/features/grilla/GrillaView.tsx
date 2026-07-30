@@ -138,6 +138,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [gridReservations, setGridReservations] = useState<Reservation[]>([]);
     const [listReservations, setListReservations] = useState<Reservation[]>([]);
     const [loading, setLoading] = useState(true);
+    const [bootstrapped, setBootstrapped] = useState(false);
     const [authResolved, setAuthResolved] = useState(false);
     const [isCreatingCourt, setIsCreatingCourt] = useState(false);
     const [clubId, setClubId] = useState<string | null>(null);
@@ -147,6 +148,12 @@ const useClubData = (dateOrStr: Date | string) => {
     const [slotDurationMin, setSlotDurationMin] = useState<number | undefined>(undefined);
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
+    const activeDateRef = useRef(dateStr);
+    const fetchSequenceRef = useRef(0);
+
+    useEffect(() => {
+        activeDateRef.current = dateStr;
+    }, [dateStr]);
 
     // Resolve club_id and load custom type colors from admin settings
     useEffect(() => {
@@ -242,9 +249,10 @@ const useClubData = (dateOrStr: Date | string) => {
     const fetchBookingsForDate = useCallback(async (
         date: string,
         courtsData: Court[],
+        forceRefresh = false,
     ): Promise<{ grid: Reservation[]; list: Reservation[] }> => {
         const cached = bookingsCache[date];
-        if (cached && Date.now() - cached.ts < CACHE_TTL) {
+        if (!forceRefresh && cached && Date.now() - cached.ts < CACHE_TTL) {
             return {
                 grid: mapBookings(cached.data, courtsData, 'grid'),
                 list: mapBookings(cached.data, courtsData, 'list'),
@@ -336,40 +344,53 @@ const useClubData = (dateOrStr: Date | string) => {
 
     const fetchData = useCallback(async () => {
         if (!authResolved) return;
+        const requestSequence = ++fetchSequenceRef.current;
+        const requestedDate = dateStr;
         if (!clubId) {
-            setLoading(false);
+            if (requestSequence === fetchSequenceRef.current) {
+                setLoading(false);
+                setBootstrapped(true);
+            }
             return;
         }
-        // Spinner en la primera carga (antes de tener canchas)
-        const isFirstLoad = courtsRef.current.length === 0;
-        if (isFirstLoad) setLoading(true);
-
-        // Render instantáneo: si hay caché para esta fecha, pintar de inmediato
-        const cached = bookingsCache[dateStr];
-        if (!isFirstLoad && cached) {
-            setGridReservations(mapBookings(cached.data, courtsRef.current, 'grid'));
-            setListReservations(mapBookings(cached.data, courtsRef.current, 'list'));
-        }
+        setLoading(true);
 
         try {
             const courtsData = await fetchCourts();
-            const mapped = await fetchBookingsForDate(dateStr, courtsData);
+            const mapped = await fetchBookingsForDate(requestedDate, courtsData, true);
+            if (requestSequence !== fetchSequenceRef.current) return;
             setGridReservations(mapped.grid);
             setListReservations(mapped.list);
             // Prefetch de los otros 3 días ahora que las canchas ya están disponibles
-            prefetchWindow(courtsData, dateStr);
+            void prefetchWindow(courtsData, requestedDate);
         } catch (err) {
-            console.error('Error fetching club data:', err);
+            if (requestSequence === fetchSequenceRef.current) {
+                console.error('Error fetching club data:', err);
+            }
         } finally {
-            setLoading(false);
+            if (requestSequence === fetchSequenceRef.current) {
+                setLoading(false);
+                setBootstrapped(true);
+            }
         }
     }, [authResolved, clubId, dateStr, fetchCourts, fetchBookingsForDate, prefetchWindow]);
 
-    // Force-refresh: invalidate cache for current date and re-fetch
+    const fetchDataRef = useRef(fetchData);
+    useEffect(() => {
+        fetchDataRef.current = fetchData;
+    }, [fetchData]);
+
+    // Force-refresh: invalidate cache and re-fetch (current day or the requested date if visible)
     const refresh = useCallback(async (opts?: { date?: string }) => {
         const d = opts?.date ?? dateStr;
         delete bookingsCache[d];
-        if (d === dateStr) await fetchData();
+        // Always drop neighboring cache noise for the same club day mutations
+        if (d === dateStr) {
+            await fetchData();
+            return;
+        }
+        // Booking created/updated on another day: ensure that day is stale so next visit refetches
+        delete bookingsCache[d];
     }, [dateStr, fetchData]);
 
     useEffect(() => {
@@ -391,6 +412,7 @@ const useClubData = (dateOrStr: Date | string) => {
                     table: 'bookings',
                 },
                 (payload) => {
+                    const activeDate = activeDateRef.current;
                     // Leemos courtsRef.current en cada evento para evitar el
                     // stale-closure: al momento de suscribir las canchas aún
                     // pueden no haber cargado, pero sí lo estarán al llegar eventos.
@@ -403,7 +425,7 @@ const useClubData = (dateOrStr: Date | string) => {
 
                     if (payload.eventType === 'INSERT') {
                         const raw = payload.new as any;
-                        const rawDate = toDateStr(new Date(raw.start_at));
+                        const rawDate = dayKeyInClubTz(new Date(raw.start_at));
                         // Actualizar caché del día afectado (esté visible o no)
                         if (bookingsCache[rawDate]) {
                             const prev = bookingsCache[rawDate].data;
@@ -411,7 +433,7 @@ const useClubData = (dateOrStr: Date | string) => {
                                 bookingsCache[rawDate] = { data: [...prev, raw], ts: bookingsCache[rawDate].ts };
                             }
                         }
-                        if (rawDate !== dateStr) return;
+                        if (rawDate !== activeDate) return;
                         const mappedGrid = mapBookings([raw], courtsRef.current, 'grid')[0];
                         const mappedList = mapBookings([raw], courtsRef.current, 'list')[0];
                         if (!mappedList) return;
@@ -450,29 +472,44 @@ const useClubData = (dateOrStr: Date | string) => {
                             setListReservations(prev => prev.filter(r => r.id !== removedId));
                             return;
                         }
-                        const rawDate = toDateStr(new Date(raw.start_at));
-                        // Actualizar caché del día afectado
+                        const rawDate = dayKeyInClubTz(new Date(raw.start_at));
+                        // Una reserva puede cambiar de día: quitar primero cualquier
+                        // versión anterior y luego insertarla en la fecha nueva.
+                        for (const ds of Object.keys(bookingsCache)) {
+                            const entry = bookingsCache[ds];
+                            if (entry.data.some((b: any) => b.id === raw.id)) {
+                                bookingsCache[ds] = {
+                                    data: entry.data.filter((b: any) => b.id !== raw.id),
+                                    ts: entry.ts,
+                                };
+                            }
+                        }
                         if (bookingsCache[rawDate]) {
                             bookingsCache[rawDate] = {
-                                data: bookingsCache[rawDate].data.map((b: any) => b.id === raw.id ? raw : b),
+                                data: [...bookingsCache[rawDate].data, raw],
                                 ts: bookingsCache[rawDate].ts,
                             };
                         }
-                        if (rawDate !== dateStr) return;
+                        if (rawDate !== activeDate) {
+                            setGridReservations(prev => prev.filter(r => r.id !== raw.id));
+                            setListReservations(prev => prev.filter(r => r.id !== raw.id));
+                            return;
+                        }
                         if (
                             raw.court_contention_status === 'won' ||
                             (raw.status === 'confirmed' &&
                                 (raw.reservation_type === 'open_match' || raw.reservation_type === 'standard'))
                         ) {
-                            delete bookingsCache[dateStr];
-                            fetchData();
+                            delete bookingsCache[activeDate];
+                            void fetchDataRef.current();
                             return;
                         }
                         const mappedList = mapBookings([raw], courtsRef.current, 'list')[0];
                         const mappedGrid = mapBookings([raw], courtsRef.current, 'grid')[0];
                         if (!mappedList) return;
-                        const mergeMapped = (prev: Reservation[], mapped: Reservation): Reservation[] =>
-                            prev.map(r => {
+                        const mergeMapped = (prev: Reservation[], mapped: Reservation): Reservation[] => {
+                            if (!prev.some(r => r.id === mapped.id)) return [...prev, mapped];
+                            return prev.map(r => {
                                 if (r.id !== mapped.id) return r;
                                 const pendingStart = r.tournamentId ? pendingTournamentStartById[r.tournamentId] : undefined;
                                 if (pendingStart && mapped.startTime !== pendingStart) return r;
@@ -488,6 +525,7 @@ const useClubData = (dateOrStr: Date | string) => {
                                 }
                                 return mapped;
                             });
+                        };
                         setListReservations(prev => mergeMapped(prev, mappedList));
                         setGridReservations(prev => {
                             if (!mappedGrid) {
@@ -522,7 +560,7 @@ const useClubData = (dateOrStr: Date | string) => {
             });
 
         return () => { supabase.removeChannel(channel); };
-    }, [clubId, dateStr]);
+    }, [clubId]);
     // ─────────────────────────────────────────────────────────────────────────
 
     const toggleCourtHidden = useCallback((courtId: string) => {
@@ -601,6 +639,7 @@ const useClubData = (dateOrStr: Date | string) => {
         setGridReservations,
         setListReservations,
         loading,
+        bootstrapped,
         authResolved,
         isCreatingCourt,
         refresh,
@@ -834,6 +873,7 @@ function GrillaViewInner() {
     setGridReservations,
     setListReservations,
     loading,
+    bootstrapped,
     authResolved,
     isCreatingCourt,
     refresh,
@@ -2509,7 +2549,7 @@ function resolveManualBookingTotalCents(
     navigate('/login', { replace: true });
   };
 
-  if (loading || !authResolved) return <PageSpinner />;
+  if (!authResolved || !bootstrapped) return <PageSpinner />;
 
   return (
     <GridBoundsProvider weeklySchedule={weeklySchedule} dateStr={selectedDateKey} slotDurationMin={slotDurationMin}>
@@ -2693,7 +2733,14 @@ function resolveManualBookingTotalCents(
             modifiers={[restrictToWindowEdges]}
           >
             <div className="flex-1 bg-white overflow-hidden flex flex-col relative min-h-0 min-w-0 grilla-flex-shrink">
-
+              {loading && (
+                <div className="absolute inset-0 z-40 flex items-center justify-center bg-white/75 backdrop-blur-[1px]">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-8 h-8 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs font-semibold text-gray-500">Cargando grilla…</span>
+                  </div>
+                </div>
+              )}
 
               {/* Scrollable area */}
               <div className={clsx(

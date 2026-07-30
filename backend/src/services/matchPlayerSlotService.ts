@@ -478,6 +478,24 @@ export async function guestJoinMatchAfterPayment(
   if (!ins.ok) {
     return ins;
   }
+
+  const { data: bookingOrg } = await supabase
+    .from('bookings')
+    .select('organizer_player_id')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (bookingOrg && !(bookingOrg as { organizer_player_id?: string | null }).organizer_player_id) {
+    await supabase
+      .from('bookings')
+      .update({ organizer_player_id: playerId, updated_at: new Date().toISOString() })
+      .eq('id', bookingId);
+    await supabase
+      .from('booking_participants')
+      .update({ role: 'organizer' })
+      .eq('booking_id', bookingId)
+      .eq('player_id', playerId);
+  }
+
   if (String((match as { visibility?: string }).visibility ?? '').toLowerCase() === 'private') {
     await acceptMatchInviteAfterGuestPayment(supabase, match.id, playerId);
   }

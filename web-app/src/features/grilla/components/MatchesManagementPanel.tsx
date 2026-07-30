@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import {
@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import { apiFetchWithAuth } from '../../../services/api';
 import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
+import { gridBoundsForClubDay, zonedTimeToUtc } from '../../../lib/clubTimeZone';
 import { CreateMatchModal } from './CreateMatchModal';
 import { PopoverMonthCalendar } from './PopoverMonthCalendar';
 import { PlayerSearch, ReservationModal } from './ReservationModal';
@@ -31,12 +32,35 @@ import {
     slotIndexFromTeamPosition,
     usedSlotIndexes,
 } from '../utils/matchPlayerSlots';
-import { buildMatchShareTextFromMatch } from '../utils/matchShareText';
+import { buildMatchShareText, buildMatchShareTextFromMatch } from '../utils/matchShareText';
+import { OPEN_MATCH_DURATION_MIN } from '../utils/bookingDuration';
+import { reservationTypePricesService } from '../../../services/reservationTypePrices';
+import { copyTextToClipboard, copyTextFromAsyncProducer } from '../../../lib/copyTextToClipboard';
+
+const FREE_SLOT_STEP_MIN = 30;
+
+function clockFromMinutes(totalMin: number): string {
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+type FreeSlotRow = {
+    id: string;
+    courtId: string;
+    courtName: string;
+    startMin: number;
+    endMin: number;
+    startAt: string;
+    endAt: string;
+    startHour: string;
+    startMinute: string;
+};
 
 interface MatchesManagementPanelProps {
     clubId: string | null;
     dateStr: string;
-    onRefreshGrid: (opts?: { date?: string }) => void;
+    onRefreshGrid: (opts?: { date?: string }) => void | Promise<void>;
     onBackToGrid?: () => void;
     courts?: Court[];
     weeklySchedule?: unknown;
@@ -76,6 +100,9 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
     const [currentDate, setCurrentDate] = useState(() => new Date(dateStr + 'T12:00:00'));
     const [isCreateMatchOpen, setIsCreateMatchOpen] = useState(false);
     const [showFilters, setShowFilters] = useState(false);
+    const [publishingSlots, setPublishingSlots] = useState(false);
+    const openMatchPriceCentsRef = useRef<number | null>(null);
+    const [inviteShareText, setInviteShareText] = useState<string | null>(null);
     const [filters, setFilters] = useState({
         type: '' as string,
         court: '' as string,
@@ -86,6 +113,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         priceMax: '' as string,
         timeFrom: '' as string,
         timeTo: '' as string,
+        withoutPlayers: false,
         playStatus: 'upcoming' as '' | 'upcoming' | 'played' | 'all',
     });
 
@@ -144,6 +172,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                 toast.success('Jugador removido con reembolso manual aplicado.');
             }
             await fetchMatches();
+            onRefreshGrid({ date: currentDateStr });
             setRemovingFromMatch(null);
             setPendingPlayerRemove(null);
         } catch (err) {
@@ -298,13 +327,90 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
 
     const activeFilterCount = Object.entries(filters).filter(([key, value]) => {
         if (key === 'playStatus' && value === 'upcoming') return false;
-        return value !== '';
+        return value !== '' && value !== false;
     }).length;
 
-    const courtNames = [...new Set(matches.map(m => {
-        const b = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
-        return b?.courts?.name as string;
-    }).filter(Boolean))].sort();
+    const dayBounds = useMemo(
+        () => gridBoundsForClubDay(weeklySchedule, currentDateStr),
+        [weeklySchedule, currentDateStr],
+    );
+
+    const occupiedIntervals = useMemo(() => {
+        const out: Array<{ courtId: string; startMs: number; endMs: number }> = [];
+        for (const m of matches) {
+            const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
+            if (!booking?.start_at || !booking?.end_at) continue;
+            const courtId = booking.court_id || booking.courts?.id;
+            if (!courtId || booking.status === 'cancelled') continue;
+            out.push({
+                courtId: String(courtId),
+                startMs: new Date(booking.start_at).getTime(),
+                endMs: new Date(booking.end_at).getTime(),
+            });
+        }
+        for (const r of gridReservations) {
+            if (!r.courtId || r.status === 'cancelled') continue;
+            const startClock = r.startTime?.includes(':') ? r.startTime : '00:00';
+            const [hh, mm] = startClock.split(':').map(Number);
+            const startIso = zonedTimeToUtc(
+                `${currentDateStr}T${String(hh).padStart(2, '0')}:${String(mm || 0).padStart(2, '0')}:00`,
+            ).toISOString();
+            const startMs = new Date(startIso).getTime();
+            const endMs = startMs + (r.durationMinutes || OPEN_MATCH_DURATION_MIN) * 60_000;
+            out.push({ courtId: r.courtId, startMs, endMs });
+        }
+        return out;
+    }, [matches, gridReservations, currentDateStr]);
+
+    const freeNinetyMinSlots = useMemo((): FreeSlotRow[] => {
+        if (!filters.withoutPlayers || dayBounds.closed) return [];
+        const visibleCourts = courts.filter((c) => !c.is_hidden);
+        const slots: FreeSlotRow[] = [];
+        for (const court of visibleCourts) {
+            for (
+                let startMin = dayBounds.openMin;
+                startMin + OPEN_MATCH_DURATION_MIN <= dayBounds.closeMin;
+                startMin += FREE_SLOT_STEP_MIN
+            ) {
+                const endMin = startMin + OPEN_MATCH_DURATION_MIN;
+                const startClock = clockFromMinutes(startMin);
+                const endClock = clockFromMinutes(endMin);
+                const [sh, sm] = startClock.split(':');
+                const startAt = zonedTimeToUtc(`${currentDateStr}T${sh}:${sm}:00`).toISOString();
+                const endAt = zonedTimeToUtc(
+                    `${currentDateStr}T${endClock.split(':')[0]}:${endClock.split(':')[1]}:00`,
+                ).toISOString();
+                const startMs = new Date(startAt).getTime();
+                const endMs = new Date(endAt).getTime();
+                const overlaps = occupiedIntervals.some(
+                    (o) => o.courtId === court.id && startMs < o.endMs && endMs > o.startMs,
+                );
+                if (overlaps) continue;
+                slots.push({
+                    id: `free:${court.id}:${startMin}`,
+                    courtId: court.id,
+                    courtName: court.name,
+                    startMin,
+                    endMin,
+                    startAt,
+                    endAt,
+                    startHour: sh,
+                    startMinute: sm,
+                });
+            }
+        }
+        return slots.sort((a, b) => a.startMin - b.startMin || a.courtName.localeCompare(b.courtName));
+    }, [filters.withoutPlayers, dayBounds, courts, currentDateStr, occupiedIntervals]);
+
+    const courtNames = useMemo(() => {
+        if (filters.withoutPlayers && courts.length > 0) {
+            return [...new Set(courts.filter((c) => !c.is_hidden).map((c) => c.name).filter(Boolean))].sort();
+        }
+        return [...new Set(matches.map(m => {
+            const b = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
+            return b?.courts?.name as string;
+        }).filter(Boolean))].sort();
+    }, [filters.withoutPlayers, courts, matches]);
 
     const filteredMatches = matches.filter(m => {
         const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
@@ -350,6 +456,18 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
             if (startTime > filters.timeTo) return false;
         }
 
+        if (filters.withoutPlayers) {
+            const durationMin = Math.round(
+                (new Date(booking.end_at).getTime() - new Date(booking.start_at).getTime()) / 60_000,
+            );
+            if (durationMin !== OPEN_MATCH_DURATION_MIN) return false;
+            const hasPlayers = (m.match_players || []).some((mp: any) => {
+                const player = Array.isArray(mp?.players) ? mp.players[0] : mp?.players;
+                return Boolean(player?.id || player?.first_name || player?.last_name);
+            });
+            if (hasPlayers) return false;
+        }
+
         if (filters.playStatus === 'upcoming') {
             const endMs = new Date(booking.end_at).getTime();
             if (endMs <= Date.now()) return false;
@@ -362,6 +480,157 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         return true;
     });
 
+    const filteredFreeSlots = useMemo(() => {
+        if (!filters.withoutPlayers) return [];
+        return freeNinetyMinSlots.filter((slot) => {
+            if (filters.court && slot.courtName !== filters.court) return false;
+            const startTime = clockFromMinutes(slot.startMin);
+            if (filters.timeFrom && startTime < filters.timeFrom) return false;
+            if (filters.timeTo && startTime > filters.timeTo) return false;
+            if (filters.playStatus === 'upcoming' && new Date(slot.endAt).getTime() <= Date.now()) return false;
+            if (filters.playStatus === 'played') return false;
+            return true;
+        });
+    }, [filters, freeNinetyMinSlots]);
+
+    const resolveOpenMatchPriceCents = useCallback(async () => {
+        if (!clubId) return 0;
+        if (openMatchPriceCentsRef.current != null) return openMatchPriceCentsRef.current;
+        const prices = await reservationTypePricesService.getByClub(clubId);
+        const pricePerHour =
+            prices.open_match?.price_per_hour_cents ||
+            prices.standard?.price_per_hour_cents ||
+            0;
+        const total = Math.round((OPEN_MATCH_DURATION_MIN / 60) * pricePerHour);
+        openMatchPriceCentsRef.current = total;
+        return total;
+    }, [clubId]);
+
+    // Precarga precio al activar el filtro para que el primer «copiar» sea más rápido
+    useEffect(() => {
+        if (!filters.withoutPlayers || !clubId) return;
+        void resolveOpenMatchPriceCents();
+    }, [filters.withoutPlayers, clubId, resolveOpenMatchPriceCents]);
+
+    /** Crea el partido abierto vacío (sin jugadores) para poder chat / link / sumar jugadores. */
+    const publishFreeSlot = useCallback(async (
+        slot: FreeSlotRow,
+        opts?: { refresh?: boolean; silent?: boolean },
+    ): Promise<{ matchId: string; bookingId: string } | null> => {
+        if (!clubId) return null;
+        setPublishingSlots(true);
+        try {
+            const totalPriceCents = await resolveOpenMatchPriceCents();
+            const bkRes = await apiFetchWithAuth<{
+                ok?: boolean;
+                booking?: { id?: string; matches?: { id?: string } | Array<{ id?: string }> };
+                error?: string;
+            }>('/bookings', {
+                method: 'POST',
+                body: JSON.stringify({
+                    court_id: slot.courtId,
+                    start_at: slot.startAt,
+                    end_at: slot.endAt,
+                    total_price_cents: totalPriceCents,
+                    status: 'pending_payment',
+                    notes: 'Partido abierto',
+                    booking_type: 'open_match',
+                    source_channel: 'manual',
+                    participants: [],
+                }),
+            });
+            if (!bkRes.ok && !bkRes.booking?.id) {
+                throw new Error(bkRes.error || 'No se pudo crear el partido');
+            }
+            const bookingId = String(bkRes.booking?.id);
+            let matchId = '';
+            const nested = bkRes.booking?.matches;
+            const nestedMatch = Array.isArray(nested) ? nested[0] : nested;
+            if (nestedMatch?.id) {
+                matchId = String(nestedMatch.id);
+            } else {
+                const mtRes = await apiFetchWithAuth<{ ok?: boolean; match?: { id?: string }; error?: string }>('/matches', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        booking_id: bookingId,
+                        visibility: 'public',
+                        type: 'open',
+                        competitive: false,
+                        gender: 'any',
+                    }),
+                });
+                matchId = String(mtRes.match?.id ?? '');
+            }
+            if (!matchId) throw new Error('Partido creado sin id de match');
+
+            // Refresco en background: no bloquear copy/chat (el gesto de clipboard expira tras awaits largos)
+            if (opts?.refresh !== false) {
+                void Promise.all([fetchMatches(), onRefreshGrid({ date: currentDateStr })]);
+            }
+            if (!opts?.silent) {
+                toast.success('Partido abierto listo para compartir o sumar jugadores');
+            }
+            return { matchId, bookingId };
+        } catch (err) {
+            console.error('[sin jugadores] publicar hueco', err);
+            if (!opts?.silent) {
+                toast.error((err as Error).message || 'No se pudo crear el partido');
+            }
+            return null;
+        } finally {
+            setPublishingSlots(false);
+        }
+    }, [clubId, resolveOpenMatchPriceCents, fetchMatches, onRefreshGrid, currentDateStr]);
+
+    const copyMatchInvitation = async (match: any) => {
+        try {
+            const text = buildMatchShareTextFromMatch(match);
+            const ok = await copyTextToClipboard(text);
+            if (!ok) throw new Error('clipboard_failed');
+            toast.success('Invitación copiada al portapapeles');
+        } catch {
+            toast.error('No se pudo copiar la invitación');
+        }
+    };
+
+    const publishAndCopyFreeSlot = (slot: FreeSlotRow) => {
+        // Invocar YA en el click (sin await previo) para conservar el permiso del clipboard.
+        void copyTextFromAsyncProducer(async () => {
+            const created = await publishFreeSlot(slot, { refresh: false, silent: true });
+            if (!created) throw new Error('No se pudo crear el partido');
+            return buildMatchShareText({
+                matchId: created.matchId,
+                startAt: slot.startAt,
+                endAt: slot.endAt,
+                clubName: 'Sede Central',
+                courtName: slot.courtName,
+                sport: 'padel',
+                eloMin: 0,
+                eloMax: 10,
+                matchPlayers: [],
+            });
+        })
+            .then(({ ok, text }) => {
+                void Promise.all([fetchMatches(), onRefreshGrid({ date: currentDateStr })]);
+                if (ok) {
+                    toast.success('Partido creado e invitación copiada');
+                    return;
+                }
+                if (text) {
+                    setInviteShareText(text);
+                    toast.message('Partido creado', {
+                        description: 'Tocá «Copiar» para pegarlo en WhatsApp.',
+                    });
+                    return;
+                }
+                toast.error('Partido creado, pero no se pudo preparar la invitación.');
+            })
+            .catch((err) => {
+                console.error('[sin jugadores] copiar link', err);
+                toast.error((err as Error)?.message || 'No se pudo crear el partido');
+            });
+    };
+
     const clearFilters = () => setFilters({
         type: '',
         court: '',
@@ -372,6 +641,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         priceMax: '',
         timeFrom: '',
         timeTo: '',
+        withoutPlayers: false,
         playStatus: 'upcoming',
     });
 
@@ -473,15 +743,6 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
         if (currentDateStr === todayStr) return 'Hoy';
         if (currentDateStr === tomorrowStr) return 'Mañana';
         return currentDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
-    };
-
-    const copyMatchInvitation = async (match: any) => {
-        try {
-            await navigator.clipboard.writeText(buildMatchShareTextFromMatch(match));
-            toast.success('Invitación copiada al portapapeles');
-        } catch {
-            toast.error('No se pudo copiar la invitación');
-        }
     };
 
     // Render Player Avatar Block
@@ -665,6 +926,18 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                         </select>
                                     </div>
                                     <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Jugadores</label>
+                                        <label className="flex h-[26px] items-center gap-2 px-2 text-xs border border-gray-200 rounded-lg bg-white cursor-pointer" title="Muestra huecos de 90 min. Al sumar jugador, abrir chat o copiar link se crea el partido abierto.">
+                                            <input
+                                                type="checkbox"
+                                                checked={filters.withoutPlayers}
+                                                onChange={e => setFilters(f => ({ ...f, withoutPlayers: e.target.checked }))}
+                                                className="accent-[#006A6A]"
+                                            />
+                                            Sin jugadores
+                                        </label>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
                                         <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Cliente</label>
                                         <input
                                             type="text"
@@ -728,7 +1001,9 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                         <div />
                                     )}
                                     <span className="text-[10px] text-gray-400 font-medium">
-                                        {filteredMatches.length} de {matches.length} partidos
+                                        {filters.withoutPlayers
+                                            ? `${filteredMatches.length + filteredFreeSlots.length} sin jugadores`
+                                            : `${filteredMatches.length} de ${matches.length} partidos`}
                                     </span>
                                 </div>
                             </div>
@@ -769,18 +1044,154 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                     <div className="w-6 h-6 mx-auto border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
                                 </td>
                             </tr>
-                        ) : filteredMatches.length === 0 ? (
+                        ) : filteredMatches.length === 0 && filteredFreeSlots.length === 0 ? (
                             <tr>
                                 <td colSpan={10} className="px-4 py-12 text-center text-gray-400 text-xs font-medium">
                                     {matches.length > 0 && activeFilterCount > 0
                                         ? 'No hay partidos que coincidan con los filtros aplicados.'
+                                        : filters.withoutPlayers
+                                            ? 'No hay partidos sin jugadores ni huecos de 90 min para este día.'
                                         : filters.playStatus === 'upcoming'
                                             ? 'No hay partidos próximos para este día.'
                                             : 'No hay partidos organizados para este día.'}
                                 </td>
                             </tr>
                         ) : (
-                            filteredMatches.map((match) => {
+                            <>
+                            {filters.withoutPlayers && filteredFreeSlots.map((slot) => (
+                                    <tr
+                                        key={slot.id}
+                                        className="hover:bg-gray-50/50 transition-colors group"
+                                    >
+                                        <td className="px-3 py-3 whitespace-nowrap">
+                                            <div className="flex flex-col">
+                                                <span className="text-xs font-bold text-gray-800">
+                                                    {clockFromMinutes(slot.startMin)}
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 sm:hidden font-medium">
+                                                    {OPEN_MATCH_DURATION_MIN} min
+                                                </span>
+                                                <span className="text-[9px] font-semibold text-[#006A6A] uppercase tracking-wider sm:hidden">
+                                                    {slot.courtName}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-3 whitespace-nowrap hidden xl:table-cell">
+                                            <span className="text-[11px] font-medium text-gray-600">Pádel</span>
+                                        </td>
+                                        <td className="px-3 py-3 whitespace-nowrap hidden sm:table-cell">
+                                            <span className="text-[11px] font-medium text-gray-600">{OPEN_MATCH_DURATION_MIN} min</span>
+                                        </td>
+                                        <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">
+                                            <span className="text-[11px] font-medium text-gray-600">0.00 - 10.00</span>
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex items-center -space-x-2">
+                                                    {[0, 1].map((index) => (
+                                                        <div key={`fa-${index}`} className="flex flex-col items-center">
+                                                            <div
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    void (async () => {
+                                                                        const created = await publishFreeSlot(slot);
+                                                                        if (!created) return;
+                                                                        setAddingToSlot({
+                                                                            matchId: created.matchId,
+                                                                            bookingId: created.bookingId,
+                                                                            team: 'A',
+                                                                            index,
+                                                                        });
+                                                                    })();
+                                                                }}
+                                                                className="w-8 h-8 rounded-full bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-100 hover:text-blue-500 hover:border-blue-300 transition-colors"
+                                                            >
+                                                                <Plus className="w-3.5 h-3.5" />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <span className="text-[9px] font-bold tracking-wider text-gray-300">VS</span>
+                                                <div className="flex items-center -space-x-2">
+                                                    {[0, 1].map((index) => (
+                                                        <div key={`fb-${index}`} className="flex flex-col items-center">
+                                                            <div
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    void (async () => {
+                                                                        const created = await publishFreeSlot(slot);
+                                                                        if (!created) return;
+                                                                        setAddingToSlot({
+                                                                            matchId: created.matchId,
+                                                                            bookingId: created.bookingId,
+                                                                            team: 'B',
+                                                                            index,
+                                                                        });
+                                                                    })();
+                                                                }}
+                                                                className="w-8 h-8 rounded-full bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-100 hover:text-blue-500 hover:border-blue-300 transition-colors"
+                                                            >
+                                                                <Plus className="w-3.5 h-3.5" />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-3 whitespace-nowrap">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold leading-tight bg-blue-100/60 text-blue-700 border border-blue-200/50 w-fit">
+                                                Amistoso
+                                            </span>
+                                        </td>
+                                        <td className="px-3 py-3 whitespace-nowrap">
+                                            <div className="flex flex-col">
+                                                <span className="text-[11px] font-bold text-gray-800">
+                                                    €0.00 <span className="text-gray-400 font-medium">/ —</span>
+                                                </span>
+                                                <span className="text-[9px] font-bold text-orange-500 uppercase tracking-wide">Pendiente</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-3 whitespace-nowrap hidden xl:table-cell">
+                                            <span className="text-[11px] font-medium text-gray-600">Sede Central</span>
+                                        </td>
+                                        <td className="px-3 py-3 whitespace-nowrap hidden sm:table-cell">
+                                            <span className="text-[11px] font-medium text-gray-600 uppercase tracking-wide">{slot.courtName}</span>
+                                        </td>
+                                        <td className="px-3 py-3 whitespace-nowrap text-right text-[11px] font-medium">
+                                            <div className="flex items-center justify-end gap-0.5">
+                                                <button
+                                                    type="button"
+                                                    title="Chat del partido"
+                                                    disabled={publishingSlots}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void (async () => {
+                                                            const created = await publishFreeSlot(slot);
+                                                            if (!created) return;
+                                                            await openInlineEdit(created.bookingId, { tab: 'chat' });
+                                                        })();
+                                                    }}
+                                                    className="p-2 hover:bg-[#006A6A]/10 rounded-full text-gray-400 hover:text-[#006A6A] transition-colors disabled:opacity-50"
+                                                >
+                                                    <MessageCircle size={16} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    title="Copiar invitación"
+                                                    disabled={publishingSlots}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void publishAndCopyFreeSlot(slot);
+                                                    }}
+                                                    className="p-2 hover:bg-[#006A6A]/10 rounded-full text-gray-400 hover:text-[#006A6A] transition-colors disabled:opacity-50"
+                                                >
+                                                    <Link2 size={16} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                            ))}
+                            {filteredMatches.map((match) => {
                                 const booking = Array.isArray(match.bookings) ? match.bookings[0] : match.bookings;
                                 const court = booking?.courts;
                                 const club = court?.clubs;
@@ -970,7 +1381,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                     </div>
                                                 ) : (
                                                     <ReservationModal
-                                                        presentation="inline"
+                                                        presentation={inlineInitialTab === 'chat' ? 'modal' : 'inline'}
                                                         initialTab={inlineInitialTab}
                                                         clubId={clubId}
                                                         gridDate={currentDateStr}
@@ -984,23 +1395,23 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                         onUpdate={async (bookingId, data) => {
                                                             await onUpdateBooking(bookingId, data);
                                                             await fetchMatches();
-                                                            onRefreshGrid({ date: currentDateStr });
+                                                            await onRefreshGrid({ date: currentDateStr });
                                                             closeInlineEdit();
                                                         }}
                                                         onDelete={onDeleteBooking ? async (...args) => {
                                                             await onDeleteBooking(...args);
                                                             await fetchMatches();
-                                                            onRefreshGrid({ date: currentDateStr });
+                                                            await onRefreshGrid({ date: currentDateStr });
                                                             closeInlineEdit();
                                                         } : undefined}
                                                         onMarkPaid={onMarkPaid ? async (bookingId) => {
                                                             await onMarkPaid(bookingId);
                                                             await fetchMatches();
-                                                            onRefreshGrid({ date: currentDateStr });
+                                                            await onRefreshGrid({ date: currentDateStr });
                                                         } : undefined}
-                                                        onGridRefresh={() => {
-                                                            void fetchMatches();
-                                                            onRefreshGrid({ date: currentDateStr });
+                                                        onGridRefresh={async () => {
+                                                            await fetchMatches();
+                                                            await onRefreshGrid({ date: currentDateStr });
                                                         }}
                                                         isOnHiddenCourt={courts.find((c) => c.id === inlineReservation.courtId)?.is_hidden === true}
                                                     />
@@ -1010,11 +1421,69 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                     )}
                                     </React.Fragment>
                                 );
-                            })
+                            })}
+                            </>
                         )}
                     </tbody>
                 </table>
             </div>
+
+            {/* Invite share fallback: un click fresco puede copiar siempre */}
+            {inviteShareText && (
+                <div
+                    className="fixed inset-0 z-200 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                    onClick={() => setInviteShareText(null)}
+                >
+                    <div
+                        className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-5 animate-scale-in"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between mb-3">
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-900 leading-tight">Invitación lista</h3>
+                                <p className="text-[11px] text-gray-500 mt-0.5">
+                                    Copiá el texto y pegalo en el grupo de WhatsApp
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setInviteShareText(null)}
+                                className="p-1 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-3 text-[11px] text-gray-800">
+                            {inviteShareText}
+                        </pre>
+                        <div className="mt-4 flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setInviteShareText(null)}
+                                className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-xs font-bold text-gray-600 hover:bg-gray-50"
+                            >
+                                Cerrar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    void copyTextToClipboard(inviteShareText).then((ok) => {
+                                        if (ok) {
+                                            toast.success('Invitación copiada');
+                                            setInviteShareText(null);
+                                        } else {
+                                            toast.error('No se pudo copiar');
+                                        }
+                                    });
+                                }}
+                                className="flex-1 rounded-lg bg-[#006A6A] px-3 py-2 text-xs font-bold text-white hover:bg-[#005151]"
+                            >
+                                Copiar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Add Player to Slot Mini Modal */}
             {addingToSlot && (
@@ -1056,8 +1525,8 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                                                 booking_id: addingToSlot.bookingId
                                             })
                                         });
-                                        // Refrescar lista
                                         await fetchMatches();
+                                        await onRefreshGrid({ date: currentDateStr });
                                     } catch (err) {
                                         console.error('Error adding player:', err);
                                         alert('Error al agregar el jugador.');
@@ -1145,13 +1614,14 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({
                     clubId={clubId}
                     isOpen={isCreateMatchOpen}
                     initialDate={currentDateStr}
-                    onCreated={(bookingDate) => {
-                        onRefreshGrid({ date: bookingDate });
+                    onCreated={async (bookingDate) => {
+                        await fetchMatches();
+                        await onRefreshGrid({ date: bookingDate });
                     }}
                     onClose={() => {
                         setIsCreateMatchOpen(false);
-                        fetchMatches();
-                        onRefreshGrid();
+                        void fetchMatches();
+                        void onRefreshGrid({ date: currentDateStr });
                     }}
                 />
             )}

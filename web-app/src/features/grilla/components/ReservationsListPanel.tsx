@@ -35,6 +35,7 @@ import {
     isDeletableReservationId,
 } from '../utils/exportReservationsExcel';
 import { ReservationDetailModal } from './ReservationDetailModal';
+import { PopoverMonthCalendar } from './PopoverMonthCalendar';
 
 const RESERVATION_TYPE_OPTIONS = [
     { value: 'standard', labelKey: 'type_standard' },
@@ -129,7 +130,9 @@ export const ReservationsListPanel: React.FC<Props> = ({
     const [detailReservation, setDetailReservation] = useState<Reservation | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [calendarOpen, setCalendarOpen] = useState(false);
     const filterPanelRef = useRef<HTMLDivElement>(null);
+    const datePickerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         setSelectedIds(new Set());
@@ -155,6 +158,7 @@ export const ReservationsListPanel: React.FC<Props> = ({
     const normalizedFrom = dateFrom <= dateTo ? dateFrom : dateTo;
     const normalizedTo = dateFrom <= dateTo ? dateTo : dateFrom;
     const isMultiDay = normalizedFrom !== normalizedTo;
+    const calendarDate = useMemo(() => new Date(`${normalizedFrom}T12:00:00`), [normalizedFrom]);
 
     const reservationTypeOptions = useMemo(() => {
         const configured = typeConfigs ? Object.keys(typeConfigs) : [];
@@ -294,19 +298,35 @@ export const ReservationsListPanel: React.FC<Props> = ({
                         >
                             <BarChart3 className="w-4 h-4" />
                         </button>
-                        <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
-                            <button type="button" onClick={() => { const next = shiftDateRange(normalizedFrom, normalizedTo, -1); onDateRangeChange(next.from, next.to); }} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200">
-                                <ChevronLeft className="w-4 h-4" />
-                            </button>
-                            <div className="px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[90px] justify-center">
-                                {isMultiDay
-                                    ? `${formatDateLabel(normalizedFrom)} – ${formatDateLabel(normalizedTo)}`
-                                    : formatDateLabel(normalizedFrom)}
-                                <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                        <div ref={datePickerRef} className="relative">
+                            <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                                <button type="button" onClick={() => { const next = shiftDateRange(normalizedFrom, normalizedTo, -1); onDateRangeChange(next.from, next.to); }} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200">
+                                    <ChevronLeft className="w-4 h-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setCalendarOpen((open) => !open)}
+                                    className="px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[90px] justify-center hover:bg-gray-50"
+                                >
+                                    {isMultiDay
+                                        ? `${formatDateLabel(normalizedFrom)} – ${formatDateLabel(normalizedTo)}`
+                                        : formatDateLabel(normalizedFrom)}
+                                    <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                                </button>
+                                <button type="button" onClick={() => { const next = shiftDateRange(normalizedFrom, normalizedTo, 1); onDateRangeChange(next.from, next.to); }} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-l border-gray-200">
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
                             </div>
-                            <button type="button" onClick={() => { const next = shiftDateRange(normalizedFrom, normalizedTo, 1); onDateRangeChange(next.from, next.to); }} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-l border-gray-200">
-                                <ChevronRight className="w-4 h-4" />
-                            </button>
+                            <PopoverMonthCalendar
+                                anchorRef={datePickerRef}
+                                open={calendarOpen}
+                                onClose={() => setCalendarOpen(false)}
+                                value={calendarDate}
+                                onChange={(date) => {
+                                    const selected = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                                    onDateRangeChange(selected, selected);
+                                }}
+                            />
                         </div>
                         <button type="button" onClick={onOpenGrid} title={t('navigation.backToGrid')} className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-[#006A6A]/5 hover:border-[#006A6A] hover:text-[#006A6A]">
                             <LayoutGrid className="w-4 h-4" />
@@ -355,8 +375,6 @@ export const ReservationsListPanel: React.FC<Props> = ({
                                     ref={filterPanelRef}
                                     filters={filters}
                                     setFilter={setFilter}
-                                    typeLabel={typeLabel}
-                                    reservationTypeOptions={reservationTypeOptions}
                                     activeFilterCount={advancedFilterCount}
                                     clearFilters={clearFilters}
                                     onClose={() => setShowAdvancedFilters(false)}
@@ -368,12 +386,20 @@ export const ReservationsListPanel: React.FC<Props> = ({
                 </div>
 
                 {/* Filtros principales siempre visibles */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
                     <FilterField label={t('reservationsList.filterDateFrom')}>
                         <input type="date" value={dateFrom} onChange={(e) => e.target.value && onDateRangeChange(e.target.value, dateTo)} className={inputClass} />
                     </FilterField>
                     <FilterField label={t('reservationsList.filterDateTo')}>
                         <input type="date" value={dateTo} onChange={(e) => e.target.value && onDateRangeChange(dateFrom, e.target.value)} className={inputClass} />
+                    </FilterField>
+                    <FilterField label={t('reservationsList.filterType')}>
+                        <select value={filters.reservationType} onChange={(e) => setFilter('reservationType', e.target.value)} className={inputClass}>
+                            <option value="">{t('reservationsList.all')}</option>
+                            {reservationTypeOptions.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{typeLabel(opt.value)}</option>
+                            ))}
+                        </select>
                     </FilterField>
                     <FilterField label={t('reservationsList.filterCourt')}>
                         <select value={filters.court} onChange={(e) => setFilter('court', e.target.value)} className={inputClass}>
@@ -567,15 +593,13 @@ const AdvancedFiltersPanel = React.forwardRef<
     {
         filters: ReservationListFilters;
         setFilter: <K extends keyof ReservationListFilters>(key: K, value: ReservationListFilters[K]) => void;
-        typeLabel: (type: string) => string;
-        reservationTypeOptions: readonly { value: string; labelKey: string }[];
         activeFilterCount: number;
         clearFilters: () => void;
         onClose: () => void;
         t: (key: string, opts?: Record<string, string | number>) => string;
     }
 >(function AdvancedFiltersPanel(
-    { filters, setFilter, typeLabel, reservationTypeOptions, activeFilterCount, clearFilters, onClose, t },
+    { filters, setFilter, activeFilterCount, clearFilters, onClose, t },
     ref,
 ) {
     const inputClass = 'w-full px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A]';
@@ -583,14 +607,6 @@ const AdvancedFiltersPanel = React.forwardRef<
         <div ref={ref} className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 p-4 w-[min(100vw-2rem,640px)] max-h-[60vh] overflow-y-auto">
             <p className="text-[10px] font-bold text-gray-400 uppercase mb-3">{t('reservationsList.advancedFilters')}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <FilterField label={t('reservationsList.filterType')}>
-                    <select value={filters.reservationType} onChange={(e) => setFilter('reservationType', e.target.value)} className={inputClass}>
-                        <option value="">{t('reservationsList.all')}</option>
-                        {reservationTypeOptions.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{typeLabel(opt.value)}</option>
-                        ))}
-                    </select>
-                </FilterField>
                 <FilterField label={t('reservationsList.filterPayment')}>
                     <select value={filters.payment} onChange={(e) => setFilter('payment', e.target.value as ReservationListFilters['payment'])} className={inputClass}>
                         <option value="">{t('reservationsList.all')}</option>
