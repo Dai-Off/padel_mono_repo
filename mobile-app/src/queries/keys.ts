@@ -47,6 +47,20 @@ export const homeKeys = {
   streak: (userId: string) => ['home', userId, 'streak'] as const,
 };
 
+/**
+ * Catálogo público de la tienda. Sin userId: los datos no dependen de la
+ * sesión (endpoints públicos). Volátil: la raíz 'store' NO se persiste.
+ */
+export const storeKeys = {
+  all: () => ['store'] as const,
+  /** Catálogo completo (+ flash embebido en la respuesta). */
+  products: () => ['store', 'products'] as const,
+  /** Campaña flash y sus productos. */
+  flash: () => ['store', 'flash'] as const,
+  /** Colecciones destacadas. */
+  collections: () => ['store', 'collections'] as const,
+};
+
 /** Partidos (mine + discovery). Volátil y con upserts optimistas: NO persistir. */
 export const matchesKeys = {
   all: (userId: string) => ['matches', userId] as const,

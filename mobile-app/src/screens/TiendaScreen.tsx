@@ -15,14 +15,10 @@ import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import {
-  fetchStoreCollections,
-  fetchStoreFlash,
-  fetchStoreProducts,
-  mapStoreProductsToTienda,
   type StoreCollectionPublic,
-  type StoreFlashCampaign,
   type TiendaProduct,
 } from "../api/store";
+import { useTiendaCatalog } from "../queries/store";
 import { TiendaFiltersModal } from "../components/tienda/TiendaFiltersModal";
 import { ProductFavoriteButton } from "../components/tienda/ProductFavoriteButton";
 import { TiendaStockPill } from "../components/tienda/TiendaStockPill";
@@ -252,75 +248,24 @@ export function TiendaScreen() {
   const [filters, setFilters] = useState<TiendaFilterFlags>(DEFAULT_TIENDA_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [draftFilters, setDraftFilters] = useState<TiendaFilterFlags>(DEFAULT_TIENDA_FILTERS);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [flashCampaign, setFlashCampaign] = useState<StoreFlashCampaign | null>(null);
-  const [flashApiProducts, setFlashApiProducts] = useState<Product[]>([]);
-  const [collections, setCollections] = useState<StoreCollectionPublic[]>([]);
   const [activeCollection, setActiveCollection] = useState<{
     id: string;
     title: string;
     productIds: string[];
   } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [collectionBannerIndex, setCollectionBannerIndex] = useState(0);
 
-  const loadProducts = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [productsRes, flashRes, collectionsRes] = await Promise.all([
-        fetchStoreProducts(),
-        fetchStoreFlash(),
-        fetchStoreCollections(),
-      ]);
-      if (!productsRes.ok || !productsRes.products) {
-        setError(productsRes.error || t("tienda.loadError"));
-        setProducts([]);
-        setFlashCampaign(null);
-        setFlashApiProducts([]);
-      } else {
-        const mapped = mapStoreProductsToTienda(productsRes.products);
-        setProducts(mapped);
-
-        const catalogFlash = mapped.filter((p) => p.isFlashDeal);
-        const flashFromEndpoint =
-          flashRes.ok && flashRes.campaign ? flashRes.campaign : null;
-        const campaign =
-          (flashFromEndpoint?.ends_at ? flashFromEndpoint : null) ??
-          (productsRes.flash?.ends_at ? productsRes.flash : null) ??
-          flashFromEndpoint ??
-          productsRes.flash ??
-          null;
-
-        const endpointFlash =
-          flashRes.ok && flashRes.campaign?.enabled && flashRes.products
-            ? mapStoreProductsToTienda(flashRes.products)
-            : [];
-
-        setFlashCampaign(campaign ?? null);
-        setFlashApiProducts(endpointFlash.length > 0 ? endpointFlash : catalogFlash);
-      }
-
-      if (collectionsRes.ok && collectionsRes.collections) {
-        setCollections(collectionsRes.collections);
-      } else {
-        setCollections([]);
-      }
-    } catch {
-      setError(t("tienda.loadError"));
-      setProducts([]);
-      setFlashCampaign(null);
-      setFlashApiProducts([]);
-      setCollections([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    void loadProducts();
-  }, [loadProducts]);
+  // Catálogo en React Query: el caché en memoria elimina el spinner al remontar.
+  const {
+    products,
+    flashCampaign,
+    flashApiProducts,
+    collections,
+    loading,
+    isError,
+    refetch: loadProducts,
+  } = useTiendaCatalog();
+  const error = isError ? t("tienda.loadError") : null;
 
   const categories = useMemo(
     () =>
