@@ -120,11 +120,19 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="CourtReservationDetail" component={CourtReservationDetailRoute} />
             {/* El pase pinta al instante (skeleton/cache), así que puede
                 permitirse animación de entrada sin mostrar cascarón. Fade
-                discreto: el slide se descartó por brusco para esta pantalla. */}
+                discreto: el slide se descartó por brusco para esta pantalla.
+                presentation 'transparentModal' mantiene el Home montado y
+                pintado debajo (native-stack v7 no detacha la pantalla anterior
+                en modales transparentes), así el fade de salida lo revela en
+                vez de desvanecerse a negro. El pase tiene fondo opaco propio. */}
             <RootStack.Screen
               name="SeasonPass"
               component={SeasonPassRoute}
-              options={{ animation: 'fade', animationDuration: 220 }}
+              options={{
+                presentation: 'transparentModal',
+                animation: 'fade',
+                animationDuration: 220,
+              }}
             />
             {/* Grafo social / partidos */}
             <RootStack.Screen name="PartidoDetail" component={PartidoDetailRoute} />
