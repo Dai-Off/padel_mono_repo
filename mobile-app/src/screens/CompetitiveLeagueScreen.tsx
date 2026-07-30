@@ -304,7 +304,10 @@ export function CompetitiveLeagueScreen({
       setIsHomeBootstrapping(false);
       return () => clearPollTimer();
     }
-    setIsHomeBootstrapping(true);
+    // No re-mostramos el skeleton si ya teníamos status cacheado (arranca en
+    // false por el seed): revalidamos en silencio. Sin caché, isHomeBootstrapping
+    // ya arranca en true, así que tampoco hace falta forzarlo aquí. Evita el
+    // parpadeo contenido→skeleton→contenido al abrir.
     void refreshStatusRef.current().finally(() => {
       if (!cancelled) setIsHomeBootstrapping(false);
     });
