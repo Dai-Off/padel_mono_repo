@@ -8,7 +8,8 @@ import { NotificationsScreen } from '../../screens/NotificationsScreen';
 import { CommunityScreen } from '../../screens/CommunityScreen';
 import { ClubDetailScreen } from '../../screens/ClubDetailScreen';
 import { markAffinityModalPendingReopen } from '../../screens/HomeScreen';
-import { useHomeData } from '../../contexts/HomeDataContext';
+import { useRefreshMatches } from '../../queries/matches';
+import { useMyProfile } from '../../queries/profile';
 import { useMatchmaking } from '../../contexts/MatchmakingContext';
 import { useAppSignals } from '../../contexts/AppSignalsContext';
 import { useOpenMatchById, useOpenMatchFromInvite } from '../matchActions';
@@ -20,7 +21,7 @@ export function PartidoDetailRoute({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, 'PartidoDetail'>) {
-  const { refreshMatches } = useHomeData();
+  const refreshMatches = useRefreshMatches();
   const { bumpMatchInvites } = useMatchmaking();
   const { bumpPartidosRefresh, openOnboardingFromSection } = useAppSignals();
 
@@ -143,7 +144,7 @@ export function NotificationsRoute({
 export function CommunityRoute({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'Community'>) {
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   return (
     <RouteShell>
       <CommunityScreen

@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
-import { usePartidosDiscoveryRange } from '../queries/matches';
+import { useMyProfile } from '../queries/profile';
+import {
+  usePartidosDiscovery,
+  usePartidosDiscoveryRange,
+  useRefreshMatches,
+} from '../queries/matches';
 import { matchesKeys } from '../queries/keys';
 import {
   clubsChipLabel,
@@ -20,6 +24,9 @@ import { loadStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import type { PartidoItem } from '../screens/PartidosScreen';
 import { useClubCatalog } from './useClubCatalog';
 
+/** Identidad estable para el estado vacío del discovery. */
+const EMPTY_PARTIDOS: PartidoItem[] = [];
+
 function isPublicJoinableMatch(p: PartidoItem): boolean {
   if (p.matchPhase !== 'upcoming') return false;
   if (p.matchStatus === 'cancelled') return false;
@@ -36,12 +43,11 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
   const { session } = useAuth();
   const userId = session?.user?.id ?? null;
   const queryClient = useQueryClient();
-  const {
-    profile,
-    partidos: contextPartidos,
-    refreshMatches,
-    matchesLoading,
-  } = useHomeData();
+  const profile = useMyProfile().data ?? null;
+  const discoveryQuery = usePartidosDiscovery();
+  const contextPartidos = discoveryQuery.data ?? EMPTY_PARTIDOS;
+  const matchesLoading = discoveryQuery.isLoading;
+  const refreshMatches = useRefreshMatches();
   const [filters, setFilters] = useState<PartidosFiltersState>(getInitialPartidosFilters);
   const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(profile?.id ?? null);
   const [favoriteClubIds, setFavoriteClubIds] = useState<string[]>([]);

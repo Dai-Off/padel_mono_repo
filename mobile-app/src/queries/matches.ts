@@ -34,6 +34,10 @@ import { matchesKeys, profileKeys } from './keys';
  * - Volátil y con mutaciones optimistas: la raíz 'matches' NO se persiste.
  */
 
+/** Throttle (3s) de las revalidaciones 'mine' sin force tras mutaciones. */
+const lastMineRefreshAtByUser = new Map<string, number>();
+const MINE_REFRESH_THROTTLE_MS = 3000;
+
 /** Registro por usuario de la mecánica anti-clobber del merge de "mis partidos". */
 type MisPartidosRegistry = {
   /** IDs que /matches/mine devolvió alguna vez — si desaparecen, no reinsertar en merge. */
@@ -197,6 +201,38 @@ export function usePartidosDiscovery() {
     // mientras se re-mapea (sin flash de lista vacía).
     placeholderData: keepPreviousData,
   });
+}
+
+/**
+ * Revalidación de partidos (antes HomeDataContext.refreshMatches). Sin force la
+ * query gestiona su frescura; con force invalida mine (y discovery si scope
+ * 'full'). El scope 'mine' sin force conserva el throttle de 3s.
+ */
+export function useRefreshMatches() {
+  const { userId } = useMatchesSession();
+  const queryClient = useQueryClient();
+  return useCallback(
+    async ({ force = false, scope = 'full' }: { force?: boolean; scope?: 'full' | 'mine' } = {}) => {
+      if (!userId) return;
+      const mineOnly = scope === 'mine';
+      if (!force) {
+        if (!mineOnly) return;
+        const lastAt = lastMineRefreshAtByUser.get(userId) ?? 0;
+        if (Date.now() - lastAt < MINE_REFRESH_THROTTLE_MS) return;
+      }
+      if (mineOnly) lastMineRefreshAtByUser.set(userId, Date.now());
+      const invalidations = [
+        queryClient.invalidateQueries({ queryKey: matchesKeys.mine(userId) }),
+      ];
+      if (!mineOnly) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: matchesKeys.discoveryAll(userId) }),
+        );
+      }
+      await Promise.all(invalidations);
+    },
+    [queryClient, userId],
+  );
 }
 
 /**

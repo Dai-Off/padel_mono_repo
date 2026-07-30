@@ -1,11 +1,13 @@
-import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchMyCourtReservations } from '../api/bookings';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import { CLUB_IANA_TIMEZONE } from '../lib/clubTimeZone';
-import { homeKeys } from './keys';
+import { useRefreshMatches } from './matches';
+import { homeKeys, profileKeys } from './keys';
 
 /**
  * Queries del dashboard del Home (stats de quick actions + racha diaria).
@@ -94,4 +96,85 @@ export function useDailyStreak() {
     },
     enabled: Boolean(token && userId),
   });
+}
+
+/**
+ * Acciones de refresco del Home (antes fachada de HomeDataContext). Cada una
+ * invalida su dominio con `force`; sin force son no-op salvo refreshMatches
+ * scope 'mine' (throttle). refreshAll fuerza todo (CTA del banner de error /
+ * pull-to-refresh).
+ */
+export function useHomeActions() {
+  const { session } = useAuth();
+  const userId = session?.user?.id ?? null;
+  const queryClient = useQueryClient();
+  const refreshMatches = useRefreshMatches();
+
+  const refreshProfile = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: profileKeys.base(userId) });
+    },
+    [queryClient, userId],
+  );
+
+  const refreshCourtReservations = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: homeKeys.courtReservations(userId) });
+    },
+    [queryClient, userId],
+  );
+
+  const refreshTournaments = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: homeKeys.tournamentsCount(userId) });
+    },
+    [queryClient, userId],
+  );
+
+  const refreshStats = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: homeKeys.stats(userId) });
+    },
+    [queryClient, userId],
+  );
+
+  const refreshStreak = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!force || !userId) return;
+      await queryClient.invalidateQueries({ queryKey: homeKeys.streak(userId) });
+    },
+    [queryClient, userId],
+  );
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([
+      refreshProfile({ force: true }),
+      refreshMatches({ force: true }),
+      refreshCourtReservations({ force: true }),
+      refreshTournaments({ force: true }),
+      refreshStats({ force: true }),
+      refreshStreak({ force: true }),
+    ]);
+  }, [
+    refreshProfile,
+    refreshMatches,
+    refreshCourtReservations,
+    refreshTournaments,
+    refreshStats,
+    refreshStreak,
+  ]);
+
+  return {
+    refreshProfile,
+    refreshMatches,
+    refreshCourtReservations,
+    refreshTournaments,
+    refreshStats,
+    refreshStreak,
+    refreshAll,
+  };
 }

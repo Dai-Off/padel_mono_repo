@@ -11,7 +11,7 @@ import { fetchSeasonTransition, type SeasonTransition } from '../api/matchmaking
 import { fetchMyPlayerProfile } from '../api/players';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppSignals } from '../contexts/AppSignalsContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useHomeActions } from '../queries/home';
 import {
   SidebarProvider,
   useSidebarActions,
@@ -90,7 +90,7 @@ function SeasonTransitionHost() {
 function UsernameSetupHost() {
   const { session } = useAuth();
   const { profileRefreshKey, bumpProfileRefresh } = useAppSignals();
-  const { refreshProfile } = useHomeData();
+  const { refreshProfile } = useHomeActions();
   const [needsUsernameSetup, setNeedsUsernameSetup] = useState(false);
   const [usernameCheckDone, setUsernameCheckDone] = useState(false);
 

@@ -18,7 +18,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { formatPlayerLabel } from '../lib/username';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import { useHomeActions } from '../queries/home';
 import {
   useCoachRadar,
   useCoachStats,
@@ -121,7 +122,8 @@ export function ProfileScreen({
   const { t } = useTranslation();
   // Cache global del perfil (HomeData): siembra el perfil base para reentrada
   // instantánea e invalida al resto de pantallas tras editar/onboarding.
-  const { profile: homeProfile, refreshProfile: refreshGlobalProfile } = useHomeData();
+  const homeProfile = useMyProfile().data ?? null;
+  const { refreshProfile: refreshGlobalProfile } = useHomeActions();
   // Datos del perfil vía React Query (warm start): caché compartido y persistido
   // (PERSIST_ROOTS), revalidación por staleTime y focusManager. El límite del
   // gráfico de evolución es estado de cliente: al cambiarlo cambia la query key.

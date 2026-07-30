@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { goToMainTab } from '../navigation/nav';
-import { useHomeData } from './HomeDataContext';
+import { useRefreshMatches } from '../queries/matches';
 
 /** Secciones de origen del cuestionario de nivelacion (retorno post-onboarding). */
 export type PostOnboardingReturn =
@@ -60,7 +60,7 @@ const AppSignalsContext = createContext<AppSignalsValue | null>(null);
  * caliente: un bump re-renderiza solo a los tabs que consumen la senal.
  */
 export function AppSignalsProvider({ children }: { children: ReactNode }) {
-  const { refreshMatches } = useHomeData();
+  const refreshMatches = useRefreshMatches();
 
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [vitrinaScrollNonce, setVitrinaScrollNonce] = useState(0);

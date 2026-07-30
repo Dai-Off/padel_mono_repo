@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import { AffinityVisibilityToggle } from '../components/affinity/AffinityVisibilityToggle';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useHomeActions } from '../queries/home';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
 import { useClubCatalog } from '../hooks/useClubCatalog';
 import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
@@ -216,7 +216,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
   const { clubs: clubCatalog } = useClubCatalog();
   // Invalidamos la cache global del profile tras guardar — el resto de
   // pantallas que leen `useHomeData().profile` verán los cambios.
-  const { refreshProfile: refreshGlobalProfile } = useHomeData();
+  const { refreshProfile: refreshGlobalProfile } = useHomeActions();
 
   useEffect(() => {
     if (!token) {

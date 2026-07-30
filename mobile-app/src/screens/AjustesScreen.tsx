@@ -9,7 +9,8 @@ import { MenuScreenSection } from '../components/menuScreen/MenuScreenSection';
 import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { InfoContentScreen } from './InfoContentScreen';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import { useHomeActions } from '../queries/home';
 import { requestAccountDeletion } from '../api/auth';
 import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import type { AjustesSectionId } from '../navigation/types';
@@ -320,7 +321,8 @@ export function AjustesSectionScreen({
   onOpenPrivacyPolicy,
 }: AjustesSectionScreenProps) {
   const { session } = useAuth();
-  const { profile, refreshProfile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
+  const { refreshProfile } = useHomeActions();
   const { t } = useTranslation();
   const token = session?.access_token;
 

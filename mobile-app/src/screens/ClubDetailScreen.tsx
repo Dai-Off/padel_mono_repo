@@ -41,7 +41,8 @@ import {
 } from "../api/payments";
 import { fetchMyPlayerId } from "../api/players";
 import { useAuth } from "../contexts/AuthContext";
-import { useHomeData } from "../contexts/HomeDataContext";
+import { useMyProfile } from "../queries/profile";
+import { useHomeActions } from "../queries/home";
 import { PartidoCard } from "../components/partido/PartidoCard";
 import type { BookingConfirmationData } from "./BookingConfirmationScreen";
 import { PrivateReservationModal } from "../components/partido/PrivateReservationModal";
@@ -383,7 +384,8 @@ export function ClubDetailScreen({
   const localeBundle = useMemo(() => getLocaleBundle(locale), [locale]);
   const dateLocale = formatLocale(locale);
   const { session } = useAuth();
-  const { profile, refreshCourtReservations } = useHomeData();
+  const profile = useMyProfile().data ?? null;
+  const { refreshCourtReservations } = useHomeActions();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [clubPartidos, setClubPartidos] = useState<PartidoItem[]>([]);
