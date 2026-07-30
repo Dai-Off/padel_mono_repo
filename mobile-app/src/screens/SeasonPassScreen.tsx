@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ACCENT } from '../components/home/inicio/constants';
 import { androidReadableText } from '../components/home/inicio/textStyles';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
 import { theme } from '../theme';
 import { useTranslation } from '../i18n';
 import { useStripe } from '../stripe';
@@ -712,7 +712,7 @@ export function SeasonPassScreen({ onBack, onGoToProfile }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const { session, isLoading: authLoading } = useAuth();
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const playerInitials =
     `${profile?.firstName?.[0] ?? ''}${profile?.lastName?.[0] ?? ''}`.toUpperCase() || 'W';
   const { t } = useTranslation();

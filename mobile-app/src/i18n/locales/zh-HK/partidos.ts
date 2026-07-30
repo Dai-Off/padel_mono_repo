@@ -86,6 +86,8 @@ export const partidos: PartidosTranslationKeys = {
   detailDeclining: '拒絕中…',
   detailLeaveA11y: '離開球局或取消預約',
   matchCanceled: '球局已取消',
+  resultPending: '結果待定',
+  resultNone: '無結果',
   evalTitle: '球局評估',
   evalThanks: '感謝你的評價！',
   evalBackHome: '返回首頁',

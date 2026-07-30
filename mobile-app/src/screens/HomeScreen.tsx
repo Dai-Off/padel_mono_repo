@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CompetitiveLeagueHomeCard,
@@ -24,7 +24,14 @@ import {
   SeasonPassHomeCard,
 } from '../components/home/inicio';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import {
+  useHomeActions,
+  useHomeStats,
+  useMyCourtReservations,
+  usePublicTournamentsCount,
+} from '../queries/home';
+import { useMisPartidos, usePartidosDiscovery } from '../queries/matches';
 import type { PartidoItem } from './PartidosScreen';
 import type { CourtReservation } from '../api/bookings';
 import { IAAfinidadModal, type AffinityCriteria } from '../components/home/IAAfinidadModal';
@@ -56,6 +63,10 @@ import { zhHK } from '../i18n/zh-HK';
 
 type TabId = 'pistas' | 'partidos' | 'torneos';
 
+/** Identidades estables para los estados vacíos (evitan re-renders por `?? []`). */
+const EMPTY_PARTIDOS: PartidoItem[] = [];
+const EMPTY_RESERVATIONS: CourtReservation[] = [];
+
 function mapSeasonMissionToHome(
   m: SeasonPassMissionDto,
   t: (key: string, params?: Record<string, string | number>) => string,
@@ -75,7 +86,6 @@ function mapSeasonMissionToHome(
     progress: `${m.current}/${m.target}`,
     pct: `${pctNum}%`,
     pctNum,
-    highlight: m.done,
   };
 }
 
@@ -186,25 +196,40 @@ export function HomeScreen({
   const { session } = useAuth();
   const numberLocale = formatLocale(locale);
   const homeCopy = locale === 'zh-HK' ? zhHK.home : es.home;
-  // Datos del home cacheados a nivel de app (sobreviven a remounts del Home
-  // cuando navegas a otras pantallas y vuelves). Ver HomeDataContext.
-  const {
-    profile: myPlayerProfile,
-    profileLoading,
-    refreshProfile,
-    partidos,
-    misPartidos,
-    misReservasPista,
-    matchesLoading,
-    courtReservationsLoading,
-    publicTournamentsCount,
-    tournamentsLoading,
-    stats,
-    statsLoading,
-    refreshStreak,
-    hasInitialError,
-    refreshAll,
-  } = useHomeData();
+  // Datos del home leídos directo de React Query (el caché a nivel de app
+  // sobrevive a remounts del Home al navegar y volver).
+  const myProfileQuery = useMyProfile();
+  const myPlayerProfile = myProfileQuery.data ?? null;
+  const profileLoading = myProfileQuery.isLoading;
+
+  const misPartidosQuery = useMisPartidos();
+  const misPartidos = misPartidosQuery.data ?? EMPTY_PARTIDOS;
+  const discoveryQuery = usePartidosDiscovery();
+  const partidos = discoveryQuery.data ?? EMPTY_PARTIDOS;
+  const matchesLoading = misPartidosQuery.isLoading || discoveryQuery.isLoading;
+
+  const courtReservationsQuery = useMyCourtReservations();
+  const misReservasPista = courtReservationsQuery.data ?? EMPTY_RESERVATIONS;
+  const courtReservationsLoading = courtReservationsQuery.isLoading;
+
+  const tournamentsQuery = usePublicTournamentsCount();
+  const publicTournamentsCount = tournamentsQuery.data ?? null;
+  const tournamentsLoading = tournamentsQuery.isLoading;
+
+  const statsQuery = useHomeStats();
+  const stats = statsQuery.data ?? null;
+  const statsLoading = statsQuery.isLoading;
+
+  const { refreshProfile, refreshStreak, refreshAll } = useHomeActions();
+
+  // Banner de error inicial: isError sin datos = primera carga fallida (stats y
+  // racha no marcan error a propósito: degradan a ceros / silencioso).
+  const hasInitialError =
+    (myProfileQuery.isError && myProfileQuery.data == null) ||
+    (misPartidosQuery.isError && misPartidosQuery.data == null) ||
+    (discoveryQuery.isError && discoveryQuery.data == null) ||
+    (courtReservationsQuery.isError && courtReservationsQuery.data == null) ||
+    (tournamentsQuery.isError && tournamentsQuery.data == null);
   // Season pass: queries compartidas con la pantalla del pase. La card usa
   // /estado (rápido); las misiones del Home, /misiones (evaluación lenta).
   // isLoading = primera carga en vuelo, como el antiguo seasonPassLoading.
@@ -229,18 +254,14 @@ export function HomeScreen({
       setRetrying(false);
     }
   };
-  // Entrada escalonada "tipo remount" sin remontar. Solo se re-arma en
-  // CAMBIOS DE TAB: el swap es instantáneo, así que esconder en el blur es
-  // garantizado invisible y la vuelta entra en cascada sobre lienzo limpio.
-  // Al volver de pantallas apiladas (pase, detalles…) NO hay replay — el
-  // contenido sigue en su sitio, como hacen las apps grandes: cualquier
-  // reset ahí compite con la transición (timers = carreras perdidas) y
-  // acababa viéndose como un parpadeo.
+  // Entrada escalonada "tipo remount" sin remontar. Se re-arma al perder foco,
+  // tanto en cambios de tab como al apilar una pantalla encima: se esconden los
+  // bloques en el blur y se re-animan en el focus de vuelta. Con transparentModal
+  // la pantalla de encima cubre el Home al instante, así que el reset queda
+  // oculto y al volver la cascada entra sobre lienzo limpio.
   const [enterNonce, setEnterNonce] = useState(0);
   const [resetNonce, setResetNonce] = useState(0);
   const isFirstFocusRef = useRef(true);
-  const tabNavigation = useNavigation();
-  const tabRoute = useRoute();
   useFocusEffect(
     useCallback(() => {
       if (isFirstFocusRef.current) {
@@ -248,21 +269,12 @@ export function HomeScreen({
         // haría tartamudear la entrada inicial.
         isFirstFocusRef.current = false;
       } else {
-        // Si el blur anterior no escondió nada (vuelta de una pantalla
-        // apilada), animar visible→visible no produce ningún cambio.
         setEnterNonce((n) => n + 1);
       }
       return () => {
-        // ¿Este blur es un cambio de tab o una pantalla apilada encima?
-        // Si el tab activo ya no es este, el Home quedó oculto en este mismo
-        // frame: esconder aquí es seguro e invisible.
-        const state = tabNavigation.getState?.();
-        const activeTab = state?.routes?.[state.index ?? 0]?.name;
-        if (activeTab !== tabRoute.name) {
-          setResetNonce((n) => n + 1);
-        }
+        setResetNonce((n) => n + 1);
       };
-    }, [tabNavigation, tabRoute.name]),
+    }, []),
   );
 
   const [affinityModalVisible, setAffinityModalVisible] = useState(() => consumeAffinityModalPendingReopen());
@@ -466,7 +478,15 @@ export function HomeScreen({
 
   const homeMissionsFromPass = useMemo(() => {
     const list = misionesQuery.data?.missions ?? [];
-    return list.filter((m) => m.period === 'daily').slice(0, 8).map((m) => mapSeasonMissionToHome(m, t));
+    // Solo misiones "activas": las completadas ya no son accionables, se ven en el pase.
+    // Todos los periodos entran; se ordenan por progreso (en curso antes que sin empezar)
+    // y se limita a un teaser corto. Se destaca la más cerca de completarse.
+    const active = list
+      .filter((m) => !m.done && m.current < m.target)
+      .map((m) => mapSeasonMissionToHome(m, t))
+      .sort((a, b) => b.pctNum - a.pctNum)
+      .slice(0, 4);
+    return active.map((m, i) => (i === 0 && m.pctNum > 0 ? { ...m, highlight: true } : m));
   }, [misionesQuery.data?.missions, t]);
 
   const seasonPassCardProps =
@@ -667,7 +687,7 @@ export function HomeScreen({
           />
         </InicioEnterBlock>
         <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 5}>
-          <MissionsHomeSection missions={homeMissionsFromPass} />
+          <MissionsHomeSection missions={homeMissionsFromPass} onViewAll={onOpenSeasonPass} />
         </InicioEnterBlock>
         <InicioEnterBlock enterKey={enterNonce} resetKey={resetNonce} enterIndex={homeEnterOffset + 6}>
           <EnDirectoSection

@@ -1,4 +1,5 @@
 import { cancelIncompletePastMatches } from './incompleteMatchCancel';
+import { SCORE_DISPUTE_GRACE_HOURS, SCORE_REPORT_WINDOW_HOURS } from './levelingConstants';
 import { getSupabaseServiceRoleClient } from './supabase';
 
 async function autoConfirmExpiredVotes(): Promise<void> {
@@ -61,6 +62,94 @@ async function autoConfirmExpiredVotes(): Promise<void> {
   }
 }
 
+/**
+ * Estados de marcador que pueden caducar a no_result. pending_confirmation y
+ * disputed_pending son del flujo legacy (la app ya no llama a /score/confirm ni
+ * /score/dispute): sin expiración quedarían atascados para siempre.
+ */
+const EXPIRABLE_SCORE_STATUSES = ['pending', 'pending_confirmation', 'disputed_pending'];
+/** Lote por ejecución: acota la URL de los .in() y la latencia del hot path. */
+const EXPIRE_BATCH_SIZE = 500;
+const EXPIRE_CHUNK_SIZE = 100;
+
+function chunked<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Partidos finished cuya reserva terminó hace más de SCORE_REPORT_WINDOW_HOURS
+ * sin resultado: pasan a no_result. Sin ELO, sin play counts — el partido queda
+ * como "sin resultado" y deja de ser accionable.
+ *
+ * Excepciones que alargan la ventana (acotadas):
+ * - pending_votes no entra aquí: lo resuelve autoConfirmExpiredVotes (24h).
+ * - Con propuesta previa (score_submissions) o estado legacy con propuesta:
+ *   gracia de SCORE_DISPUTE_GRACE_HOURS desde el último movimiento (updated_at)
+ *   antes de cerrar a no_result.
+ */
+async function expireUnreportedScores(): Promise<void> {
+  const supabase = getSupabaseServiceRoleClient();
+  const nowMs = Date.now();
+  const cutoffIso = new Date(nowMs - SCORE_REPORT_WINDOW_HOURS * 3600 * 1000).toISOString();
+
+  const { data: rows, error: selectErr } = await supabase
+    .from('matches')
+    .select('id, score_status, updated_at, bookings!inner(end_at)')
+    .eq('status', 'finished')
+    .in('score_status', EXPIRABLE_SCORE_STATUSES)
+    .lt('bookings.end_at', cutoffIso)
+    .limit(EXPIRE_BATCH_SIZE);
+
+  if (selectErr) {
+    console.error('[expireUnreportedScores] select failed:', selectErr.message);
+    return;
+  }
+
+  const candidates = (rows ?? []).filter((r: { id: string }) => Boolean(r.id));
+  if (candidates.length === 0) return;
+
+  const withProposalIds = new Set<string>();
+  for (const chunk of chunked(candidates.map((r: { id: string }) => r.id), EXPIRE_CHUNK_SIZE)) {
+    const { data: subs, error: subsErr } = await supabase
+      .from('score_submissions')
+      .select('match_id')
+      .in('match_id', chunk);
+    if (subsErr) {
+      console.error('[expireUnreportedScores] submissions select failed:', subsErr.message);
+      return;
+    }
+    for (const s of subs ?? []) withProposalIds.add((s as { match_id: string }).match_id);
+  }
+
+  const graceMs = SCORE_DISPUTE_GRACE_HOURS * 3600 * 1000;
+  const ids = candidates
+    .filter((r: { id: string; score_status?: string; updated_at?: string | null }) => {
+      const hadProposal = withProposalIds.has(r.id) || r.score_status !== 'pending';
+      if (!hadProposal) return true;
+      const lastMoveMs = r.updated_at ? new Date(r.updated_at).getTime() : NaN;
+      return !Number.isFinite(lastMoveMs) || nowMs >= lastMoveMs + graceMs;
+    })
+    .map((r: { id: string }) => r.id);
+  if (ids.length === 0) return;
+
+  let expired = 0;
+  for (const chunk of chunked(ids, EXPIRE_CHUNK_SIZE)) {
+    const { error: updErr } = await supabase
+      .from('matches')
+      .update({ score_status: 'no_result', updated_at: new Date().toISOString() })
+      .in('id', chunk)
+      .in('score_status', EXPIRABLE_SCORE_STATUSES);
+    if (updErr) {
+      console.error('[expireUnreportedScores] update failed:', updErr.message);
+      return;
+    }
+    expired += chunk.length;
+  }
+  if (expired > 0) console.log(`[expireUnreportedScores] expired ${expired} matches to no_result`);
+}
+
 type FinalizePastMatchesOpts = {
   /** Reembolsos Stripe + cancelación masiva: solo cron (`run-debt-settlement`), no listados. */
   cancelIncomplete?: boolean;
@@ -82,6 +171,13 @@ export async function finalizePastMatches(
     await autoConfirmExpiredVotes();
   } catch (err) {
     console.error('[finalizePastMatches] autoConfirmExpiredVotes failed:', err);
+  }
+
+  // Cierra sin resultado los partidos que nadie reportó dentro de la ventana.
+  try {
+    await expireUnreportedScores();
+  } catch (err) {
+    console.error('[finalizePastMatches] expireUnreportedScores failed:', err);
   }
 
   let cancelled = 0;

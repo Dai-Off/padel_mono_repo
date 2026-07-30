@@ -89,6 +89,8 @@ export const partidos: PartidosTranslationKeys = {
   detailDeclining: 'Declinando…',
   detailLeaveA11y: 'Salir del partido o cancelar reserva',
   matchCanceled: 'Partido cancelado',
+  resultPending: 'Resultado pendiente',
+  resultNone: 'Sin resultado',
   evalTitle: 'Evaluación de Partido',
   evalThanks: '¡Gracias por evaluar!',
   evalBackHome: 'Volver a inicio',

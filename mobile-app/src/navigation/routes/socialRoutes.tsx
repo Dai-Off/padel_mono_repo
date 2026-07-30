@@ -8,19 +8,21 @@ import { NotificationsScreen } from '../../screens/NotificationsScreen';
 import { CommunityScreen } from '../../screens/CommunityScreen';
 import { ClubDetailScreen } from '../../screens/ClubDetailScreen';
 import { markAffinityModalPendingReopen } from '../../screens/HomeScreen';
-import { useHomeData } from '../../contexts/HomeDataContext';
+import { useRefreshMatches } from '../../queries/matches';
+import { useMyProfile } from '../../queries/profile';
 import { useMatchmaking } from '../../contexts/MatchmakingContext';
 import { useAppSignals } from '../../contexts/AppSignalsContext';
 import { useOpenMatchById, useOpenMatchFromInvite } from '../matchActions';
 import { goToMainTab } from '../nav';
 import { RouteShell } from '../RouteShell';
+import { ScreenFadeIn } from '../../components/ui/ScreenFadeIn';
 import type { RootStackParamList } from '../types';
 
 export function PartidoDetailRoute({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, 'PartidoDetail'>) {
-  const { refreshMatches } = useHomeData();
+  const refreshMatches = useRefreshMatches();
   const { bumpMatchInvites } = useMatchmaking();
   const { bumpPartidosRefresh, openOnboardingFromSection } = useAppSignals();
 
@@ -143,20 +145,22 @@ export function NotificationsRoute({
 export function CommunityRoute({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'Community'>) {
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   return (
     <RouteShell>
-      <CommunityScreen
-        onBack={() => navigation.goBack()}
-        // replace: hoy Mensajes sustituye a Comunidad (su back no vuelve aqui).
-        onMessagesPress={() => navigation.replace('Messages')}
-        onOpenPlayer={(pid) => navigation.push('PublicProfile', { playerId: pid })}
-        myPlayerId={profile?.id}
-        onNavigateToTab={(tab) => {
-          navigation.popTo('Main');
-          goToMainTab(tab);
-        }}
-      />
+      <ScreenFadeIn>
+        <CommunityScreen
+          onBack={() => navigation.goBack()}
+          // replace: hoy Mensajes sustituye a Comunidad (su back no vuelve aqui).
+          onMessagesPress={() => navigation.replace('Messages')}
+          onOpenPlayer={(pid) => navigation.push('PublicProfile', { playerId: pid })}
+          myPlayerId={profile?.id}
+          onNavigateToTab={(tab) => {
+            navigation.popTo('Main');
+            goToMainTab(tab);
+          }}
+        />
+      </ScreenFadeIn>
     </RouteShell>
   );
 }

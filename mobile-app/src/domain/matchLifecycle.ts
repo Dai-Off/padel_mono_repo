@@ -42,12 +42,6 @@ export function getMatchBooking<
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
-export function countFilledMatchPlayers(
-  matchPlayers?: Array<{ players?: { id?: string } | null } | null> | null,
-): number {
-  return (matchPlayers ?? []).filter((mp) => Boolean(mp?.players?.id)).length;
-}
-
 /** Solo partidos con 4 jugadores y no cancelados pueden registrar resultado. */
 export function canRecordMatchScore(
   matchStatus: string | null | undefined,
@@ -58,35 +52,55 @@ export function canRecordMatchScore(
   return filledPlayerCount >= 4;
 }
 
-type HomeMisPartidoRow = {
-  status: string;
-  has_my_feedback?: boolean;
-  match_players?: Array<{ players?: { id?: string } | null } | null> | null;
-  bookings?:
-    | { start_at?: string | null; end_at?: string | null; status?: string | null; deleted_at?: string | null }
-    | Array<{ start_at?: string | null; end_at?: string | null; status?: string | null; deleted_at?: string | null }>
-    | null;
-};
+/**
+ * Ventana post-partido para iniciar el reporte de resultado. Pasada la ventana
+ * el backend cierra el partido a no_result (salvo votación o disputa activas).
+ * Mantener alineado con SCORE_REPORT_WINDOW_HOURS en backend/src/lib/levelingConstants.ts.
+ */
+export const POST_MATCH_ACTION_WINDOW_HOURS = 48;
+/** Ventana de feedback tras confirmarse el marcador. Alineado con FEEDBACK_WINDOW_HOURS del backend. */
+export const FEEDBACK_WINDOW_HOURS = 24;
+/** Red de seguridad: nada post-partido sigue accionable pasados 7 días (estados legacy sin auto-resolución). */
+export const POST_MATCH_MAX_LIFETIME_HOURS = 7 * 24;
 
-/** Carrusel home: excluir reservas borradas/canceladas y pasados incompletos sin feedback. */
-export function shouldIncludeInHomeMisPartidos(
-  m: HomeMisPartidoRow,
+export function isPostMatchActionWindowOpen(
+  endAt: string | null | undefined,
   nowMs: number = Date.now(),
 ): boolean {
-  const b = getMatchBooking(m);
-  if (!b?.start_at || !b?.end_at) return false;
-  if (b.deleted_at != null) return false;
+  const endMs = parseMs(endAt);
+  if (endMs == null) return true;
+  return nowMs < endMs + POST_MATCH_ACTION_WINDOW_HOURS * 3600 * 1000;
+}
 
-  const matchStatus = m.status;
-  if (String(matchStatus).toLowerCase() === 'cancelled') return false;
-  if (String(b.status ?? '').toLowerCase() === 'cancelled') return false;
+/**
+ * ¿Sigue abierto el flujo post-partido (finalizar: resultado + feedback) para mí?
+ * - no_result → cerrado.
+ * - confirmed → solo si me falta feedback y su ventana (24h desde confirmación) sigue abierta.
+ * - pending_votes → abierto: la votación se resuelve sola (votos o autoconfirmación a 24h).
+ * - pending (incluye disputa tras rechazo) y estados legacy → abierto; el backend
+ *   lo cierra a no_result (ventana 48h + gracia de disputa) y el cap de 7 días acota el resto.
+ */
+export function isPostMatchFlowOpen(
+  p: {
+    endAt?: string | null;
+    scoreStatus?: string | null;
+    score_status?: string | null;
+    scoreConfirmedAt?: string | null;
+    hasMyFeedback?: boolean;
+  },
+  nowMs: number = Date.now(),
+): boolean {
+  const endMs = parseMs(p.endAt);
+  if (endMs != null && nowMs >= endMs + POST_MATCH_MAX_LIFETIME_HOURS * 3600 * 1000) return false;
 
-  const phase = getMatchListPhase(nowMs, matchStatus, b.start_at, b.end_at);
-  if (phase === 'past' && m.has_my_feedback === true) return false;
-
-  const filled = countFilledMatchPlayers(m.match_players);
-  if (phase === 'past' && !canRecordMatchScore(matchStatus, filled)) return false;
-
+  const st = String(p.score_status ?? p.scoreStatus ?? '').toLowerCase();
+  if (st === 'no_result') return false;
+  if (st === 'confirmed') {
+    if (p.hasMyFeedback) return false;
+    const confirmedMs = parseMs(p.scoreConfirmedAt);
+    if (confirmedMs != null) return nowMs < confirmedMs + FEEDBACK_WINDOW_HOURS * 3600 * 1000;
+    return isPostMatchActionWindowOpen(p.endAt, nowMs);
+  }
   return true;
 }
 
@@ -98,20 +112,6 @@ export function isPartidoCancelled(p: {
   if (String(p.matchStatus ?? '').toLowerCase() === 'cancelled') return true;
   if (String(p.bookingStatus ?? '').toLowerCase() === 'cancelled') return true;
   return false;
-}
-
-export function shouldIncludePartidoInHomeCarousel(p: {
-  matchPhase?: MatchListPhase;
-  hasMyFeedback?: boolean;
-  matchStatus?: string;
-  bookingStatus?: string;
-  players: Array<{ isFree: boolean }>;
-}): boolean {
-  if (isPartidoCancelled(p)) return false;
-  if (p.matchPhase !== 'past') return true;
-  if (p.hasMyFeedback) return false;
-  const filled = p.players.filter((x) => !x.isFree).length;
-  return canRecordMatchScore(p.matchStatus, filled);
 }
 
 export function isMatchEnrichedActiveForDiscovery(m: {

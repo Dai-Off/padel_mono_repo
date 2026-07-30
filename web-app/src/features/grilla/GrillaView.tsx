@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Calendar, Menu, ArrowLeft, X, Globe, Wallet, Gift, Plus, Loader2, MoreVertical, Trash2, Settings, Lock, LockOpen, CheckSquare } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
 import { PageSpinner } from '../../components/Layout/PageSpinner';
+import { CashOpeningPendingBanner } from '../../components/Layout/CashOpeningPendingBanner';
 import clsx from 'clsx';
 import { useGrillaTranslation } from './i18n/useGrillaTranslation';
 import { calendarLocale } from './i18n/calendarLocale';
@@ -2630,11 +2631,14 @@ function resolveManualBookingTotalCents(
             </div>
           </header>
         )}
+        {/* Flex child so the h-dvh shell keeps its footer visible while the reminder shows. */}
+        <CashOpeningPendingBanner />
+
         <div className="hidden md:block">
-          <GrillaQuickNav 
-            isAdmin={isAdmin} 
-            portalMenuPermissionKeys={portalMenuPermissionKeys} 
-            clubId={clubId} 
+          <GrillaQuickNav
+            isAdmin={isAdmin}
+            portalMenuPermissionKeys={portalMenuPermissionKeys}
+            clubId={clubId}
             loading={permissionsLoading}
           />
         </div>

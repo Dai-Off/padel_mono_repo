@@ -68,6 +68,7 @@ export type PartidoItem = {
   bookingStatus?: string;
   scoreStatus?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | 'pending_votes' | 'no_result' | null;
   score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | 'pending_votes' | 'no_result' | null;
+  scoreConfirmedAt?: string | null;
   hasMyFeedback?: boolean;
   sets?: Array<{ a: number; b: number }> | null;
   myTeam?: 'A' | 'B' | null;

@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import appJson from '../../app.json';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useHomeActions } from '../queries/home';
 import {
   fetchMyPlayerProfile,
   updateMyPlayerProfile,
@@ -217,7 +217,7 @@ export function EditProfileScreen({
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const { session } = useAuth();
-  const { refreshProfile, refreshMatches } = useHomeData();
+  const { refreshProfile, refreshMatches } = useHomeActions();
   const token = session?.access_token;
 
   const [loading, setLoading] = useState(true);

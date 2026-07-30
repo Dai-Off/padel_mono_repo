@@ -33,12 +33,10 @@ import { useClubCatalog } from '../hooks/useClubCatalog';
 import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
 import { computeMatchAvailabilityWindow } from '../lib/matchAvailabilityWindow';
 import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
-import { fetchMatches, fetchMatchById, type MatchEnriched } from '../api/matches';
+import { fetchMatchById, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from './PartidosScreen';
 import {
-  fetchMatchmakingLeagueConfig,
-  fetchMatchmakingLeaderboard,
   fetchMatchmakingProposal,
   fetchMatchmakingStatus,
   isMatchmakingFlowPending,
@@ -53,7 +51,14 @@ import {
   type MatchmakingStatusResponse,
   type PairInvite,
 } from '../api/matchmaking';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import { useQueryClient } from '@tanstack/react-query';
+import { matchmakingKeys } from '../queries/keys';
+import {
+  useMatchmakingLeaderboardInfinite,
+  useMatchmakingLeagueConfigQuery,
+  useRecentMatchmakingMatchesQuery,
+} from '../queries/matchmaking';
 import { useTranslation } from '../i18n';
 import { getMatchBooking } from '../domain/matchLifecycle';
 import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
@@ -123,25 +128,44 @@ export function CompetitiveLeagueScreen({
 }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const userId = session?.user?.id ?? null;
+  const queryClient = useQueryClient();
+  // Status sembrado desde la query global (MatchmakingContext ya la poll-ea a
+  // nivel app): al abrir/reabrir la pantalla no re-parpadea el skeleton si el
+  // estado ya se conoce. El bootstrap de abajo revalida en silencio.
+  const cachedStatus = userId
+    ? queryClient.getQueryData<MatchmakingStatusResponse>(matchmakingKeys.status(userId)) ?? null
+    : null;
   const [mainTab, setMainTab] = useState<MainTab>('liga');
   const [step, setStep] = useState<Step>('home');
   const [form, setForm] = useState<SearchForm>(DEFAULT_FORM);
   const [loading, setLoading] = useState(false);
   const [openingProposal, setOpeningProposal] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(true);
+  const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(cachedStatus == null);
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const { t } = useTranslation();
-  const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
-  const [rankingRows, setRankingRows] = useState<MatchmakingLeaderboardRow[]>([]);
-  const [rankingTotal, setRankingTotal] = useState(0);
-  const [rankingHasMore, setRankingHasMore] = useState(false);
-  const [rankingLoading, setRankingLoading] = useState(false);
-  const [rankingLoadingMore, setRankingLoadingMore] = useState(false);
-  const [rankingError, setRankingError] = useState<string | null>(null);
-  const rankingLoadGenRef = useRef(0);
-  const [status, setStatus] = useState<MatchmakingStatusResponse | null>(null);
+  // Config de divisiones desde React Query (cachea entre aperturas).
+  const leagueRows = useMatchmakingLeagueConfigQuery().data ?? null;
+  // Ranking desde React Query (infinite): cachea por liga entre aperturas, así
+  // no re-parpadea el skeleton al reentrar en la pestaña con la misma liga.
+  const playerLiga = profile?.liga?.trim() || null;
+  const leaderboardQuery = useMatchmakingLeaderboardInfinite(
+    mainTab === 'ranking' ? playerLiga : null,
+  );
+  const rankingRows = useMemo(
+    () => leaderboardQuery.data?.pages.flatMap((p) => p.rows) ?? [],
+    [leaderboardQuery.data],
+  );
+  const rankingTotal = leaderboardQuery.data?.pages[0]?.total ?? 0;
+  const rankingHasMore = Boolean(leaderboardQuery.hasNextPage);
+  const rankingLoading = leaderboardQuery.isLoading;
+  const rankingLoadingMore = leaderboardQuery.isFetchingNextPage;
+  const rankingError = leaderboardQuery.isError
+    ? t('competitive.screen.errors.rankingLoadFailed')
+    : null;
+  const [status, setStatus] = useState<MatchmakingStatusResponse | null>(cachedStatus);
   const [proposal, setProposal] = useState<MatchmakingProposalResponse | null>(null);
   const [proposalMatch, setProposalMatch] = useState<MatchEnriched | null>(null);
   const [recentMatchRows, setRecentMatchRows] = useState<
@@ -256,64 +280,11 @@ export function CompetitiveLeagueScreen({
   ]);
   refreshStatusRef.current = refreshStatus;
 
-  useEffect(() => {
-    void fetchMatchmakingLeagueConfig().then(setLeagueRows);
-  }, []);
-
-  const loadRankingPage = useCallback(
-    async (offset: number, append: boolean) => {
-      const token = session?.access_token ?? null;
-      const liga = profile?.liga?.trim() || null;
-      if (!token || !liga) return;
-
-      const gen = ++rankingLoadGenRef.current;
-      if (append) {
-        setRankingLoadingMore(true);
-      } else {
-        setRankingLoading(true);
-        setRankingError(null);
-      }
-
-      const res = await fetchMatchmakingLeaderboard(token, {
-        liga,
-        limit: RANKING_PAGE_SIZE,
-        offset,
-      });
-      if (gen !== rankingLoadGenRef.current) return;
-
-      if (!res) {
-        if (!append) {
-          setRankingRows([]);
-          setRankingTotal(0);
-          setRankingHasMore(false);
-          setRankingError(t('competitive.screen.errors.rankingLoadFailed'));
-        }
-        setRankingLoading(false);
-        setRankingLoadingMore(false);
-        return;
-      }
-
-      setRankingTotal(res.total);
-      setRankingHasMore(res.has_more === true);
-      setRankingRows((prev) => (append ? [...prev, ...res.rows] : res.rows));
-      setRankingLoading(false);
-      setRankingLoadingMore(false);
-    },
-    [profile?.liga, session?.access_token, t],
-  );
-
-  useEffect(() => {
-    if (mainTab !== 'ranking') return;
-    setRankingRows([]);
-    setRankingTotal(0);
-    setRankingHasMore(false);
-    void loadRankingPage(0, false);
-  }, [mainTab, profile?.liga, session?.access_token, loadRankingPage]);
-
   const loadMoreRanking = useCallback(() => {
-    if (rankingLoading || rankingLoadingMore || !rankingHasMore) return;
-    void loadRankingPage(rankingRows.length, true);
-  }, [loadRankingPage, rankingHasMore, rankingLoading, rankingLoadingMore, rankingRows.length]);
+    if (leaderboardQuery.hasNextPage && !leaderboardQuery.isFetchingNextPage) {
+      void leaderboardQuery.fetchNextPage();
+    }
+  }, [leaderboardQuery]);
 
   const handleHomeScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -333,7 +304,10 @@ export function CompetitiveLeagueScreen({
       setIsHomeBootstrapping(false);
       return () => clearPollTimer();
     }
-    setIsHomeBootstrapping(true);
+    // No re-mostramos el skeleton si ya teníamos status cacheado (arranca en
+    // false por el seed): revalidamos en silencio. Sin caché, isHomeBootstrapping
+    // ya arranca en true, así que tampoco hace falta forzarlo aquí. Evita el
+    // parpadeo contenido→skeleton→contenido al abrir.
     void refreshStatusRef.current().finally(() => {
       if (!cancelled) setIsHomeBootstrapping(false);
     });
@@ -376,20 +350,17 @@ export function CompetitiveLeagueScreen({
     onPartnerApplied?.();
   }, [pendingPartnerInvite, onPartnerApplied]);
 
+  // Partidos recientes desde React Query (cachea entre aperturas); el mapeo a
+  // filas sigue en la pantalla. Se sincroniza al state al llegar/cambiar el dato.
+  const recentMatchesQuery = useRecentMatchmakingMatchesQuery(profile?.id);
   useEffect(() => {
-    const token = session?.access_token ?? null;
     const myId = profile?.id;
-    if (!token || !myId) return;
-    let cancelled = false;
-    void fetchMatches({ expand: true, token, activeOnly: false }).then((rows) => {
-      if (cancelled) return;
-      const myMatches = rows.filter((m) => (m.match_players ?? []).some((mp) => mp.players?.id === myId));
-      setRecentMatchRows(toRecentRows(myMatches, myId));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.id, session?.access_token]);
+    if (!myId || !recentMatchesQuery.data) return;
+    const myMatches = recentMatchesQuery.data.filter((m) =>
+      (m.match_players ?? []).some((mp) => mp.players?.id === myId),
+    );
+    setRecentMatchRows(toRecentRows(myMatches, myId));
+  }, [recentMatchesQuery.data, profile?.id]);
 
   useEffect(() => {
     if (preferredClubsSeedDoneRef.current || clubCatalog.length === 0) return;

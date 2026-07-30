@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchMatches } from '../api/matches';
-import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../contexts/AuthContext';
+import { useMyProfile } from '../queries/profile';
+import {
+  usePartidosDiscovery,
+  usePartidosDiscoveryRange,
+  useRefreshMatches,
+} from '../queries/matches';
+import { matchesKeys } from '../queries/keys';
 import {
   clubsChipLabel,
   countPartidosAdvancedFilters,
@@ -18,6 +24,9 @@ import { loadStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import type { PartidoItem } from '../screens/PartidosScreen';
 import { useClubCatalog } from './useClubCatalog';
 
+/** Identidad estable para el estado vacío del discovery. */
+const EMPTY_PARTIDOS: PartidoItem[] = [];
+
 function isPublicJoinableMatch(p: PartidoItem): boolean {
   if (p.matchPhase !== 'upcoming') return false;
   if (p.matchStatus === 'cancelled') return false;
@@ -29,30 +38,17 @@ function isOthersOpenMatch(p: PartidoItem, myPlayerId: string | null): boolean {
   return isPublicJoinableMatch(p) && isPartidoOpenForDiscovery(p, myPlayerId);
 }
 
-function mapDiscoveryRows(
-  rows: Awaited<ReturnType<typeof fetchMatches>>,
-  myId: string | null,
-): PartidoItem[] {
-  return rows
-    .map((m) => mapMatchToPartido(m, { viewerPlayerId: myId }))
-    .filter((p): p is PartidoItem => p != null)
-    .filter((p) => p.matchPhase !== 'past')
-    .filter((p) => isPartidoOpenForDiscovery(p, myId));
-}
-
 export function usePartidosList(token: string | null | undefined, refreshNonce: number) {
   const { t, locale } = useTranslation();
-  const {
-    profile,
-    partidos: contextPartidos,
-    refreshMatches,
-    matchesLoading,
-  } = useHomeData();
-  const customLoadGenRef = useRef(0);
+  const { session } = useAuth();
+  const userId = session?.user?.id ?? null;
+  const queryClient = useQueryClient();
+  const profile = useMyProfile().data ?? null;
+  const discoveryQuery = usePartidosDiscovery();
+  const contextPartidos = discoveryQuery.data ?? EMPTY_PARTIDOS;
+  const matchesLoading = discoveryQuery.isLoading;
+  const refreshMatches = useRefreshMatches();
   const [filters, setFilters] = useState<PartidosFiltersState>(getInitialPartidosFilters);
-  /** Solo cuando el filtro «cuándo» pide un rango distinto al cache de Home. */
-  const [customRangeOpen, setCustomRangeOpen] = useState<PartidoItem[] | null>(null);
-  const [customRangeLoading, setCustomRangeLoading] = useState(false);
   const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(profile?.id ?? null);
   const [favoriteClubIds, setFavoriteClubIds] = useState<string[]>([]);
   const { clubs, loading: clubsLoading, reload: reloadClubs } = useClubCatalog();
@@ -82,57 +78,24 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
 
   const fetchRange = useMemo(() => partidosFetchDateRange(filters), [filters]);
 
-  /** Tras crear/unirse: una sola revalidación en HomeDataContext (mine + discovery). */
+  // Discovery de rango custom en React Query: activo solo cuando el filtro
+  // «cuándo» pide un rango distinto al del Home (si no, se usa el cache del Home).
+  const customRange = usesDefaultDiscoveryRange
+    ? null
+    : { activeOnly: fetchRange.activeOnly, dateFrom: fetchRange.dateFrom, dateTo: fetchRange.dateTo };
+  const customRangeQuery = usePartidosDiscoveryRange(customRange);
+  const customRangeOpen = usesDefaultDiscoveryRange ? null : (customRangeQuery.data ?? null);
+  const customRangeLoading = usesDefaultDiscoveryRange ? false : customRangeQuery.isLoading;
+
+  /** Tras crear/unirse: revalida el Home (mine + discovery) y el rango custom. */
   useEffect(() => {
     if (refreshNonce > 0 && token) {
-      setCustomRangeOpen(null);
       void refreshMatches({ force: true });
+      if (userId) {
+        void queryClient.invalidateQueries({ queryKey: matchesKeys.discoveryRangeAll(userId) });
+      }
     }
-  }, [refreshNonce, token, refreshMatches]);
-
-  const loadCustomRangeOpen = useCallback(async () => {
-    if (!token || usesDefaultDiscoveryRange) {
-      setCustomRangeOpen(null);
-      setCustomRangeLoading(false);
-      return;
-    }
-
-    const gen = ++customLoadGenRef.current;
-    setCustomRangeLoading(true);
-    const { activeOnly, dateFrom, dateTo } = fetchRange;
-
-    try {
-      const openMatches = await fetchMatches({
-        expand: true,
-        token,
-        activeOnly,
-        discovery: true,
-        visibility: 'public',
-        dateFrom,
-        dateTo,
-        joinableOnly: true,
-        limit: 100,
-      });
-      if (gen !== customLoadGenRef.current) return;
-      const myId = profile?.id ?? null;
-      setCustomRangeOpen(mapDiscoveryRows(openMatches, myId));
-    } catch {
-      if (gen === customLoadGenRef.current) setCustomRangeOpen([]);
-    } finally {
-      if (gen === customLoadGenRef.current) setCustomRangeLoading(false);
-    }
-  }, [
-    token,
-    usesDefaultDiscoveryRange,
-    fetchRange.activeOnly,
-    fetchRange.dateFrom,
-    fetchRange.dateTo,
-    profile?.id,
-  ]);
-
-  useEffect(() => {
-    void loadCustomRangeOpen();
-  }, [loadCustomRangeOpen]);
+  }, [refreshNonce, token, refreshMatches, userId, queryClient]);
 
   const openRawBase = usesDefaultDiscoveryRange ? contextPartidos : (customRangeOpen ?? []);
 

@@ -1,5 +1,8 @@
 import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import {
+  createNativeStackNavigator,
+  type NativeStackNavigationOptions,
+} from '@react-navigation/native-stack';
 import { RequireAuth } from '../components/auth';
 import { MainShell } from './MainShell';
 import { navigationRef } from './navigationRef';
@@ -67,6 +70,31 @@ const APP_NAV_THEME: Theme = {
 /** Fondo de las pantallas del stack durante las transiciones nativas. */
 const APP_CONTENT_STYLE = { backgroundColor: '#0F0F0F' } as const;
 
+/**
+ * Opciones por defecto de todas las rutas apiladas del grupo autenticado.
+ * `transparentModal` mantiene la pantalla de debajo montada y pintada mientras
+ * esta está encima (native-stack v7 no la detacha en modales transparentes),
+ * así al volver se revela sin flash negro ni re-montaje. Las pantallas tienen
+ * fondo opaco propio (RouteShell), no se transparentan en uso.
+ *
+ * `animation: 'none'`: la entrada instantánea cubre el Home al momento, así el
+ * reset de la cascada (esconder los bloques en el blur) queda oculto y no se ve
+ * el parpadeo que sí producía el fade al dejar el Home visible durante 220 ms.
+ */
+const REVEAL_HOME_OPTIONS: NativeStackNavigationOptions = {
+  presentation: 'transparentModal',
+  animation: 'none',
+};
+
+/**
+ * El Home (ruta base) NO es un modal: es la pantalla de fondo del stack. Card
+ * normal opaca, sin animación (nunca se "entra" a ella con push).
+ */
+const MAIN_OPTIONS: NativeStackNavigationOptions = {
+  presentation: 'card',
+  animation: 'none',
+};
+
 function MainRoute() {
   return (
     <RequireAuth>
@@ -97,8 +125,8 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
           }}
         >
         {isAuthenticated ? (
-          <RootStack.Group>
-            <RootStack.Screen name="Main" component={MainRoute} />
+          <RootStack.Group screenOptions={REVEAL_HOME_OPTIONS}>
+            <RootStack.Screen name="Main" component={MainRoute} options={MAIN_OPTIONS} />
             {/* Cluster ajustes/sidebar */}
             <RootStack.Screen name="Monedero" component={MonederoRoute} />
             <RootStack.Screen name="Transacciones" component={TransaccionesRoute} />
@@ -118,14 +146,7 @@ export function RootNavigator({ isAuthenticated }: RootNavigatorProps) {
             <RootStack.Screen name="PublicCourseDetail" component={PublicCourseDetailRoute} />
             <RootStack.Screen name="CrearPartido" component={CrearPartidoRoute} />
             <RootStack.Screen name="CourtReservationDetail" component={CourtReservationDetailRoute} />
-            {/* El pase pinta al instante (skeleton/cache), así que puede
-                permitirse animación de entrada sin mostrar cascarón. Fade
-                discreto: el slide se descartó por brusco para esta pantalla. */}
-            <RootStack.Screen
-              name="SeasonPass"
-              component={SeasonPassRoute}
-              options={{ animation: 'fade', animationDuration: 220 }}
-            />
+            <RootStack.Screen name="SeasonPass" component={SeasonPassRoute} />
             {/* Grafo social / partidos */}
             <RootStack.Screen name="PartidoDetail" component={PartidoDetailRoute} />
             <RootStack.Screen name="PublicProfile" component={PublicProfileRoute} />

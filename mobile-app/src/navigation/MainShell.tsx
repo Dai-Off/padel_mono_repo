@@ -11,6 +11,7 @@ import { fetchSeasonTransition, type SeasonTransition } from '../api/matchmaking
 import { fetchMyPlayerProfile } from '../api/players';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppSignals } from '../contexts/AppSignalsContext';
+import { useHomeActions } from '../queries/home';
 import {
   SidebarProvider,
   useSidebarActions,
@@ -89,6 +90,7 @@ function SeasonTransitionHost() {
 function UsernameSetupHost() {
   const { session } = useAuth();
   const { profileRefreshKey, bumpProfileRefresh } = useAppSignals();
+  const { refreshProfile } = useHomeActions();
   const [needsUsernameSetup, setNeedsUsernameSetup] = useState(false);
   const [usernameCheckDone, setUsernameCheckDone] = useState(false);
 
@@ -117,6 +119,9 @@ function UsernameSetupHost() {
       visible={needsUsernameSetup}
       onComplete={() => {
         setNeedsUsernameSetup(false);
+        // El hero del perfil lee el username del cache global (HomeData); antes
+        // lo recogía el remount de ProfileScreen, que ya no existe.
+        void refreshProfile({ force: true });
         bumpProfileRefresh();
       }}
     />

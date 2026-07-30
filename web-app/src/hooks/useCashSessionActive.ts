@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { paymentsService } from '../services/payments';
+import { localDateYmd } from '../lib/localDate';
 
 type CashSessionState = {
   loading: boolean;
@@ -22,7 +23,9 @@ export function useCashSessionActive(clubId: string | null | undefined): CashSes
     }
     setLoading(true);
     try {
-      const res = await paymentsService.listCashMovementRecords(clubId);
+      // The date must be explicit: the API falls back to UTC, which resolves to the
+      // previous day between midnight and 02:00 in Europe/Madrid.
+      const res = await paymentsService.listCashMovementRecords(clubId, localDateYmd());
       setActive(res.session_active === true);
     } catch {
       setActive(false);

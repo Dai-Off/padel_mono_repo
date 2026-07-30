@@ -58,6 +58,10 @@ function outcomeFromSets(partido: PartidoItem): PartidoOutcome | null {
 export function classifyPartidoOutcome(partido: PartidoItem): PartidoOutcome {
   if (isCancelled(partido)) return 'cancelled';
 
+  // no_result: cerrado sin resultado — nunca ganado/perdido aunque queden sets de una disputa.
+  const scoreSt = String(partido.score_status ?? partido.scoreStatus ?? '').toLowerCase();
+  if (scoreSt === 'no_result') return 'incomplete';
+
   const result = partido.myResult;
   if (result === 'win') return 'won';
   if (result === 'loss') return 'lost';
@@ -66,7 +70,6 @@ export function classifyPartidoOutcome(partido: PartidoItem): PartidoOutcome {
   const fromSets = outcomeFromSets(partido);
   if (fromSets) return fromSets;
 
-  const scoreSt = (partido.scoreStatus ?? '').toLowerCase();
   if (scoreSt === 'confirmed' || scoreSt === 'pending_confirmation' || scoreSt === 'disputed' || scoreSt === 'pending_votes') {
     if (hasRecordedScore(partido)) return 'incomplete';
   }

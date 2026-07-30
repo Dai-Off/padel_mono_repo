@@ -14,6 +14,7 @@ export const profile: ProfileTranslationKeys = {
   coachImprove: 'Mejora',
   coachGoals: 'Objetivos',
   coachMatches: 'Partidos',
+  coachWinStreak: 'Racha partidos',
   coachTabPlan: 'Plan',
   coachTodaySummary: 'Resumen de Hoy',
   coachAnalysisTitle: 'Análisis de tu Nivel Actual',

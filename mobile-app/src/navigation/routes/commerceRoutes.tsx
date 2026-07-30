@@ -6,7 +6,13 @@ import { PublicCourseDetailScreen } from '../../screens/PublicCourseDetailScreen
 import { CourtReservationDetailScreen } from '../../screens/CourtReservationDetailScreen';
 import { SeasonPassScreen } from '../../screens/SeasonPassScreen';
 import { CrearPartidoLocationSheet } from '../../components/partido/CrearPartidoLocationSheet';
-import { useHomeData } from '../../contexts/HomeDataContext';
+import { useMyProfile } from '../../queries/profile';
+import { useHomeActions } from '../../queries/home';
+import {
+  useMisPartidosActions,
+  useRefreshMatches,
+  useSyncMisPartidoFromMatchId,
+} from '../../queries/matches';
 import { useBookingSuccess } from '../../contexts/BookingSuccessContext';
 import { useAppSignals } from '../../contexts/AppSignalsContext';
 import { goToMainTab } from '../nav';
@@ -90,7 +96,7 @@ export function CourtReservationDetailRoute({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, 'CourtReservationDetail'>) {
-  const { refreshCourtReservations } = useHomeData();
+  const { refreshCourtReservations } = useHomeActions();
   return (
     <RouteShell>
       <CourtReservationDetailScreen
@@ -126,7 +132,10 @@ export function CrearPartidoRoute({
   route,
 }: NativeStackScreenProps<RootStackParamList, 'CrearPartido'>) {
   const { organizerId, matchVisibility } = route.params;
-  const { profile, refreshMatches, upsertMisPartido, syncMisPartidoFromMatchId } = useHomeData();
+  const profile = useMyProfile().data ?? null;
+  const refreshMatches = useRefreshMatches();
+  const { upsertMisPartido } = useMisPartidosActions();
+  const syncMisPartidoFromMatchId = useSyncMisPartidoFromMatchId();
   const { show: showBookingSuccess } = useBookingSuccess();
   const { bumpPartidosRefresh } = useAppSignals();
 

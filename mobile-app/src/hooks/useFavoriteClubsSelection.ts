@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import { useHomeActions } from '../queries/home';
 import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
 import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
@@ -9,7 +10,8 @@ import { useClubCatalog } from './useClubCatalog';
 export function useFavoriteClubsSelection() {
   const { session } = useAuth();
   const token = session?.access_token;
-  const { profile, refreshProfile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
+  const { refreshProfile } = useHomeActions();
   const { clubs: clubCatalog, loading: catalogLoading, error: catalogError, reload } = useClubCatalog();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);

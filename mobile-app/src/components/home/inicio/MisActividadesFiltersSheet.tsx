@@ -8,6 +8,8 @@ import { useTranslation } from '../../../i18n';
 import { theme } from '../../../theme';
 import {
   filterHomeActivityItems,
+  HOME_ACTIVITY_ALL_TYPES,
+  HOME_ACTIVITY_DEFAULT_SHOW_FINISHED,
   type HomeActivityItem,
   type HomeActivityType,
 } from './homeActivityFilters';
@@ -54,9 +56,10 @@ export function MisActividadesFiltersSheet({
     );
   };
 
+  // "Limpiar" restablece el default: todos los tipos + finalizados activos.
   const handleClear = () => {
-    setDraftTypes([]);
-    setDraftFinished(false);
+    setDraftTypes([...HOME_ACTIVITY_ALL_TYPES]);
+    setDraftFinished(HOME_ACTIVITY_DEFAULT_SHOW_FINISHED);
   };
 
   return (

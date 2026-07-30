@@ -24,6 +24,8 @@ import { useTranslation } from '../../../i18n';
 import {
   buildHomeActivityItems,
   filterHomeActivityItems,
+  HOME_ACTIVITY_ALL_TYPES,
+  HOME_ACTIVITY_DEFAULT_SHOW_FINISHED,
   type HomeActivityItem,
   type HomeActivityType,
 } from './homeActivityFilters';
@@ -137,8 +139,10 @@ export function ProximosPartidosSection({
   const insets = useSafeAreaInsets();
   const { width: windowW } = useWindowDimensions();
 
-  const [typeFilters, setTypeFilters] = useState<HomeActivityType[]>([]);
-  const [showFinished, setShowFinished] = useState(false);
+  const [typeFilters, setTypeFilters] = useState<HomeActivityType[]>([
+    ...HOME_ACTIVITY_ALL_TYPES,
+  ]);
+  const [showFinished, setShowFinished] = useState(HOME_ACTIVITY_DEFAULT_SHOW_FINISHED);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const allItems = useMemo(
@@ -155,7 +159,9 @@ export function ProximosPartidosSection({
     [allItems, typeFilters, showFinished],
   );
 
-  const activeFilterCount = typeFilters.length + (showFinished ? 1 : 0);
+  // Badge solo cuando el usuario restringe respecto al default (todo activo).
+  const activeFilterCount =
+    HOME_ACTIVITY_ALL_TYPES.length - typeFilters.length + (showFinished ? 0 : 1);
 
   const usableW = windowW - INICIO_PAD_H * 2;
   const carouselCardW = Math.min(CAROUSEL_CARD_W_MAX, Math.max(200, usableW - CAROUSEL_INNER_PAD));

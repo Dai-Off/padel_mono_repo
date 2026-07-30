@@ -1,7 +1,38 @@
 # Plan incremental de migración a React Query (mobile-app)
 
-Estado: infraestructura + piloto (season pass) hechos. Este documento prioriza
-la migración del resto de dominios de estado de servidor.
+Estado: **COMPLETADA (2026-07-30).** Todo el estado de servidor vive en React
+Query; no queda fetch manual ni contextos de datos de servidor. `HomeDataContext`
+y `ProfileDataContext` eliminados; `TuActividadDataContext` reconvertido a fachada
+sobre queries. Este documento se conserva como registro del criterio aplicado.
+
+## Cierre (2026-07-30)
+
+Además de los puntos 1–6 de abajo, se migró lo que faltaba:
+- **Tienda** (`queries/store.ts`): 3 queries públicas + agregador `useTiendaCatalog`.
+- **Tu actividad** (`queries/tuActividad.ts`): 2 queries + `useInfiniteQuery` de
+  torneos; el contexto pasó a fachada sin estado.
+- **Perfil público** (`queries/publicProfile.ts`): keyed por `playerId`; follow con
+  `useMutation` optimista; reutiliza `useMyProfile()` en vez de `fetchMyPlayerId`.
+- **Matchmaking** (`queries/matchmaking.ts`): los dos polls a `useQuery` con
+  `refetchInterval` (5s/8s); la máquina de banner/timeout sigue como estado UI.
+- **Rango custom de partidos** (`usePartidosDiscoveryRange` en `queries/matches.ts`).
+- **HomeDataContext eliminado**: acciones en `useHomeActions`/`useRefreshMatches`/
+  `useSyncMisPartidoFromMatchId`; los ~30 consumidores leen de los hooks directos.
+
+### Notas de comportamiento a verificar (cambios sutiles del cierre)
+- Las queries del Home ya no están montadas a nivel app: el caché sobrevive
+  (gcTime 24h) pero el background-refresh mientras estás fuera del Home ya no
+  ocurre (se refresca al volver, por mount + focusManager). Es más eficiente.
+- Matchmaking: `refetchIntervalInBackground: false` pausa el poll en background
+  (antes seguía con setTimeout). Mejora de batería/red.
+- Se perdió el efecto que resembraba el avatar propio en "mis partidos" cuando el
+  perfil llegaba *después* de `/mine` (caso arranque frío sin caché de disco). El
+  avatar del match sigue viniendo del backend; verificar en primer arranque.
+
+---
+
+Estado histórico: infraestructura + piloto (season pass) + perfil propio (punto 1) hechos.
+Este documento prioriza la migración del resto de dominios de estado de servidor.
 
 ## Qué hay ya
 
@@ -21,7 +52,11 @@ la migración del resto de dominios de estado de servidor.
 
 ## Orden propuesto
 
-### 1. ProfileDataContext (perfil propio) — el mayor beneficio
+### 1. ProfileDataContext (perfil propio) — HECHO
+
+Migrado en `src/queries/profile.ts` (una query por dataset + acciones), contexto
+retirado, remount por `key` sustituido por invalidaciones y raíz `profile` en
+`PERSIST_ROOTS`. Lo de abajo queda como registro del criterio aplicado.
 
 Pantalla clave ya optimizada a mano; criterio duro: **no empeorar el warm feel**.
 
@@ -41,6 +76,31 @@ Pantalla clave ya optimizada a mano; criterio duro: **no empeorar el warm feel**
 - Candidato a entrar en `PERSIST_ROOTS` (datos estables).
 
 ### 2. HomeDataContext (Home) — por dominios, matches al final
+
+**Perfil base: HECHO** (`useMyProfile` en `queries/profile.ts`; el contexto lo
+expone como fachada — `profile`/`profileLoading`/`refreshProfile` leen de la
+query — hasta migrar sus ~25 consumidores a los hooks; sin estado duplicado).
+
+**Stats + racha: HECHO** (`queries/home.ts`: `useHomeStats`/`useDailyStreak`,
+raíz `home` volátil fuera de PERSIST_ROOTS; fachada en el contexto igual que
+el perfil base).
+
+**Torneos (count): HECHO** (`usePublicTournamentsCount` en `queries/home.ts`,
+misma fachada).
+
+**Reservas de pista: HECHO** (`useMyCourtReservations` en `queries/home.ts`).
+
+**Matches: HECHO** (`queries/matches.ts`: `useMisPartidos` con el merge de
+upserts optimistas dentro del queryFn —registro `everSynced`/`pendingLocal` por
+usuario—, `usePartidosDiscovery` con el viewer en la key + keepPreviousData, y
+`useMisPartidosActions` con cancelQueries + setQueryData; raíz `matches` NO se
+persiste). `refreshMatches({scope:'mine'})` sin force conserva el throttle de
+3s. Bootstrap y background-refresh del provider eliminados: lo hace RQ
+(mount + focusManager). `hasInitialError` ahora es 100% derivado.
+
+**El contexto entero es ya una fachada sin estado propio.** Último paso
+pendiente de esta fase: migrar los ~30 consumidores de `useHomeData` a los
+hooks y borrar HomeDataContext.
 
 - Orden: profile → stats/streak → tournaments/reservations → **matches al
   final** (es el dominio con upserts optimistas de `misPartidos`,

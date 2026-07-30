@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../../services/auth';
+import { CashOpeningPendingBanner } from './CashOpeningPendingBanner';
 
 export type PortalTealHeaderProps = {
   /** Nombre del club o título de pantalla (ej. panel admin). */
@@ -142,6 +143,8 @@ export function PortalTealHeader({ clubName, onMenuClick }: PortalTealHeaderProp
     <>
       {mount ? createPortal(header, mount) : header}
       <div className="h-12 md:h-14 w-full shrink-0" aria-hidden />
+      {/* In flow, right below the fixed header: pushes the page content instead of overlapping it. */}
+      <CashOpeningPendingBanner />
     </>
   );
 }

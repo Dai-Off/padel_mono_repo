@@ -17,7 +17,8 @@ import { ScalePressable } from './ScalePressable';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
 import { useAuth } from '../../../contexts/AuthContext';
-import { useHomeData } from '../../../contexts/HomeDataContext';
+import { DEFAULT_STREAK, useDailyStreak } from '../../../queries/home';
+import { useMyProfile } from '../../../queries/profile';
 // Nota: el hook useStreak local sigue existiendo (lo usa DailyLessonScreen
 // con su propia frescura). En esta card consumimos del HomeDataContext.
 import { loadProgress } from '../../../lib/dailyLessonStorage';
@@ -168,7 +169,10 @@ export function DailyLessonCard({
     locale === 'zh-HK' ? zhHK.home.dailyLesson.weekDays : es.home.dailyLesson.weekDays;
   // Profile cacheado a nivel de app (HomeDataContext). Evita el GET /players/me
   // que esta card hacía al montar — el dato ya está cargado tras el login.
-  const { profile, streak, streakLoading } = useHomeData();
+  const profile = useMyProfile().data ?? null;
+  const streakQuery = useDailyStreak();
+  const streak = streakQuery.data ?? DEFAULT_STREAK;
+  const streakLoading = streakQuery.isLoading;
   const locked = profile?.onboardingCompleted === false;
 
   // ¿Tiene una lección a medias guardada en local? Mostramos "Continuar"

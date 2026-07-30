@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
-import { useHomeData } from '../../contexts/HomeDataContext';
+import { useMyProfile } from '../../queries/profile';
 import { AvatarWithFrame } from '../profile/AvatarWithFrame';
 import { useSidebarContext } from '../../contexts/SidebarContext';
 import { useTranslation } from '../../i18n';
@@ -23,7 +23,7 @@ function SidebarUserHeader() {
   const { t } = useTranslation();
   const ctx = useSidebarContext();
   const { session } = useAuth();
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const close = ctx?.close;
   const name =
     profile?.firstName && profile?.lastName

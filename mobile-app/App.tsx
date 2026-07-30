@@ -11,9 +11,7 @@ import * as SystemUI from 'expo-system-ui';
 import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
 import { MatchmakingProvider } from './src/contexts/MatchmakingContext';
-import { HomeDataProvider } from './src/contexts/HomeDataContext';
 import { AppSignalsProvider } from './src/contexts/AppSignalsContext';
-import { ProfileDataProvider } from './src/contexts/ProfileDataContext';
 import { CartProvider } from './src/contexts/CartContext';
 import { SplashScreen } from './src/components/SplashScreen';
 import { RootNavigator } from './src/navigation/RootNavigator';
@@ -70,15 +68,11 @@ function App() {
               <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
                 <AuthProvider>
                   <MatchmakingProvider>
-                    <HomeDataProvider>
-                      <AppSignalsProvider>
-                        <ProfileDataProvider>
-                          <CartProvider>
-                            <AppContent />
-                          </CartProvider>
-                        </ProfileDataProvider>
-                      </AppSignalsProvider>
-                    </HomeDataProvider>
+                    <AppSignalsProvider>
+                      <CartProvider>
+                        <AppContent />
+                      </CartProvider>
+                    </AppSignalsProvider>
                   </MatchmakingProvider>
                 </AuthProvider>
               </PersistQueryClientProvider>

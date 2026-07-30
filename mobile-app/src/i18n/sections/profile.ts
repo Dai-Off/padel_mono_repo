@@ -13,6 +13,7 @@ export interface ProfileTranslationKeys {
   coachImprove: string;
   coachGoals: string;
   coachMatches: string;
+  coachWinStreak: string;
   coachTabPlan: string;
   coachTodaySummary: string;
   coachAnalysisTitle: string;

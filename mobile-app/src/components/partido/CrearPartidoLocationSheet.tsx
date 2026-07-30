@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useStripe } from '../../stripe';
 import { useAuth } from '../../contexts/AuthContext';
-import { useHomeData } from '../../contexts/HomeDataContext';
+import { useMyProfile } from '../../queries/profile';
 import { createIntentForNewMatch, confirmPaymentFromClient } from '../../api/payments';
 import { sendMatchPlayerInvites } from '../../api/matchInvites';
 import { PrivateInvitePlayerPicker, type SelectedInvitePlayer } from './PrivateInvitePlayerPicker';
@@ -148,7 +148,7 @@ export function CrearPartidoLocationSheet({
   const { session } = useAuth();
   // Profile compartido (HomeDataContext) — evita un GET /players/me extra
   // cada vez que el usuario pulsa un slot para crear partido.
-  const { profile: cachedProfile } = useHomeData();
+  const cachedProfile = useMyProfile().data ?? null;
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>(initialStep);

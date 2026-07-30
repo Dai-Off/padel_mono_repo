@@ -15,7 +15,7 @@ import { BackHeader } from '../../components/layout/BackHeader';
 import { HomeHeader } from '../../components/layout/HomeHeader';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
-import { useHomeData } from '../../contexts/HomeDataContext';
+import { useMyProfile } from '../../queries/profile';
 import { useMatchmaking } from '../../contexts/MatchmakingContext';
 import { useAppSignals } from '../../contexts/AppSignalsContext';
 import { useSidebarActions } from '../../contexts/SidebarContext';
@@ -155,7 +155,7 @@ export function InicioTab() {
 export function PartidosTab() {
   const navigation = useNavigation<RootNav>();
   const { t } = useTranslation();
-  const { profile } = useHomeData();
+  const profile = useMyProfile().data ?? null;
   const { partidosRefreshNonce } = useAppSignals();
 
   return (
@@ -281,7 +281,6 @@ export function PerfilTab() {
   const navigation = useNavigation<RootNav>();
   const { toggle: toggleSidebar } = useSidebarActions();
   const {
-    profileRefreshKey,
     vitrinaScrollNonce,
     autoOpenOnboarding,
     setAutoOpenOnboarding,
@@ -311,7 +310,6 @@ export function PerfilTab() {
   return (
     <TabScreenShell>
       <ProfileScreen
-        key={profileRefreshKey}
         onBack={() => {
           goToMainTab('inicio');
           setAutoOpenOnboarding(false);

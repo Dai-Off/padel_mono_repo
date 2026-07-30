@@ -86,6 +86,11 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
   // Generar plan con fidelidad de Figma
   const plan = generateFigmaWeeklyPlan(assessment, t);
 
+  // Objetivos = ítems del plan semanal ya cumplidos (actual >= target), para que
+  // la cifra cuadre siempre con las barras de "Plan de Esta Semana".
+  const weeklyObjectivesDone = plan.weeklyProgress.filter((i) => i.actual >= i.target).length;
+  const weeklyObjectivesTotal = plan.weeklyProgress.length;
+
   return (
     <View style={styles.container}>
       {/* Cabecera del bloque Coach IA (las stats se movieron a la tab Plan) */}
@@ -129,28 +134,20 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
       {/* TAB RESUMEN DE HOY */}
       {activeTab === 'today' && (
         <>
-          {/* Recomendación (el radar se movió a SkillRadarCard, arriba del Coach) */}
-          <View style={styles.analysisCard}>
-            {/* Recomendación IA */}
-            <View style={styles.recommendationBox}>
-              <View style={styles.recIconContainer}>
-                <Ionicons name="sparkles-outline" size={12} color="#fff" />
+          {/* Recomendación: un solo cuadro naranja (sin card gris alrededor) */}
+          <View style={styles.recommendationCard}>
+            <View style={styles.recIconContainer}>
+              <Ionicons name="sparkles-outline" size={12} color="#fff" />
+            </View>
+            <View style={styles.recContent}>
+              {/* Título siempre "Recomendación" — NO se expone que la info venga
+                  del feedback de compañeros (fuente/fecha/conteo fuera). */}
+              <View style={styles.recHeaderRow}>
+                <Text style={styles.recTitle}>{t('profile.coachRecommendationSelf')}</Text>
               </View>
-              <View style={styles.recContent}>
-                {/* Título siempre "Recomendación" — NO se expone que la info venga
-                    del feedback de compañeros (fuente/fecha/conteo fuera). */}
-                <View style={styles.recHeaderRow}>
-                  <Text style={styles.recTitle}>{t('profile.coachRecommendationSelf')}</Text>
-                </View>
-                <Text style={styles.recText}>
-                  {recommendation || t('profile.coachNoData')}
-                </Text>
-                {!showPeerData && activeTab === 'today' && (
-                    <Text style={styles.emptyText}>
-                      {t('profile.coachNoData')}
-                    </Text>
-                )}
-              </View>
+              <Text style={styles.recText}>
+                {recommendation || t('profile.coachNoData')}
+              </Text>
             </View>
           </View>
 
@@ -300,7 +297,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                   <Ionicons name="locate-outline" size={16} color="#F18F34" />
                 </View>
                 <Text style={styles.statValue}>
-                  {assessment.stats?.completedObjectives ?? 0}/{assessment.stats?.totalObjectives ?? 10}
+                  {weeklyObjectivesDone}/{weeklyObjectivesTotal}
                 </Text>
                 <Text style={styles.statLabel}>{t('profile.coachGoals')}</Text>
               </View>
@@ -309,9 +306,9 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
                   <Ionicons name="flame-outline" size={16} color="#F18F34" />
                 </View>
                 <Text style={styles.statValue}>
-                  {assessment.stats?.matchCount ?? 0}
+                  {assessment.stats?.winStreak ?? 0}
                 </Text>
-                <Text style={styles.statLabel}>{t('profile.coachMatches')}</Text>
+                <Text style={styles.statLabel}>{t('profile.coachWinStreak')}</Text>
               </View>
             </View>
           </View>
@@ -545,6 +542,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     fontWeight: '600',
     letterSpacing: 0.5,
+    textAlign: 'center',
   },
   tabsContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
@@ -607,15 +605,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
   },
-  recommendationBox: {
-    marginTop: 16,
-    padding: 12,
+  recommendationCard: {
+    padding: 16,
     backgroundColor: 'rgba(241, 143, 52, 0.06)',
-    borderRadius: 12,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(241, 143, 52, 0.12)',
+    borderColor: 'rgba(241, 143, 52, 0.15)',
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   recIconContainer: {
     width: 24,
@@ -742,12 +739,6 @@ const styles = StyleSheet.create({
     color: '#F18F34',
     marginTop: 6,
     fontWeight: '500',
-  },
-  emptyText: {
-    fontSize: 11,
-    color: '#6B7280',
-    fontStyle: 'italic',
-    marginTop: 4,
   },
   emptySmallText: {
     fontSize: 9,

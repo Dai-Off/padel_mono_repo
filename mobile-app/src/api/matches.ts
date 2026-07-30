@@ -13,6 +13,7 @@ export type Match = {
   competitive: boolean;
   status: string;
   score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | 'pending_votes' | 'no_result' | null;
+  score_confirmed_at?: string | null;
   sets?: Array<{ a: number; b: number }> | null;
   match_end_reason?: string | null;
   type?: string | null;

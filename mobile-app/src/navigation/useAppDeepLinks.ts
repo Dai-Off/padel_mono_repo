@@ -10,7 +10,8 @@ import { parseMatchDeepLink, type ParsedMatchDeepLink } from '../lib/parseMatchD
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { isPlayerInPartido } from '../lib/partidoPlayerUtils';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeData } from '../contexts/HomeDataContext';
+import { useMyProfile } from '../queries/profile';
+import { useMisPartidosActions } from '../queries/matches';
 import { useAppSignals } from '../contexts/AppSignalsContext';
 import { useTranslation } from '../i18n';
 import { navigationRef } from './navigationRef';
@@ -27,7 +28,8 @@ const PENDING_MATCH_DEEPLINK_KEY = 'pending_match_deeplink';
  */
 export function useAppDeepLinks() {
   const { session } = useAuth();
-  const { profile, upsertMisPartido } = useHomeData();
+  const profile = useMyProfile().data ?? null;
+  const { upsertMisPartido } = useMisPartidosActions();
   const { setPendingTournamentId } = useAppSignals();
   const { t } = useTranslation();
 
