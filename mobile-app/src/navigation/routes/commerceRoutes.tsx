@@ -17,6 +17,7 @@ import { useBookingSuccess } from '../../contexts/BookingSuccessContext';
 import { useAppSignals } from '../../contexts/AppSignalsContext';
 import { goToMainTab } from '../nav';
 import { RouteShell } from '../RouteShell';
+import { ScreenFadeIn } from '../../components/ui/ScreenFadeIn';
 import type { RootStackParamList } from '../types';
 
 export function CartRoute({
@@ -116,13 +117,15 @@ export function SeasonPassRoute({
 }: NativeStackScreenProps<RootStackParamList, 'SeasonPass'>) {
   return (
     <RouteShell>
-      <SeasonPassScreen
-        onBack={() => navigation.goBack()}
-        onGoToProfile={() => {
-          navigation.goBack();
-          goToMainTab('perfil');
-        }}
-      />
+      <ScreenFadeIn>
+        <SeasonPassScreen
+          onBack={() => navigation.goBack()}
+          onGoToProfile={() => {
+            navigation.goBack();
+            goToMainTab('perfil');
+          }}
+        />
+      </ScreenFadeIn>
     </RouteShell>
   );
 }

@@ -15,6 +15,7 @@ import { useAppSignals } from '../../contexts/AppSignalsContext';
 import { useOpenMatchById, useOpenMatchFromInvite } from '../matchActions';
 import { goToMainTab } from '../nav';
 import { RouteShell } from '../RouteShell';
+import { ScreenFadeIn } from '../../components/ui/ScreenFadeIn';
 import type { RootStackParamList } from '../types';
 
 export function PartidoDetailRoute({
@@ -147,17 +148,19 @@ export function CommunityRoute({
   const profile = useMyProfile().data ?? null;
   return (
     <RouteShell>
-      <CommunityScreen
-        onBack={() => navigation.goBack()}
-        // replace: hoy Mensajes sustituye a Comunidad (su back no vuelve aqui).
-        onMessagesPress={() => navigation.replace('Messages')}
-        onOpenPlayer={(pid) => navigation.push('PublicProfile', { playerId: pid })}
-        myPlayerId={profile?.id}
-        onNavigateToTab={(tab) => {
-          navigation.popTo('Main');
-          goToMainTab(tab);
-        }}
-      />
+      <ScreenFadeIn>
+        <CommunityScreen
+          onBack={() => navigation.goBack()}
+          // replace: hoy Mensajes sustituye a Comunidad (su back no vuelve aqui).
+          onMessagesPress={() => navigation.replace('Messages')}
+          onOpenPlayer={(pid) => navigation.push('PublicProfile', { playerId: pid })}
+          myPlayerId={profile?.id}
+          onNavigateToTab={(tab) => {
+            navigation.popTo('Main');
+            goToMainTab(tab);
+          }}
+        />
+      </ScreenFadeIn>
     </RouteShell>
   );
 }
