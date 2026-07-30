@@ -200,6 +200,46 @@ export function usePartidosDiscovery() {
 }
 
 /**
+ * Discovery de un rango de fechas custom (cuando el filtro «cuándo» pide un
+ * rango distinto al del Home). Mismo mapeo que usePartidosDiscovery. Se habilita
+ * solo con un `range` no nulo; el playerId va en la key para re-mapear al llegar
+ * el perfil. Sustituye al fetch manual con generaciones de usePartidosList.
+ */
+export function usePartidosDiscoveryRange(
+  range: { activeOnly: boolean; dateFrom?: string; dateTo?: string } | null,
+) {
+  const { token, userId } = useMatchesSession();
+  const { data: myProfile } = useMyProfile();
+  const playerId = myProfile?.id ?? null;
+  const rangeKey = range
+    ? `${range.activeOnly ? 1 : 0}:${range.dateFrom ?? ''}:${range.dateTo ?? ''}`
+    : 'none';
+  return useQuery({
+    queryKey: matchesKeys.discoveryRange(userId ?? 'anon', playerId ?? 'none', rangeKey),
+    queryFn: async (): Promise<PartidoItem[]> => {
+      const discoveryRows = await fetchMatches({
+        expand: true,
+        token: token!,
+        activeOnly: range!.activeOnly,
+        discovery: true,
+        visibility: 'public',
+        dateFrom: range!.dateFrom,
+        dateTo: range!.dateTo,
+        joinableOnly: true,
+        limit: 100,
+      });
+      return discoveryRows
+        .map((m) => mapMatchToPartido(m, { viewerPlayerId: playerId }))
+        .filter((p): p is PartidoItem => p != null)
+        .filter((p) => p.matchPhase !== 'past')
+        .filter((p) => isPartidoOpenForDiscovery(p, playerId));
+    },
+    enabled: Boolean(token && userId && range),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
  * Mutaciones optimistas del carrusel. Cancelan el /mine en vuelo antes de
  * escribir (su merge, anterior al cambio local, pisaría el upsert) y registran
  * el id en pendingLocal para que el próximo merge lo respete.

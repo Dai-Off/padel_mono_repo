@@ -120,4 +120,9 @@ export const matchesKeys = {
   /** Listado público de discovery, mapeado con el viewer actual. */
   discovery: (userId: string, viewerId: string) =>
     ['matches', userId, 'discovery', viewerId] as const,
+  /** Prefijo para invalidar el discovery de rango custom (cualquier viewer/rango). */
+  discoveryRangeAll: (userId: string) => ['matches', userId, 'discovery-range'] as const,
+  /** Discovery de un rango de fechas custom (filtro «cuándo»), keyed por viewer y rango. */
+  discoveryRange: (userId: string, viewerId: string, rangeKey: string) =>
+    ['matches', userId, 'discovery-range', viewerId, rangeKey] as const,
 };
