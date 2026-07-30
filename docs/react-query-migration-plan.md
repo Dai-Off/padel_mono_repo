@@ -1,6 +1,37 @@
 # Plan incremental de migración a React Query (mobile-app)
 
-Estado: infraestructura + piloto (season pass) + perfil propio (punto 1) hechos.
+Estado: **COMPLETADA (2026-07-30).** Todo el estado de servidor vive en React
+Query; no queda fetch manual ni contextos de datos de servidor. `HomeDataContext`
+y `ProfileDataContext` eliminados; `TuActividadDataContext` reconvertido a fachada
+sobre queries. Este documento se conserva como registro del criterio aplicado.
+
+## Cierre (2026-07-30)
+
+Además de los puntos 1–6 de abajo, se migró lo que faltaba:
+- **Tienda** (`queries/store.ts`): 3 queries públicas + agregador `useTiendaCatalog`.
+- **Tu actividad** (`queries/tuActividad.ts`): 2 queries + `useInfiniteQuery` de
+  torneos; el contexto pasó a fachada sin estado.
+- **Perfil público** (`queries/publicProfile.ts`): keyed por `playerId`; follow con
+  `useMutation` optimista; reutiliza `useMyProfile()` en vez de `fetchMyPlayerId`.
+- **Matchmaking** (`queries/matchmaking.ts`): los dos polls a `useQuery` con
+  `refetchInterval` (5s/8s); la máquina de banner/timeout sigue como estado UI.
+- **Rango custom de partidos** (`usePartidosDiscoveryRange` en `queries/matches.ts`).
+- **HomeDataContext eliminado**: acciones en `useHomeActions`/`useRefreshMatches`/
+  `useSyncMisPartidoFromMatchId`; los ~30 consumidores leen de los hooks directos.
+
+### Notas de comportamiento a verificar (cambios sutiles del cierre)
+- Las queries del Home ya no están montadas a nivel app: el caché sobrevive
+  (gcTime 24h) pero el background-refresh mientras estás fuera del Home ya no
+  ocurre (se refresca al volver, por mount + focusManager). Es más eficiente.
+- Matchmaking: `refetchIntervalInBackground: false` pausa el poll en background
+  (antes seguía con setTimeout). Mejora de batería/red.
+- Se perdió el efecto que resembraba el avatar propio en "mis partidos" cuando el
+  perfil llegaba *después* de `/mine` (caso arranque frío sin caché de disco). El
+  avatar del match sigue viniendo del backend; verificar en primer arranque.
+
+---
+
+Estado histórico: infraestructura + piloto (season pass) + perfil propio (punto 1) hechos.
 Este documento prioriza la migración del resto de dominios de estado de servidor.
 
 ## Qué hay ya
